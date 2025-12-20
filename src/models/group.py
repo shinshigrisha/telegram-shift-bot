@@ -12,7 +12,10 @@ class Group(Base):
     id = Column(Integer, primary_key=True, index=True)
     name = Column(String(50), unique=True, nullable=False)
     telegram_chat_id = Column(BigInteger, unique=True, nullable=False)
-    telegram_topic_id = Column(Integer, nullable=True)  # ID темы для форум-групп
+    telegram_topic_id = Column(Integer, nullable=True)  # ID темы "отметки на слот"
+    arrival_departure_topic_id = Column(Integer, nullable=True)  # ID темы "приход/уход"
+    general_chat_topic_id = Column(Integer, nullable=True)  # ID темы "общий чат" для напоминаний
+    important_info_topic_id = Column(Integer, nullable=True)  # ID темы "важная информация"
     is_night = Column(Boolean, default=False)
     poll_close_time = Column(
         Time,

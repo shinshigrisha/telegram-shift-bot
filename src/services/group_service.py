@@ -23,6 +23,9 @@ class GroupService:
     async def get_group_by_chat_id(self, chat_id: int) -> Group | None:
         return await self.group_repo.get_by_chat_id(chat_id)
 
+    async def get_group_by_id(self, group_id: int) -> Group | None:
+        return await self.group_repo.get_by_id(group_id)
+
     async def get_all_groups(self) -> List[Group]:
         return await self.group_repo.get_all()
 

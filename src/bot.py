@@ -11,10 +11,12 @@ from config.settings import settings
 from src.middlewares.auth_middleware import AdminMiddleware  # type: ignore
 from src.middlewares.rate_limit_middleware import RateLimitMiddleware  # type: ignore
 from src.middlewares.database_middleware import DatabaseMiddleware  # type: ignore
+from src.middlewares.verification_middleware import VerificationMiddleware  # type: ignore
+from src.middlewares.message_cleanup_middleware import MessageCleanupMiddleware  # type: ignore
 
 from src.services.screenshot_service import ScreenshotService  # type: ignore
 
-from src.handlers import admin_handlers, setup_handlers, report_handlers, user_handlers, monitoring_handlers  # type: ignore
+from src.handlers import admin_handlers, setup_handlers, report_handlers, user_handlers, monitoring_handlers, verification_handlers, poll_handlers, admin_panel, group_handlers  # type: ignore
 
 
 logger = logging.getLogger(__name__)
@@ -23,15 +25,25 @@ logger = logging.getLogger(__name__)
 async def setup_bot(bot: Bot, dp: Dispatcher, redis: Redis) -> None:
     """Глобальная настройка бота: middleware, роутеры, сервисы."""
 
-    # Сохраняем redis для использования в shutdown
+    # Сохраняем redis и bot для использования в shutdown и middleware
     dp["redis"] = redis  # type: ignore[index]
+    dp["bot"] = bot  # type: ignore[index]
 
-    # Регистрация middleware
+    # Регистрация middleware (порядок важен!)
+    # DatabaseMiddleware нужен для всех типов событий (Message и CallbackQuery)
+    db_middleware = DatabaseMiddleware()
+    dp.message.middleware(db_middleware)  # Сначала создаем сессию БД для сообщений
+    dp.callback_query.middleware(db_middleware)  # И для callback query
+    dp.message.middleware(VerificationMiddleware())  # Затем проверяем верификацию
     dp.message.middleware(AdminMiddleware())
     dp.message.middleware(RateLimitMiddleware())
-    dp.message.middleware(DatabaseMiddleware())
+    dp.message.middleware(MessageCleanupMiddleware())  # Удаление предыдущих сообщений
 
     # Регистрация роутеров
+    dp.include_router(group_handlers.router)  # Обработка событий группы (новые участники, админы)
+    dp.include_router(verification_handlers.router)  # Верификация должна быть первой
+    dp.include_router(poll_handlers.router)  # Обработка ответов на опросы
+    dp.include_router(admin_panel.router)  # Админ-панель с кнопками
     dp.include_router(admin_handlers.router)
     dp.include_router(setup_handlers.router)
     dp.include_router(report_handlers.router)
@@ -79,26 +91,52 @@ async def setup_bot(bot: Bot, dp: Dispatcher, redis: Redis) -> None:
 
 
 async def set_bot_commands(bot: Bot) -> None:
-    """Установка команд бота для автодополнения."""
-    commands = [
+    """Установка команд бота для автодополнения и меню через слэш."""
+    from aiogram.types import MenuButtonCommands
+    
+    # Команды для всех пользователей
+    user_commands = [
         BotCommand(command="start", description="🚀 Начать работу с ботом"),
         BotCommand(command="help", description="❓ Справка по командам"),
         BotCommand(command="my_votes", description="📊 Мои голоса"),
         BotCommand(command="schedule", description="📅 Расписание"),
-        BotCommand(command="add_group", description="➕ Добавить группу (админ)"),
-        BotCommand(command="setup_ziz", description="⚙️ Настроить группу (админ)"),
-        BotCommand(command="set_topic", description="📌 Установить тему для группы (админ)"),
-        BotCommand(command="get_topic_id", description="📌 Показать topic_id из контекста (админ)"),
-        BotCommand(command="list_groups", description="📋 Список групп (админ)"),
-        BotCommand(command="stats", description="📊 Статистика (админ)"),
-        BotCommand(command="create_polls", description="📝 Создать опросы (админ)"),
-        BotCommand(command="get_report", description="📄 Получить отчет (админ)"),
-        BotCommand(command="status", description="🔍 Статус системы (админ)"),
-        BotCommand(command="logs", description="📜 Логи системы (админ)"),
+    ]
+    
+    # Команды для админов
+    admin_commands = [
+        BotCommand(command="admin", description="👑 Админ-панель"),
+        BotCommand(command="add_group", description="➕ Добавить группу"),
+        BotCommand(command="setup_ziz", description="⚙️ Настроить группу"),
+        BotCommand(command="set_topic", description="📌 Установить тему 'отметки на слот'"),
+        BotCommand(command="set_arrival_topic", description="📥 Установить тему 'приход/уход'"),
+        BotCommand(command="set_general_topic", description="💬 Установить тему 'общий чат'"),
+        BotCommand(command="get_topic_id", description="📌 Показать topic_id"),
+        BotCommand(command="list_groups", description="📋 Список групп"),
+        BotCommand(command="stats", description="📊 Статистика"),
+        BotCommand(command="create_polls", description="📝 Создать опросы"),
+        BotCommand(command="get_report", description="📄 Получить отчет"),
+        BotCommand(command="status", description="🔍 Статус системы"),
+        BotCommand(command="logs", description="📜 Логи системы"),
     ]
     
     try:
-        await bot.set_my_commands(commands)
+        # Устанавливаем команды для всех пользователей
+        await bot.set_my_commands(user_commands)
+        
+        # Устанавливаем команды для админов (если есть)
+        if settings.ADMIN_IDS:
+            from aiogram.enums import BotCommandScopeType
+            for admin_id in settings.ADMIN_IDS:
+                try:
+                    await bot.set_my_commands(
+                        user_commands + admin_commands,
+                        scope={"type": BotCommandScopeType.CHAT, "chat_id": admin_id}
+                    )
+                except Exception as e:
+                    logger.warning("Failed to set commands for admin %s: %s", admin_id, e)
+        
+        # Устанавливаем меню через слэш (кнопка меню)
+        await bot.set_chat_menu_button(menu_button=MenuButtonCommands())
         logger.info("Bot commands set successfully")
     except Exception as e:
         logger.warning("Failed to set bot commands: %s", e)

@@ -51,6 +51,16 @@ CREATE TABLE IF NOT EXISTS user_votes (
     UNIQUE(poll_id, user_id)
 );
 
+CREATE TABLE IF NOT EXISTS users (
+    id BIGINT PRIMARY KEY,  -- telegram user_id
+    first_name VARCHAR(100),
+    last_name VARCHAR(100),
+    username VARCHAR(100),
+    is_verified BOOLEAN DEFAULT FALSE,
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+);
+
 CREATE TABLE IF NOT EXISTS administrators (
     id SERIAL PRIMARY KEY,
     user_id BIGINT UNIQUE NOT NULL,
@@ -78,5 +88,6 @@ CREATE INDEX IF NOT EXISTS idx_daily_polls_status ON daily_polls(status);
 CREATE INDEX IF NOT EXISTS idx_user_votes_poll_user ON user_votes(poll_id, user_id);
 CREATE INDEX IF NOT EXISTS idx_user_votes_user_date ON user_votes(user_id, voted_at);
 CREATE INDEX IF NOT EXISTS idx_audit_logs_created_at ON audit_logs(created_at);
+CREATE INDEX IF NOT EXISTS idx_users_verified ON users(is_verified);
 
 

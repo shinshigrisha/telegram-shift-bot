@@ -1,0 +1,1735 @@
+import logging
+from typing import Optional
+
+from aiogram import Router, Bot
+from aiogram.filters import Command, StateFilter
+from aiogram.fsm.context import FSMContext
+from aiogram.types import Message, CallbackQuery, InlineKeyboardMarkup, InlineKeyboardButton
+
+from config.settings import settings
+from src.utils.auth import require_admin, require_admin_callback
+from src.services.group_service import GroupService
+from src.services.poll_service import PollService
+from src.repositories.group_repository import GroupRepository
+from src.repositories.poll_repository import PollRepository
+from src.states.setup_states import SetupStates
+from src.states.admin_panel_states import AdminPanelStates
+
+logger = logging.getLogger(__name__)
+router = Router()
+
+
+def get_admin_panel_keyboard() -> InlineKeyboardMarkup:
+    """Создать клавиатуру админ-панели."""
+    keyboard = [
+        [InlineKeyboardButton(text="➕ Создать группу для ЗИЗ", callback_data="admin:create_group")],
+        [InlineKeyboardButton(text="⚙️ Настройки слотов", callback_data="admin:setup_slots")],
+        [InlineKeyboardButton(text="⏰ Настройка расписания", callback_data="admin:setup_schedule")],
+        [InlineKeyboardButton(text="📌 Установить тему", callback_data="admin:set_topic_menu")],
+        [InlineKeyboardButton(text="📝 Создать опросы вручную", callback_data="admin:create_polls")],
+        [InlineKeyboardButton(text="🔄 Пересоздать опросы", callback_data="admin:force_create_polls")],
+        [InlineKeyboardButton(text="📊 Вывести результат", callback_data="admin:show_results")],
+        [InlineKeyboardButton(text="🔒 Досрочно закрыть опрос", callback_data="admin:close_poll_early")],
+        [InlineKeyboardButton(text="📢 Рассылка по группам", callback_data="admin:broadcast")],
+    ]
+    return InlineKeyboardMarkup(inline_keyboard=keyboard)
+
+
+def get_topic_setup_keyboard() -> InlineKeyboardMarkup:
+    """Создать клавиатуру для настройки тем."""
+    keyboard = [
+        [InlineKeyboardButton(text="📋 Отметки на слот", callback_data="admin:set_topic:poll")],
+        [InlineKeyboardButton(text="📥 Приход/уход", callback_data="admin:set_topic:arrival")],
+        [InlineKeyboardButton(text="💬 Общий чат", callback_data="admin:set_topic:general")],
+        [InlineKeyboardButton(text="📢 Важная информация", callback_data="admin:set_topic:important")],
+        [InlineKeyboardButton(text="◀️ Назад", callback_data="admin:back_to_main")],
+    ]
+    return InlineKeyboardMarkup(inline_keyboard=keyboard)
+
+
+@router.message(Command("admin"))
+async def cmd_admin_panel(
+    message: Message,
+    state: FSMContext | None = None,
+) -> None:
+    """Открыть админ-панель (только для админов)."""
+    user_id = message.from_user.id
+    
+    if user_id not in settings.ADMIN_IDS:
+        await message.answer("⛔ У вас нет прав для выполнения этой команды")
+        return
+    
+    text = (
+        "👑 <b>Админ-панель</b>\n\n"
+        "Выберите действие:"
+    )
+    await message.answer(text, reply_markup=get_admin_panel_keyboard())
+
+
+@router.callback_query(lambda c: c.data == "admin:back_to_main")
+async def callback_back_to_main(callback: CallbackQuery) -> None:
+    """Вернуться в главное меню админ-панели."""
+    await callback.message.edit_text(
+        "👑 <b>Админ-панель</b>\n\n"
+        "Выберите действие:",
+        reply_markup=get_admin_panel_keyboard(),
+    )
+    await callback.answer()
+
+
+@router.callback_query(lambda c: c.data == "admin:create_group")
+@require_admin_callback
+async def callback_create_group(
+    callback: CallbackQuery,
+    state: FSMContext,
+) -> None:
+    """Создание новой группы для ЗИЗ через админ-панель."""
+    text = (
+        "➕ <b>Создание группы для ЗИЗ</b>\n\n"
+        "Введите название группы (например, <code>ЗИЗ-1</code>):"
+    )
+    keyboard = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="◀️ Назад", callback_data="admin:back_to_main")],
+    ])
+    await callback.message.edit_text(text, reply_markup=keyboard)
+    await state.set_state(SetupStates.waiting_for_group_name_for_create)
+    await callback.answer()
+
+
+@router.message(StateFilter(SetupStates.waiting_for_group_name_for_create))
+async def process_group_name_for_create(
+    message: Message,
+    state: FSMContext,
+    group_service: GroupService,
+) -> None:
+    """Обработка ввода названия группы для создания."""
+    group_name = message.text.strip()
+    
+    # Проверяем, существует ли группа с таким именем
+    existing = await group_service.get_group_by_name(group_name)
+    if existing:
+        await message.answer(
+            f"❌ Группа с именем <b>{group_name}</b> уже существует\n"
+            f"ID: {existing.id} | Chat ID: {existing.telegram_chat_id}\n\n"
+            "Введите другое название:"
+        )
+        return
+    
+    await state.set_state(SetupStates.waiting_for_chat_id_for_create)
+    await state.update_data(group_name=group_name)
+    
+    await message.answer(
+        f"✅ Название группы: <b>{group_name}</b>\n\n"
+        "Теперь введите <b>Chat ID</b> группы Telegram\n"
+        "(начинается с <code>-100</code>):\n\n"
+        "💡 <b>Как узнать Chat ID:</b>\n"
+        "1. Добавьте бота @userinfobot в группу\n"
+        "2. Он покажет Chat ID группы\n"
+        "3. Или используйте @RawDataBot для получения ID"
+    )
+
+
+@router.message(StateFilter(SetupStates.waiting_for_chat_id_for_create))
+async def process_chat_id_for_create(
+    message: Message,
+    state: FSMContext,
+    group_service: GroupService,
+) -> None:
+    """Обработка ввода chat_id для создания группы."""
+    try:
+        chat_id = int(message.text.strip())
+    except ValueError:
+        await message.answer(
+            "❌ Chat ID должен быть числом\n"
+            "Введите Chat ID еще раз:"
+        )
+        return
+    
+    # Проверяем, существует ли группа с таким chat_id
+    existing = await group_service.get_group_by_chat_id(chat_id)
+    if existing:
+        await message.answer(
+            f"❌ Группа с Chat ID <b>{chat_id}</b> уже существует\n"
+            f"Имя: <b>{existing.name}</b> | ID: {existing.id}\n\n"
+            "Введите другой Chat ID:"
+        )
+        return
+    
+    data = await state.get_data()
+    group_name = data.get("group_name")
+    
+    # Определяем topic_id из контекста, если команда выполнена в теме
+    topic_id = None
+    if message.is_topic_message and message.message_thread_id:
+        topic_id = message.message_thread_id
+        await message.answer(
+            f"📌 Topic ID автоматически определен из контекста: <b>{topic_id}</b>"
+        )
+    
+    # Создаем группу
+    try:
+        group = await group_service.create_group(
+            name=group_name,
+            telegram_chat_id=chat_id,
+            telegram_topic_id=topic_id,
+            is_night=False,
+        )
+        
+        # Формируем уведомление о необходимости добавить темы
+        notification_text = (
+            f"✅ <b>Группа {group_name} успешно создана!</b>\n\n"
+            f"📋 <b>Информация:</b>\n"
+            f"• ID: {group.id}\n"
+            f"• Chat ID: {chat_id}\n"
+        )
+        
+        if topic_id:
+            notification_text += f"• Topic ID (отметки на слот): {topic_id}\n"
+        
+        notification_text += (
+            f"\n⚠️ <b>ВАЖНО! Не забудьте настроить темы:</b>\n\n"
+            f"1. 📋 <b>Отметки на слот</b> — тема, где создаются опросы\n"
+            f"   Команда: <code>/set_topic {group_name} [topic_id]</code>\n"
+            f"   Или через админ-панель: /admin → Установить тему → Отметки на слот\n\n"
+            f"2. 📥 <b>Приход/уход</b> — тема, куда отправляются результаты\n"
+            f"   Команда: <code>/set_arrival_topic {group_name} [topic_id]</code>\n"
+            f"   Или через админ-панель: /admin → Установить тему → Приход/уход\n\n"
+            f"3. 💬 <b>Общий чат</b> — тема для напоминаний\n"
+            f"   Команда: <code>/set_general_topic {group_name} [topic_id]</code>\n"
+            f"   Или через админ-панель: /admin → Установить тему → Общий чат\n\n"
+            f"💡 <b>Совет:</b> Используйте <code>/get_topic_id</code> в нужной теме,\n"
+            f"чтобы узнать её ID."
+        )
+        
+        await message.answer(notification_text)
+        await state.clear()
+        
+    except Exception as e:
+        logger.error("Error creating group: %s", e, exc_info=True)
+        await message.answer(
+            f"❌ Ошибка при создании группы: {e}\n\n"
+            "Попробуйте еще раз или используйте команду /add_group"
+        )
+        await state.clear()
+
+
+@router.callback_query(lambda c: c.data == "admin:setup_slots")
+@require_admin_callback
+async def callback_setup_slots(
+    callback: CallbackQuery,
+    state: FSMContext,
+) -> None:
+    """Настройка слотов через админ-панель."""
+    text = (
+        "⚙️ <b>Настройка слотов</b>\n\n"
+        "💡 <b>Важно:</b> У каждой группы ЗИЗ могут быть <b>разные настройки</b>\n"
+        "времени слотов и количества людей на них.\n\n"
+        "Введите название группы для настройки слотов.\n\n"
+        "<b>Формат ввода слотов:</b>\n"
+        "<code>время_начала-время_конца:лимит</code>\n\n"
+        "<b>Примеры:</b>\n"
+        "• <code>07:30-19:30:3</code> - с 07:30 до 19:30, лимит 3 человека\n"
+        "• <code>08:00-20:00:2</code> - с 08:00 до 20:00, лимит 2 человека\n"
+        "• <code>10:00-22:00:1</code> - с 10:00 до 22:00, лимит 1 человек\n\n"
+        "Можно вводить несколько слотов сразу (каждый с новой строки).\n"
+        "Для завершения отправьте <b>готово</b>.\n\n"
+        "Введите название группы:"
+    )
+    keyboard = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="◀️ Назад", callback_data="admin:back_to_main")],
+    ])
+    await callback.message.edit_text(text, reply_markup=keyboard)
+    await state.set_state(SetupStates.waiting_for_group_name)
+    await callback.answer()
+
+
+@router.callback_query(lambda c: c.data == "admin:setup_schedule")
+@require_admin_callback
+async def callback_setup_schedule(callback: CallbackQuery) -> None:
+    """Настройка расписания."""
+    reminder_str = ", ".join(f"{h}:00" for h in settings.REMINDER_HOURS) if settings.REMINDER_HOURS else "нет"
+    
+    text = (
+        "⏰ <b>Настройка автоматического расписания</b>\n\n"
+        f"<b>Текущие настройки:</b>\n"
+        f"• Создание опросов: {settings.POLL_CREATION_HOUR:02d}:{settings.POLL_CREATION_MINUTE:02d}\n"
+        f"• Закрытие опросов: {settings.POLL_CLOSING_HOUR:02d}:{settings.POLL_CLOSING_MINUTE:02d}\n"
+        f"• Напоминания: {reminder_str}\n\n"
+        "⚠️ <b>Внимание:</b> Изменения вступят в силу после перезапуска бота."
+    )
+    
+    keyboard = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="✏️ Редактировать", callback_data="admin:edit_schedule")],
+        [InlineKeyboardButton(text="◀️ Назад", callback_data="admin:back_to_main")],
+    ])
+    
+    await callback.message.edit_text(text, reply_markup=keyboard)
+    await callback.answer()
+
+
+@router.callback_query(lambda c: c.data == "admin:edit_schedule")
+@require_admin_callback
+async def callback_edit_schedule(
+    callback: CallbackQuery,
+    state: FSMContext,
+) -> None:
+    """Начать редактирование расписания."""
+    text = (
+        "⏰ <b>Редактирование расписания</b>\n\n"
+        "Введите время создания опросов в формате <b>hh:mm</b>\n\n"
+        "<b>Пример:</b> <code>09:00</code>"
+    )
+    
+    keyboard = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="◀️ Назад", callback_data="admin:setup_schedule")],
+    ])
+    
+    await callback.message.edit_text(text, reply_markup=keyboard)
+    await state.set_state(AdminPanelStates.waiting_for_poll_creation_time)
+    await callback.answer()
+
+
+@router.message(StateFilter(AdminPanelStates.waiting_for_poll_creation_time))
+async def process_poll_creation_time(
+    message: Message,
+    state: FSMContext,
+) -> None:
+    """Обработка ввода времени создания опросов."""
+    time_str = message.text.strip()
+    
+    # Проверяем формат hh:mm
+    time_pattern = r"^(\d{1,2}):(\d{2})$"
+    import re
+    match = re.match(time_pattern, time_str)
+    
+    if not match:
+        await message.answer(
+            "❌ Неверный формат времени. Используйте формат <b>hh:mm</b>\n\n"
+            "<b>Пример:</b> <code>09:00</code>\n\n"
+            "Введите время создания опросов:"
+        )
+        return
+    
+    hour_str, minute_str = match.groups()
+    try:
+        hour = int(hour_str)
+        minute = int(minute_str)
+        
+        if not (0 <= hour <= 23):
+            await message.answer(
+                "❌ Час должен быть от 0 до 23\n\n"
+                "Введите время создания опросов:"
+            )
+            return
+        
+        if not (0 <= minute <= 59):
+            await message.answer(
+                "❌ Минута должна быть от 0 до 59\n\n"
+                "Введите время создания опросов:"
+            )
+            return
+        
+        # Сохраняем время создания
+        await state.update_data(
+            poll_creation_hour=hour,
+            poll_creation_minute=minute,
+        )
+        
+        # Переходим к следующему вопросу
+        text = (
+            "⏰ <b>Редактирование расписания</b>\n\n"
+            f"✅ Время создания опросов: <b>{hour:02d}:{minute:02d}</b>\n\n"
+            "Введите время закрытия опросов в формате <b>hh:mm</b>\n\n"
+            "<b>Пример:</b> <code>19:00</code>"
+        )
+        
+        keyboard = InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text="◀️ Назад", callback_data="admin:setup_schedule")],
+        ])
+        
+        await message.answer(text, reply_markup=keyboard)
+        await state.set_state(AdminPanelStates.waiting_for_poll_closing_time)
+        
+    except ValueError:
+        await message.answer(
+            "❌ Неверный формат времени. Используйте формат <b>hh:mm</b>\n\n"
+            "Введите время создания опросов:"
+        )
+
+
+@router.message(StateFilter(AdminPanelStates.waiting_for_poll_closing_time))
+async def process_poll_closing_time(
+    message: Message,
+    state: FSMContext,
+) -> None:
+    """Обработка ввода времени закрытия опросов."""
+    time_str = message.text.strip()
+    
+    # Проверяем формат hh:mm
+    time_pattern = r"^(\d{1,2}):(\d{2})$"
+    import re
+    match = re.match(time_pattern, time_str)
+    
+    if not match:
+        await message.answer(
+            "❌ Неверный формат времени. Используйте формат <b>hh:mm</b>\n\n"
+            "<b>Пример:</b> <code>19:00</code>\n\n"
+            "Введите время закрытия опросов:"
+        )
+        return
+    
+    hour_str, minute_str = match.groups()
+    try:
+        hour = int(hour_str)
+        minute = int(minute_str)
+        
+        if not (0 <= hour <= 23):
+            await message.answer(
+                "❌ Час должен быть от 0 до 23\n\n"
+                "Введите время закрытия опросов:"
+            )
+            return
+        
+        if not (0 <= minute <= 59):
+            await message.answer(
+                "❌ Минута должна быть от 0 до 59\n\n"
+                "Введите время закрытия опросов:"
+            )
+            return
+        
+        # Сохраняем время закрытия
+        await state.update_data(
+            poll_closing_hour=hour,
+            poll_closing_minute=minute,
+        )
+        
+        # Получаем сохраненные данные
+        saved_data = await state.get_data()
+        creation_hour = saved_data.get("poll_creation_hour", 0)
+        creation_minute = saved_data.get("poll_creation_minute", 0)
+        
+        # Переходим к следующему вопросу
+        text = (
+            "⏰ <b>Редактирование расписания</b>\n\n"
+            f"✅ Время создания опросов: <b>{creation_hour:02d}:{creation_minute:02d}</b>\n"
+            f"✅ Время закрытия опросов: <b>{hour:02d}:{minute:02d}</b>\n\n"
+            "Введите часы для напоминаний через запятую\n\n"
+            "<b>Пример:</b> <code>10, 12, 14, 16, 18</code>\n\n"
+            "💡 <b>Примечание:</b>\n"
+            "• Если ничего не ввести, изменения не будут применены\n"
+            "• Если ввести <code>0</code>, оповещений не будет"
+        )
+        
+        keyboard = InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text="◀️ Назад", callback_data="admin:setup_schedule")],
+        ])
+        
+        await message.answer(text, reply_markup=keyboard)
+        await state.set_state(AdminPanelStates.waiting_for_reminder_hours)
+        
+    except ValueError:
+        await message.answer(
+            "❌ Неверный формат времени. Используйте формат <b>hh:mm</b>\n\n"
+            "Введите время закрытия опросов:"
+        )
+
+
+@router.message(StateFilter(AdminPanelStates.waiting_for_reminder_hours))
+async def process_reminder_hours(
+    message: Message,
+    state: FSMContext,
+) -> None:
+    """Обработка ввода часов напоминаний."""
+    hours_str = message.text.strip()
+    
+    data = await state.get_data()
+    poll_creation_hour = data.get("poll_creation_hour")
+    poll_creation_minute = data.get("poll_creation_minute")
+    poll_closing_hour = data.get("poll_closing_hour")
+    poll_closing_minute = data.get("poll_closing_minute")
+    
+    # Если пусто, не меняем напоминания
+    reminder_hours = None
+    if hours_str and hours_str != "0":
+        try:
+            # Парсим часы через запятую
+            hours_list = [int(h.strip()) for h in hours_str.split(",") if h.strip()]
+            
+            # Валидация
+            for hour in hours_list:
+                if not (0 <= hour <= 23):
+                    await message.answer(
+                        "❌ Часы должны быть от 0 до 23\n\n"
+                        "Введите часы для напоминаний через запятую:"
+                    )
+                    return
+            
+            reminder_hours = sorted(set(hours_list))  # Убираем дубликаты и сортируем
+        except ValueError:
+            await message.answer(
+                "❌ Неверный формат. Используйте часы через запятую\n\n"
+                "<b>Пример:</b> <code>10, 12, 14, 16, 18</code>\n\n"
+                "Введите часы для напоминаний:"
+            )
+            return
+    elif hours_str == "0":
+        reminder_hours = []
+    
+    # Обновляем .env файл
+    from pathlib import Path
+    from src.utils.env_updater import update_env_variable
+    
+    env_path = Path(__file__).parent.parent.parent / ".env"
+    
+    success = True
+    errors = []
+    
+    # Обновляем время создания
+    if poll_creation_hour is not None and poll_creation_minute is not None:
+        if not update_env_variable("POLL_CREATION_HOUR", str(poll_creation_hour), env_path):
+            errors.append("POLL_CREATION_HOUR")
+            success = False
+        if not update_env_variable("POLL_CREATION_MINUTE", str(poll_creation_minute), env_path):
+            errors.append("POLL_CREATION_MINUTE")
+            success = False
+    
+    # Обновляем время закрытия
+    if poll_closing_hour is not None and poll_closing_minute is not None:
+        if not update_env_variable("POLL_CLOSING_HOUR", str(poll_closing_hour), env_path):
+            errors.append("POLL_CLOSING_HOUR")
+            success = False
+        if not update_env_variable("POLL_CLOSING_MINUTE", str(poll_closing_minute), env_path):
+            errors.append("POLL_CLOSING_MINUTE")
+            success = False
+    
+    # Обновляем часы напоминаний
+    if reminder_hours is not None:
+        import json
+        reminder_json = json.dumps(reminder_hours)
+        if not update_env_variable("REMINDER_HOURS", reminder_json, env_path):
+            errors.append("REMINDER_HOURS")
+            success = False
+    
+    if not success:
+        error_text = (
+            f"❌ <b>Ошибка при сохранении настроек</b>\n\n"
+            f"Не удалось обновить: {', '.join(errors)}\n\n"
+            "Проверьте права доступа к файлу .env"
+        )
+        await message.answer(error_text)
+        await state.clear()
+        return
+    
+    # Формируем итоговое сообщение
+    reminder_display = ", ".join(f"{h}:00" for h in reminder_hours) if reminder_hours else "нет"
+    
+    result_text = (
+        "✅ <b>Настройки сохранены!</b>\n\n"
+        f"<b>Новые настройки:</b>\n"
+        f"• Создание опросов: {poll_creation_hour:02d}:{poll_creation_minute:02d}\n"
+        f"• Закрытие опросов: {poll_closing_hour:02d}:{poll_closing_minute:02d}\n"
+        f"• Напоминания: {reminder_display}\n\n"
+        "⚠️ <b>Внимание:</b> Изменения вступят в силу после перезапуска бота."
+    )
+    
+    keyboard = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="◀️ Назад в админ-панель", callback_data="admin:back_to_main")],
+    ])
+    
+    await message.answer(result_text, reply_markup=keyboard)
+    await state.clear()
+
+
+@router.callback_query(lambda c: c.data == "admin:set_topic_menu")
+@require_admin_callback
+async def callback_set_topic_menu(
+    callback: CallbackQuery,
+) -> None:
+    """Меню настройки тем."""
+    text = (
+        "📌 <b>Установить тему</b>\n\n"
+        "Выберите тип темы для настройки:\n\n"
+        "• <b>Отметки на слот</b> - тема, где создаются опросы\n"
+        "• <b>Приход/уход</b> - тема, куда отправляются результаты\n"
+        "• <b>Общий чат</b> - тема для напоминаний\n"
+        "• <b>Важная информация</b> - тема для важных сообщений\n\n"
+        "💡 <b>Важно:</b> Выполните выбор темы в нужной теме форум-группы,\n"
+        "чтобы topic_id определился автоматически."
+    )
+    await callback.message.edit_text(text, reply_markup=get_topic_setup_keyboard())
+    await callback.answer()
+
+
+@router.callback_query(lambda c: c.data.startswith("admin:set_topic:"))
+@require_admin_callback
+async def callback_set_topic_type(
+    callback: CallbackQuery,
+    state: FSMContext,
+    group_service: GroupService,
+    bot: Bot,
+) -> None:
+    """Обработка выбора типа темы."""
+    topic_type = callback.data.split(":")[-1]
+    
+    topic_names = {
+        "poll": ("отметки на слот", "telegram_topic_id"),
+        "arrival": ("приход/уход", "arrival_departure_topic_id"),
+        "general": ("общий чат", "general_chat_topic_id"),
+        "important": ("важная информация", "important_info_topic_id"),
+    }
+    
+    if topic_type not in topic_names:
+        await callback.answer("❌ Неизвестный тип темы")
+        return
+    
+    topic_name, field_name = topic_names[topic_type]
+    
+    # Очищаем предыдущее состояние
+    await state.clear()
+    
+    # Получаем topic_id из контекста сообщения
+    topic_id = None
+    if callback.message:
+        # Пытаемся получить topic_id из сообщения
+        if hasattr(callback.message, "message_thread_id") and callback.message.message_thread_id:
+            topic_id = callback.message.message_thread_id
+        # Если не нашли, пытаемся получить из чата через API
+        elif callback.message.chat.type in ("supergroup", "group"):
+            try:
+                # Проверяем, является ли это форум-группой
+                chat = await bot.get_chat(callback.message.chat.id)
+                if hasattr(chat, "is_forum") and chat.is_forum:
+                    # Если это форум, но topic_id не указан, нужно запросить у пользователя
+                    pass
+            except Exception:
+                pass
+    
+    # Сохраняем данные в состояние
+    await state.update_data(
+        topic_type=topic_type,
+        field_name=field_name,
+        topic_name=topic_name,
+    )
+    
+    # Если topic_id найден, сразу показываем список групп
+    if topic_id:
+        await state.update_data(topic_id=topic_id)
+        
+        # Показываем список групп для выбора
+        groups = await group_service.get_all_groups()
+        if not groups:
+            await callback.answer("❌ Нет зарегистрированных групп", show_alert=True)
+            await state.clear()
+            return
+        
+        keyboard_buttons = []
+        for group in groups:
+            keyboard_buttons.append([
+                InlineKeyboardButton(
+                    text=group.name,
+                    callback_data=f"admin:select_group_topic_{topic_type}_{group.id}",
+                ),
+            ])
+        keyboard_buttons.append([
+            InlineKeyboardButton(text="◀️ Назад", callback_data="admin:set_topic_menu"),
+        ])
+        
+        text = (
+            f"📌 <b>Установить тему: {topic_name}</b>\n\n"
+            f"✅ Topic ID определен: <b>{topic_id}</b>\n\n"
+            "Выберите группу для установки темы:"
+        )
+        
+        await callback.message.edit_text(
+            text,
+            reply_markup=InlineKeyboardMarkup(inline_keyboard=keyboard_buttons),
+        )
+        await state.set_state(AdminPanelStates.waiting_for_group_selection_for_topic)
+        await callback.answer(f"Topic ID: {topic_id}")
+    else:
+        # Если topic_id не найден, запрашиваем его у пользователя
+        keyboard = InlineKeyboardMarkup(inline_keyboard=[
+            [
+                InlineKeyboardButton(
+                    text="📌 Использовать /get_topic_id",
+                    callback_data=f"admin:get_topic_id_help_{topic_type}",
+                ),
+            ],
+            [
+                InlineKeyboardButton(
+                    text="✏️ Ввести вручную",
+                    callback_data=f"admin:enter_topic_id_{topic_type}",
+                ),
+            ],
+            [
+                InlineKeyboardButton(text="◀️ Назад", callback_data="admin:set_topic_menu"),
+            ],
+        ])
+        
+        text = (
+            f"📌 <b>Установить тему: {topic_name}</b>\n\n"
+            "❌ Topic ID не найден в контексте.\n\n"
+            "💡 <b>Как получить Topic ID:</b>\n"
+            "1. Перейдите в нужную тему форум-группы\n"
+            "2. Выполните команду <code>/get_topic_id</code>\n"
+            "3. Или введите Topic ID вручную\n\n"
+            "Выберите способ получения Topic ID:"
+        )
+        
+        await callback.message.edit_text(
+            text,
+            reply_markup=keyboard,
+        )
+        await callback.answer()
+
+
+@router.callback_query(lambda c: c.data.startswith("admin:get_topic_id_help_"))
+@require_admin_callback
+async def callback_get_topic_id_help(
+    callback: CallbackQuery,
+) -> None:
+    """Показать помощь по получению topic_id."""
+    topic_type = callback.data.split("_")[-1]
+    
+    keyboard = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="◀️ Назад", callback_data=f"admin:set_topic:{topic_type}")],
+    ])
+    
+    text = (
+        "📌 <b>Как получить Topic ID:</b>\n\n"
+        "1. Перейдите в нужную тему форум-группы\n"
+        "2. Выполните команду <code>/get_topic_id</code>\n"
+        "3. Скопируйте полученный Topic ID\n"
+        "4. Вернитесь в админ-панель и выберите 'Ввести вручную'\n\n"
+        "💡 <b>Альтернативный способ:</b>\n"
+        "Перешлите любое сообщение из нужной темы боту @RawDataBot\n"
+        "и найдите поле <code>message_thread_id</code>"
+    )
+    
+    await callback.message.edit_text(text, reply_markup=keyboard)
+    await callback.answer()
+
+
+@router.callback_query(lambda c: c.data.startswith("admin:enter_topic_id_"))
+@require_admin_callback
+async def callback_enter_topic_id(
+    callback: CallbackQuery,
+    state: FSMContext,
+) -> None:
+    """Запросить ввод topic_id вручную."""
+    topic_type = callback.data.split("_")[-1]
+    
+    keyboard = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="❌ Отмена", callback_data=f"admin:set_topic:{topic_type}")],
+    ])
+    
+    text = (
+        "✏️ <b>Введите Topic ID вручную:</b>\n\n"
+        "Введите числовое значение Topic ID для установки темы.\n\n"
+        "💡 Topic ID можно получить командой <code>/get_topic_id</code>\n"
+        "в нужной теме форум-группы."
+    )
+    
+    await callback.message.edit_text(text, reply_markup=keyboard)
+    await state.set_state(AdminPanelStates.waiting_for_topic_id_input)
+    await callback.answer()
+
+
+@router.message(StateFilter(AdminPanelStates.waiting_for_topic_id_input))
+@require_admin
+async def process_topic_id_input(
+    message: Message,
+    state: FSMContext,
+    group_service: GroupService,
+) -> None:
+    """Обработка введенного topic_id."""
+    try:
+        topic_id = int(message.text.strip())
+    except (ValueError, AttributeError):
+        await message.answer(
+            "❌ Неверный формат. Введите числовое значение Topic ID.\n\n"
+            "Или нажмите /admin для возврата в меню."
+        )
+        return
+    
+    data = await state.get_data()
+    topic_type = data.get("topic_type")
+    field_name = data.get("field_name")
+    topic_name = data.get("topic_name")
+    
+    if not topic_type or not field_name:
+        await message.answer("❌ Ошибка: данные не найдены. Начните заново через /admin")
+        await state.clear()
+        return
+    
+    # Сохраняем topic_id
+    await state.update_data(topic_id=topic_id)
+    
+    # Показываем список групп для выбора
+    groups = await group_service.get_all_groups()
+    if not groups:
+        await message.answer("❌ Нет зарегистрированных групп")
+        await state.clear()
+        return
+    
+    keyboard_buttons = []
+    for group in groups:
+        keyboard_buttons.append([
+            InlineKeyboardButton(
+                text=group.name,
+                callback_data=f"admin:select_group_topic_{topic_type}_{group.id}",
+            ),
+        ])
+    keyboard_buttons.append([
+        InlineKeyboardButton(text="❌ Отмена", callback_data="admin:back_to_main"),
+    ])
+    
+    text = (
+        f"📌 <b>Установить тему: {topic_name}</b>\n\n"
+        f"✅ Topic ID: <b>{topic_id}</b>\n\n"
+        "Выберите группу для установки темы:"
+    )
+    
+    await message.answer(
+        text,
+        reply_markup=InlineKeyboardMarkup(inline_keyboard=keyboard_buttons),
+    )
+    await state.set_state(AdminPanelStates.waiting_for_group_selection_for_topic)
+
+
+@router.callback_query(lambda c: c.data.startswith("admin:select_group_topic_") and c.data.endswith("_continue"))
+@require_admin_callback
+async def callback_continue_topic_setup(
+    callback: CallbackQuery,
+    state: FSMContext,
+    group_service: GroupService,
+) -> None:
+    """Продолжить установку темы после получения topic_id через /get_topic_id."""
+    # Формат: admin:select_group_topic_{topic_type}_continue
+    parts = callback.data.split("_")
+    topic_type = parts[3]
+    
+    data = await state.get_data()
+    topic_id = data.get("topic_id")
+    topic_name = data.get("topic_name", "тема")
+    field_name = data.get("field_name")
+    
+    # Если field_name не найден, определяем его по типу темы
+    if not field_name:
+        topic_names = {
+            "poll": ("отметки на слот", "telegram_topic_id"),
+            "arrival": ("приход/уход", "arrival_departure_topic_id"),
+            "general": ("общий чат", "general_chat_topic_id"),
+            "important": ("важная информация", "important_info_topic_id"),
+        }
+        if topic_type in topic_names:
+            _, field_name = topic_names[topic_type]
+            await state.update_data(field_name=field_name)
+    
+    if not topic_id:
+        await callback.answer("❌ Topic ID не найден", show_alert=True)
+        await state.clear()
+        return
+    
+    # Показываем список групп для выбора
+    groups = await group_service.get_all_groups()
+    if not groups:
+        await callback.answer("❌ Нет зарегистрированных групп", show_alert=True)
+        await state.clear()
+        return
+    
+    keyboard_buttons = []
+    for group in groups:
+        keyboard_buttons.append([
+            InlineKeyboardButton(
+                text=group.name,
+                callback_data=f"admin:select_group_topic_{topic_type}_{group.id}",
+            ),
+        ])
+    keyboard_buttons.append([
+        InlineKeyboardButton(text="❌ Отмена", callback_data="admin:back_to_main"),
+    ])
+    
+    text = (
+        f"📌 <b>Установить тему: {topic_name}</b>\n\n"
+        f"✅ Topic ID: <b>{topic_id}</b>\n\n"
+        "Выберите группу для установки темы:"
+    )
+    
+    await callback.message.edit_text(
+        text,
+        reply_markup=InlineKeyboardMarkup(inline_keyboard=keyboard_buttons),
+    )
+    await state.set_state(AdminPanelStates.waiting_for_group_selection_for_topic)
+    await callback.answer()
+
+
+@router.callback_query(lambda c: c.data.startswith("admin:select_group_topic_") and not c.data.endswith("_continue"))
+@require_admin_callback
+async def callback_select_group_for_topic(
+    callback: CallbackQuery,
+    state: FSMContext,
+    group_service: GroupService,
+) -> None:
+    """Обработка выбора группы для установки темы."""
+    logger.info("callback_select_group_for_topic called with data: %s", callback.data)
+    # Немедленно отвечаем на callback, чтобы убрать индикатор загрузки
+    await callback.answer()
+    
+    try:
+        # Формат: admin:select_group_topic_{topic_type}_{group_id}
+        # Правильный парсинг: удаляем префикс и разбиваем по последнему подчеркиванию
+        callback_data = callback.data
+        prefix = "admin:select_group_topic_"
+        if not callback_data.startswith(prefix):
+            await callback.message.answer("❌ Неверный формат callback")
+            logger.error("Invalid callback format: %s", callback_data)
+            return
+        
+        # Убираем префикс и разбиваем по последнему подчеркиванию
+        rest = callback_data[len(prefix):]
+        last_underscore = rest.rfind("_")
+        if last_underscore == -1:
+            await callback.message.answer("❌ Неверный формат callback")
+            logger.error("No underscore found in callback: %s", rest)
+            return
+        
+        topic_type = rest[:last_underscore]
+        group_id_str = rest[last_underscore + 1:]
+        
+        try:
+            group_id = int(group_id_str)
+        except ValueError:
+            await callback.message.answer("❌ Неверный ID группы")
+            logger.error("Invalid group_id in callback: %s", group_id_str)
+            return
+        
+        logger.info("Setting topic: type=%s, group_id=%s", topic_type, group_id)
+        
+        data = await state.get_data()
+        topic_id = data.get("topic_id")
+        field_name = data.get("field_name")
+        topic_name = data.get("topic_name", "тема")
+        
+        logger.info("State data: topic_id=%s, field_name=%s, topic_name=%s", topic_id, field_name, topic_name)
+        
+        if not topic_id or not field_name:
+            await callback.message.answer("❌ Ошибка: данные не найдены в состоянии")
+            logger.error("Missing state data: topic_id=%s, field_name=%s", topic_id, field_name)
+            await state.clear()
+            return
+        
+        # Получаем группу через репозиторий напрямую
+        from src.repositories.group_repository import GroupRepository
+        group_repo = GroupRepository(group_service.session)
+        group = await group_repo.get_by_id(group_id)
+        
+        if not group:
+            await callback.message.answer("❌ Группа не найдена")
+            logger.error("Group not found: group_id=%s", group_id)
+            await state.clear()
+            return
+        
+        logger.info("Found group: %s (id=%s)", group.name, group.id)
+        
+        # Обновляем topic_id в группе
+        update_result = await group_repo.update(group.id, **{field_name: topic_id})
+        if not update_result:
+            await callback.message.answer("❌ Ошибка при обновлении группы")
+            logger.error("Failed to update group %s", group_id)
+            return
+        
+        await group_service.session.commit()
+        logger.info("Group updated successfully in database")
+        
+        topic_names = {
+            "poll": "отметки на слот",
+            "arrival": "приход/уход",
+            "general": "общий чат",
+            "important": "важная информация",
+        }
+        display_topic_name = topic_names.get(topic_type, topic_name)
+        
+        logger.info("Topic set successfully: group=%s, topic_type=%s, topic_id=%s", group.name, display_topic_name, topic_id)
+        
+        keyboard = InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text="◀️ Назад в админ-панель", callback_data="admin:back_to_main")],
+        ])
+        
+        await callback.message.edit_text(
+            f"✅ <b>Тема установлена!</b>\n\n"
+            f"Группа: <b>{group.name}</b>\n"
+            f"Тип темы: <b>{display_topic_name}</b>\n"
+            f"Topic ID: <b>{topic_id}</b>\n\n"
+            "Теперь опросы и уведомления будут отправляться в указанную тему.",
+            reply_markup=keyboard,
+        )
+        await state.clear()
+        
+    except Exception as e:
+        logger.error("Error setting topic: %s", e, exc_info=True)
+        try:
+            await callback.message.answer(f"❌ Ошибка при установке темы: {str(e)[:200]}")
+        except Exception:
+            pass  # Игнорируем ошибки при отправке сообщения об ошибке
+
+
+async def _send_existing_polls_to_admin(
+    bot: Bot,
+    poll_repo: PollRepository,
+    group_repo: GroupRepository,
+    admin_user_id: int,
+) -> list[str]:
+    """
+    Отправить существующие опросы администратору в личку.
+    
+    Returns:
+        Список строк с информацией о статусе отправки опросов
+    """
+    from datetime import date, timedelta
+    
+    tomorrow = date.today() + timedelta(days=1)
+    groups = await group_repo.get_active_groups()
+    existing_polls_info = []
+    
+    for group in groups:
+        existing_poll = await poll_repo.get_active_by_group_and_date(
+            group.id,
+            tomorrow,
+        )
+        
+        if existing_poll and existing_poll.telegram_message_id:
+            try:
+                # Формируем ссылку на сообщение
+                chat_id_str = str(group.telegram_chat_id)
+                # Убираем -100 для формирования ссылки на группу
+                if chat_id_str.startswith("-100"):
+                    chat_id_for_link = chat_id_str[4:]
+                else:
+                    chat_id_for_link = chat_id_str
+                
+                message_link = f"https://t.me/c/{chat_id_for_link}/{existing_poll.telegram_message_id}"
+                
+                # Пытаемся переслать сообщение с опросом в личку админа
+                try:
+                    await bot.forward_message(
+                        chat_id=admin_user_id,
+                        from_chat_id=group.telegram_chat_id,
+                        message_id=existing_poll.telegram_message_id,
+                    )
+                    existing_polls_info.append(f"✅ {group.name} - опрос переслан")
+                except Exception as forward_error:
+                    # Если не удалось переслать, отправляем ссылку
+                    logger.warning("Failed to forward poll message for %s: %s", group.name, forward_error)
+                    await bot.send_message(
+                        chat_id=admin_user_id,
+                        text=f"📊 <b>Существующий опрос для {group.name}</b>\n\n<a href=\"{message_link}\">Ссылка на опрос</a>",
+                        parse_mode="HTML",
+                    )
+                    existing_polls_info.append(f"📊 {group.name} - ссылка отправлена")
+            except Exception as e:
+                logger.error("Error sending existing poll for %s: %s", group.name, e)
+                existing_polls_info.append(f"❌ {group.name} - ошибка отправки")
+    
+    # Если были существующие опросы, отправляем информацию о них в личку админа
+    if existing_polls_info:
+        info_text = "📋 <b>Существующие опросы на завтра:</b>\n\n" + "\n".join(existing_polls_info)
+        await bot.send_message(
+            chat_id=admin_user_id,
+            text=info_text,
+            parse_mode="HTML",
+        )
+    
+    return existing_polls_info
+
+
+async def _create_polls_with_commit(
+    poll_service: PollService,
+    group_service: GroupService,
+    force: bool = False,
+) -> tuple[int, list[str]]:
+    """
+    Создать опросы и закоммитить изменения в БД.
+    
+    Returns:
+        Кортеж (количество созданных опросов, список ошибок)
+    """
+    logger.info("Calling create_daily_polls with force=%s...", force)
+    created, errors = await poll_service.create_daily_polls(force=force)
+    logger.info("create_daily_polls completed: created=%s, errors=%s", created, len(errors))
+    
+    # Коммитим изменения в БД
+    try:
+        await group_service.session.commit()
+        logger.info("Database changes committed successfully")
+    except Exception as commit_error:
+        logger.error("Error committing database changes: %s", commit_error, exc_info=True)
+        await group_service.session.rollback()
+        raise
+    
+    return created, errors
+
+
+@router.callback_query(lambda c: c.data == "admin:create_polls")
+@require_admin_callback
+async def callback_create_polls(
+    callback: CallbackQuery,
+    bot: Bot,
+    poll_repo: PollRepository,
+    group_repo: GroupRepository,
+    group_service: GroupService,
+) -> None:
+    """Создать опросы вручную."""
+    logger.info("Manual poll creation requested via admin panel")
+    await callback.answer("⏳ Создание опросов...")
+    
+    try:
+        from src.services.screenshot_service import ScreenshotService
+        
+        screenshot_service = ScreenshotService()
+        poll_service = PollService(
+            bot=bot,
+            poll_repo=poll_repo,
+            group_repo=group_repo,
+            screenshot_service=screenshot_service,
+        )
+        
+        # Проверяем существующие опросы и отправляем их первыми
+        existing_polls_info = await _send_existing_polls_to_admin(
+            bot=bot,
+            poll_repo=poll_repo,
+            group_repo=group_repo,
+            admin_user_id=callback.from_user.id,
+        )
+        
+        # Создаем опросы
+        created, errors = await _create_polls_with_commit(
+            poll_service=poll_service,
+            group_service=group_service,
+            force=False,
+        )
+        
+        text = (
+            f"✅ <b>Опросы созданы</b>\n\n"
+            f"Создано: {created}\n"
+            f"Ошибок: {len(errors)}"
+        )
+        
+        if existing_polls_info:
+            text += f"\n\n📋 Найдено существующих опросов: {len(existing_polls_info)}"
+        
+        if errors:
+            text += f"\n\n❌ <b>Ошибки:</b>\n" + "\n".join(f"• {e}" for e in errors[:5])
+            if len(errors) > 5:
+                text += f"\n... и ещё {len(errors) - 5}"
+        
+        keyboard = InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text="◀️ Назад", callback_data="admin:back_to_main")],
+        ])
+        
+        await callback.message.edit_text(text, reply_markup=keyboard)
+        
+    except Exception as e:
+        logger.error("Error creating polls: %s", e, exc_info=True)
+        try:
+            # Пытаемся откатить изменения в случае ошибки
+            await group_service.session.rollback()
+            logger.info("Database changes rolled back")
+        except Exception as rollback_error:
+            logger.error("Error rolling back: %s", rollback_error)
+        
+        await callback.message.edit_text(
+            f"❌ Ошибка при создании опросов: {str(e)[:200]}",
+            reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+                [InlineKeyboardButton(text="◀️ Назад", callback_data="admin:back_to_main")],
+            ]),
+        )
+
+
+@router.callback_query(lambda c: c.data == "admin:force_create_polls")
+@require_admin_callback
+async def callback_force_create_polls_confirm(
+    callback: CallbackQuery,
+) -> None:
+    """Подтверждение принудительного создания опросов."""
+    from datetime import date, timedelta
+    tomorrow = date.today() + timedelta(days=1)
+    
+    text = (
+        f"⚠️ <b>Пересоздание опросов</b>\n\n"
+        f"Это действие закроет все существующие активные опросы на <b>{tomorrow.strftime('%d.%m.%Y')}</b> "
+        f"и создаст новые.\n\n"
+        f"<b>Внимание:</b> Данные голосования из существующих опросов будут потеряны!\n\n"
+        f"Вы уверены, что хотите продолжить?"
+    )
+    
+    keyboard = InlineKeyboardMarkup(inline_keyboard=[
+        [
+            InlineKeyboardButton(text="✅ Да, пересоздать", callback_data="admin:force_create_polls:confirm"),
+            InlineKeyboardButton(text="❌ Отмена", callback_data="admin:back_to_main"),
+        ],
+    ])
+    
+    await callback.message.edit_text(text, reply_markup=keyboard)
+    await callback.answer()
+
+
+@router.callback_query(lambda c: c.data == "admin:force_create_polls:confirm")
+@require_admin_callback
+async def callback_force_create_polls(
+    callback: CallbackQuery,
+    bot: Bot,
+    poll_repo: PollRepository,
+    group_repo: GroupRepository,
+    group_service: GroupService,
+) -> None:
+    """Принудительно создать опросы (с закрытием существующих)."""
+    logger.info("Force poll creation requested via admin panel")
+    await callback.answer("⏳ Пересоздание опросов...")
+    
+    try:
+        from src.services.screenshot_service import ScreenshotService
+        screenshot_service = ScreenshotService()
+        
+        poll_service = PollService(
+            bot=bot,
+            poll_repo=poll_repo,
+            group_repo=group_repo,
+            screenshot_service=screenshot_service,
+        )
+        
+        # Создаем опросы с принудительным режимом
+        created, errors = await _create_polls_with_commit(
+            poll_service=poll_service,
+            group_service=group_service,
+            force=True,
+        )
+        
+        text = (
+            f"✅ <b>Опросы пересозданы</b>\n\n"
+            f"Создано: {created}\n"
+            f"Ошибок: {len(errors)}"
+        )
+        
+        if errors:
+            text += f"\n\n❌ <b>Ошибки:</b>\n" + "\n".join(f"• {e}" for e in errors[:5])
+            if len(errors) > 5:
+                text += f"\n... и ещё {len(errors) - 5}"
+        
+        keyboard = InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text="◀️ Назад", callback_data="admin:back_to_main")],
+        ])
+        
+        await callback.message.edit_text(text, reply_markup=keyboard)
+        
+    except Exception as e:
+        logger.error("Error force creating polls: %s", e, exc_info=True)
+        try:
+            # Пытаемся откатить изменения в случае ошибки
+            await group_service.session.rollback()
+            logger.info("Database changes rolled back")
+        except Exception as rollback_error:
+            logger.error("Error rolling back: %s", rollback_error)
+        
+        await callback.message.edit_text(
+            f"❌ Ошибка при пересоздании опросов: {str(e)[:200]}",
+            reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+                [InlineKeyboardButton(text="◀️ Назад", callback_data="admin:back_to_main")],
+            ]),
+        )
+
+
+@router.callback_query(lambda c: c.data == "admin:show_results")
+@require_admin_callback
+async def callback_show_results(
+    callback: CallbackQuery,
+    state: FSMContext,
+    group_service: GroupService,
+) -> None:
+    """Вывести результаты опроса (тестовая функция)."""
+    groups = await group_service.get_all_groups()
+    if not groups:
+        await callback.answer("❌ Нет зарегистрированных групп", show_alert=True)
+        return
+    
+    keyboard_buttons = []
+    for group in groups:
+        keyboard_buttons.append([
+            InlineKeyboardButton(
+                text=group.name,
+                callback_data=f"admin:show_results_group_{group.id}",
+            ),
+        ])
+    keyboard_buttons.append([
+        InlineKeyboardButton(text="◀️ Назад", callback_data="admin:back_to_main"),
+    ])
+    
+    await callback.message.edit_text(
+        "📊 <b>Вывести результат опроса</b>\n\n"
+        "Выберите группу:",
+        reply_markup=InlineKeyboardMarkup(inline_keyboard=keyboard_buttons),
+    )
+    await state.set_state(AdminPanelStates.waiting_for_group_selection_for_results)
+    await callback.answer()
+
+
+@router.callback_query(lambda c: c.data.startswith("admin:show_results_group_"))
+@require_admin_callback
+async def callback_show_results_for_group(
+    callback: CallbackQuery,
+    bot: Bot,
+    poll_repo: PollRepository,
+    group_repo: GroupRepository,
+) -> None:
+    """Вывести результаты опроса для выбранной группы."""
+    group_id = int(callback.data.split("_")[-1])
+    await callback.answer("⏳ Получение результатов...")
+    
+    try:
+        from datetime import date
+        from src.services.screenshot_service import ScreenshotService
+        
+        group = await group_repo.get_by_id(group_id)
+        if not group:
+            await callback.answer("❌ Группа не найдена", show_alert=True)
+            return
+        
+        today = date.today()
+        poll = await poll_repo.get_by_group_and_date(group.id, today)
+        
+        if not poll:
+            await callback.message.edit_text(
+                f"❌ Опрос для группы <b>{group.name}</b> за {today.strftime('%d.%m.%Y')} не найден",
+                reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+                    [InlineKeyboardButton(text="◀️ Назад", callback_data="admin:back_to_main")],
+                ]),
+            )
+            return
+        
+        # Пытаемся создать скриншот
+        screenshot_service = ScreenshotService()
+        screenshot_path = None
+        
+        try:
+            screenshot_path = await screenshot_service.create_poll_screenshot(
+                chat_id=group.telegram_chat_id,
+                message_id=poll.telegram_message_id,
+                group_name=group.name,
+                poll_date=today,
+            )
+        except Exception as e:
+            logger.warning("Failed to create screenshot: %s", e)
+        
+        # Отправляем результат
+        if screenshot_path:
+            from aiogram.types import FSInputFile
+            photo = FSInputFile(str(screenshot_path))
+            await bot.send_photo(
+                chat_id=callback.message.chat.id,
+                photo=photo,
+                caption=f"📊 Результаты опроса для {group.name} за {today.strftime('%d.%m.%Y')}",
+            )
+            text = "✅ Скриншот отправлен"
+        else:
+            # Получаем текстовый формат результатов
+            from src.services.poll_service import PollService
+            poll_service = PollService(
+                bot=bot,
+                poll_repo=poll_repo,
+                group_repo=group_repo,
+                screenshot_service=screenshot_service,
+            )
+            results_text = await poll_service.get_poll_results_text(poll.id)
+            text = (
+                f"📊 <b>Результаты опроса</b>\n\n"
+                f"Группа: <b>{group.name}</b>\n"
+                f"Дата: {today.strftime('%d.%m.%Y')}\n\n"
+                f"{results_text}"
+            )
+        
+        keyboard = InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text="◀️ Назад", callback_data="admin:back_to_main")],
+        ])
+        
+        await callback.message.edit_text(text, reply_markup=keyboard)
+        
+    except Exception as e:
+        logger.error("Error showing results: %s", e, exc_info=True)
+        await callback.message.edit_text(
+            f"❌ Ошибка: {e}",
+            reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+                [InlineKeyboardButton(text="◀️ Назад", callback_data="admin:back_to_main")],
+            ]),
+        )
+
+
+@router.callback_query(lambda c: c.data == "admin:close_poll_early")
+@require_admin_callback
+async def callback_close_poll_early(
+    callback: CallbackQuery,
+    state: FSMContext,
+    group_service: GroupService,
+) -> None:
+    """Досрочно закрыть опрос."""
+    groups = await group_service.get_all_groups()
+    if not groups:
+        await callback.answer("❌ Нет зарегистрированных групп", show_alert=True)
+        return
+    
+    keyboard_buttons = []
+    for group in groups:
+        keyboard_buttons.append([
+            InlineKeyboardButton(
+                text=group.name,
+                callback_data=f"admin:close_poll_group_{group.id}",
+            ),
+        ])
+    keyboard_buttons.append([
+        InlineKeyboardButton(text="◀️ Назад", callback_data="admin:back_to_main"),
+    ])
+    
+    await callback.message.edit_text(
+        "🔒 <b>Досрочно закрыть опрос</b>\n\n"
+        "Выберите группу:",
+        reply_markup=InlineKeyboardMarkup(inline_keyboard=keyboard_buttons),
+    )
+    await state.set_state(AdminPanelStates.waiting_for_group_selection_for_close)
+    await callback.answer()
+
+
+@router.callback_query(lambda c: c.data.startswith("admin:close_poll_group_"))
+@require_admin_callback
+async def callback_close_poll_for_group(
+    callback: CallbackQuery,
+    bot: Bot,
+    poll_repo: PollRepository,
+    group_repo: GroupRepository,
+) -> None:
+    """Досрочно закрыть опрос для выбранной группы."""
+    group_id = int(callback.data.split("_")[-1])
+    await callback.answer("⏳ Закрытие опроса...")
+    
+    try:
+        from datetime import date, datetime
+        from src.services.screenshot_service import ScreenshotService
+        
+        group = await group_repo.get_by_id(group_id)
+        if not group:
+            await callback.answer("❌ Группа не найдена", show_alert=True)
+            return
+        
+        today = date.today()
+        poll = await poll_repo.get_active_by_group_and_date(group.id, today)
+        
+        if not poll:
+            await callback.message.edit_text(
+                f"❌ Активный опрос для группы <b>{group.name}</b> за {today.strftime('%d.%m.%Y')} не найден",
+                reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+                    [InlineKeyboardButton(text="◀️ Назад", callback_data="admin:back_to_main")],
+                ]),
+            )
+            return
+        
+        # Закрываем опрос (message_thread_id не поддерживается в stop_poll API)
+        await bot.stop_poll(
+            chat_id=group.telegram_chat_id,
+            message_id=poll.telegram_message_id,
+        )
+        
+        now = datetime.now()
+        await poll_repo.update(poll.id, status="closed", closed_at=now)
+        
+        # Создаем скриншот и отправляем
+        screenshot_service = ScreenshotService()
+        screenshot_path = None
+        
+        try:
+            screenshot_path = await screenshot_service.create_poll_screenshot(
+                chat_id=group.telegram_chat_id,
+                message_id=poll.telegram_message_id,
+                group_name=group.name,
+                poll_date=today,
+            )
+            if screenshot_path:
+                await poll_repo.update(poll.id, screenshot_path=str(screenshot_path))
+        except Exception as e:
+            logger.warning("Failed to create screenshot: %s", e)
+        
+        # Отправляем скриншот в тему "приход/уход"
+        arrival_departure_topic_id = getattr(group, "arrival_departure_topic_id", None)
+        if screenshot_path and arrival_departure_topic_id:
+            try:
+                from aiogram.types import FSInputFile
+                photo = FSInputFile(str(screenshot_path))
+                await bot.send_photo(
+                    chat_id=group.telegram_chat_id,
+                    photo=photo,
+                    caption=f"📊 Результаты опроса за {today.strftime('%d.%m.%Y')}",
+                    message_thread_id=arrival_departure_topic_id,
+                )
+            except Exception as e:
+                logger.error("Failed to send screenshot: %s", e)
+        
+        text = (
+            f"✅ <b>Опрос закрыт досрочно</b>\n\n"
+            f"Группа: <b>{group.name}</b>\n"
+            f"Дата: {today.strftime('%d.%m.%Y')}\n"
+        )
+        
+        if screenshot_path:
+            text += "✅ Скриншот создан и отправлен"
+        else:
+            text += "⚠️ Скриншот не создан"
+        
+        keyboard = InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text="◀️ Назад", callback_data="admin:back_to_main")],
+        ])
+        
+        await callback.message.edit_text(text, reply_markup=keyboard)
+        
+    except Exception as e:
+        logger.error("Error closing poll early: %s", e, exc_info=True)
+        await callback.message.edit_text(
+            f"❌ Ошибка: {e}",
+            reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+                [InlineKeyboardButton(text="◀️ Назад", callback_data="admin:back_to_main")],
+            ]),
+        )
+
+
+@router.callback_query(lambda c: c.data == "admin:broadcast")
+@require_admin_callback
+async def callback_broadcast_menu(
+    callback: CallbackQuery,
+) -> None:
+    """Меню рассылки по группам."""
+    text = (
+        "📢 <b>Рассылка по группам</b>\n\n"
+        "Выберите тему, в которую отправить сообщение:\n\n"
+        "• <b>Отметки на слот</b> - тема, где создаются опросы\n"
+        "• <b>Приход/уход</b> - тема, куда отправляются результаты\n"
+        "• <b>Общий чат</b> - тема для напоминаний\n"
+        "• <b>Важная информация</b> - тема для важных сообщений"
+    )
+    
+    keyboard = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="📋 Отметки на слот", callback_data="admin:broadcast:poll")],
+        [InlineKeyboardButton(text="📥 Приход/уход", callback_data="admin:broadcast:arrival")],
+        [InlineKeyboardButton(text="💬 Общий чат", callback_data="admin:broadcast:general")],
+        [InlineKeyboardButton(text="📢 Важная информация", callback_data="admin:broadcast:important")],
+        [InlineKeyboardButton(text="◀️ Назад", callback_data="admin:back_to_main")],
+    ])
+    
+    await callback.message.edit_text(text, reply_markup=keyboard)
+    await callback.answer()
+
+
+@router.callback_query(lambda c: c.data.startswith("admin:broadcast:"))
+@require_admin_callback
+async def callback_broadcast_topic(
+    callback: CallbackQuery,
+    state: FSMContext,
+) -> None:
+    """Обработка выбора темы для рассылки."""
+    topic_type = callback.data.split(":")[-1]
+    
+    topic_names = {
+        "poll": "отметки на слот",
+        "arrival": "приход/уход",
+        "general": "общий чат",
+        "important": "важная информация",
+    }
+    
+    if topic_type not in topic_names:
+        await callback.answer("❌ Неизвестный тип темы")
+        return
+    
+    topic_name = topic_names[topic_type]
+    
+    await state.update_data(broadcast_topic_type=topic_type)
+    
+    text = (
+        f"📢 <b>Рассылка в тему: {topic_name}</b>\n\n"
+        "Введите сообщение для рассылки во все группы:"
+    )
+    
+    keyboard = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="◀️ Назад", callback_data="admin:broadcast")],
+    ])
+    
+    await callback.message.edit_text(text, reply_markup=keyboard)
+    await state.set_state(AdminPanelStates.waiting_for_broadcast_message)
+    await callback.answer()
+
+
+@router.message(StateFilter(AdminPanelStates.waiting_for_broadcast_message))
+async def process_broadcast_message(
+    message: Message,
+    state: FSMContext,
+    bot: Bot,
+    group_repo: GroupRepository,
+) -> None:
+    """Обработка ввода сообщения для рассылки (поддерживает текст, фото, файлы)."""
+    # Проверяем, есть ли контент для отправки
+    has_text = bool(message.text or message.caption)
+    has_photo = bool(message.photo)
+    has_document = bool(message.document)
+    has_video = bool(message.video)
+    has_audio = bool(message.audio)
+    has_voice = bool(message.voice)
+    has_video_note = bool(message.video_note)
+    has_sticker = bool(message.sticker)
+    
+    if not any([has_text, has_photo, has_document, has_video, has_audio, has_voice, has_video_note, has_sticker]):
+        await message.answer("❌ Сообщение не может быть пустым. Отправьте текст, фото, файл или другое медиа:")
+        return
+    
+    data = await state.get_data()
+    topic_type = data.get("broadcast_topic_type")
+    
+    if not topic_type:
+        await message.answer("❌ Ошибка: тип темы не найден")
+        await state.clear()
+        return
+    
+    # Определяем поле для topic_id
+    topic_fields = {
+        "poll": "telegram_topic_id",
+        "arrival": "arrival_departure_topic_id",
+        "general": "general_chat_topic_id",
+        "important": "important_info_topic_id",
+    }
+    field_name = topic_fields.get(topic_type)
+    
+    if not field_name:
+        await message.answer("❌ Ошибка: неизвестный тип темы")
+        await state.clear()
+        return
+    
+    # Получаем все активные группы
+    groups = await group_repo.get_active_groups()
+    
+    if not groups:
+        await message.answer("❌ Нет активных групп для рассылки")
+        await state.clear()
+        return
+    
+    # Отправляем сообщение во все группы
+    sent_count = 0
+    errors = []
+    
+    # Определяем текст/подпись
+    broadcast_text = message.text or message.caption
+    
+    for group in groups:
+        try:
+            topic_id = getattr(group, field_name, None)
+            
+            if not topic_id:
+                errors.append(f"{group.name}: тема не настроена")
+                continue
+            
+            # Отправляем в зависимости от типа медиа
+            if has_photo:
+                # Отправляем фото с подписью
+                await bot.send_photo(
+                    chat_id=group.telegram_chat_id,
+                    photo=message.photo[-1].file_id,  # Берем фото наибольшего размера
+                    caption=broadcast_text,
+                    message_thread_id=topic_id,
+                )
+            elif has_document:
+                # Отправляем документ с подписью
+                await bot.send_document(
+                    chat_id=group.telegram_chat_id,
+                    document=message.document.file_id,
+                    caption=broadcast_text,
+                    message_thread_id=topic_id,
+                )
+            elif has_video:
+                # Отправляем видео с подписью
+                await bot.send_video(
+                    chat_id=group.telegram_chat_id,
+                    video=message.video.file_id,
+                    caption=broadcast_text,
+                    message_thread_id=topic_id,
+                )
+            elif has_audio:
+                # Отправляем аудио с подписью
+                await bot.send_audio(
+                    chat_id=group.telegram_chat_id,
+                    audio=message.audio.file_id,
+                    caption=broadcast_text,
+                    message_thread_id=topic_id,
+                )
+            elif has_voice:
+                # Отправляем голосовое сообщение с подписью
+                await bot.send_voice(
+                    chat_id=group.telegram_chat_id,
+                    voice=message.voice.file_id,
+                    caption=broadcast_text,
+                    message_thread_id=topic_id,
+                )
+            elif has_video_note:
+                # Отправляем видеосообщение (кружок)
+                await bot.send_video_note(
+                    chat_id=group.telegram_chat_id,
+                    video_note=message.video_note.file_id,
+                    message_thread_id=topic_id,
+                )
+                # Если есть подпись, отправляем отдельным сообщением
+                if broadcast_text:
+                    await bot.send_message(
+                        chat_id=group.telegram_chat_id,
+                        text=broadcast_text,
+                        message_thread_id=topic_id,
+                    )
+            elif has_sticker:
+                # Отправляем стикер
+                await bot.send_sticker(
+                    chat_id=group.telegram_chat_id,
+                    sticker=message.sticker.file_id,
+                    message_thread_id=topic_id,
+                )
+                # Если есть подпись, отправляем отдельным сообщением
+                if broadcast_text:
+                    await bot.send_message(
+                        chat_id=group.telegram_chat_id,
+                        text=broadcast_text,
+                        message_thread_id=topic_id,
+                    )
+            elif has_text:
+                # Отправляем текстовое сообщение
+                await bot.send_message(
+                    chat_id=group.telegram_chat_id,
+                    text=broadcast_text,
+                    message_thread_id=topic_id,
+                )
+            else:
+                errors.append(f"{group.name}: неизвестный тип медиа")
+                continue
+                
+            sent_count += 1
+        except Exception as e:
+            errors.append(f"{group.name}: {str(e)}")
+            logger.error("Error sending broadcast to group %s: %s", group.name, e)
+    
+    # Формируем ответ
+    result_text = (
+        f"✅ <b>Рассылка завершена</b>\n\n"
+        f"Отправлено: {sent_count} из {len(groups)}\n"
+    )
+    
+    if errors:
+        result_text += f"\n❌ <b>Ошибки ({len(errors)}):</b>\n"
+        result_text += "\n".join(f"• {e}" for e in errors[:5])
+        if len(errors) > 5:
+            result_text += f"\n... и ещё {len(errors) - 5}"
+    
+    keyboard = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="◀️ Назад в админ-панель", callback_data="admin:back_to_main")],
+    ])
+    
+    await message.answer(result_text, reply_markup=keyboard)
+    await state.clear()
+
