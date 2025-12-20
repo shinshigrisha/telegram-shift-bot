@@ -1,7 +1,9 @@
 import asyncio
 import logging
+import signal
 import sys
 from pathlib import Path
+from typing import Optional
 
 # Добавляем корневую директорию проекта в PYTHONPATH
 project_root = Path(__file__).parent.parent
@@ -12,6 +14,12 @@ from aiogram.enums import ParseMode
 
 from config.settings import settings
 from src.bot import setup_bot
+
+
+# Глобальные переменные для корректной остановки
+bot_instance: Optional[Bot] = None
+dp_instance: Optional[Dispatcher] = None
+shutdown_event = asyncio.Event()
 
 
 async def main() -> None:
@@ -29,11 +37,13 @@ async def main() -> None:
 
     logger = logging.getLogger(__name__)
 
+    global bot_instance, dp_instance
+
     try:
-        logger.info("Starting Telegram Shift Bot...")
+        logger.info("Запуск Telegram бота для планирования смен...")
 
         # Создаем бота с настройками по умолчанию
-        bot = Bot(
+        bot_instance = Bot(
             token=settings.BOT_TOKEN,
             parse_mode=ParseMode.HTML,
         )
@@ -53,19 +63,47 @@ async def main() -> None:
         storage = RedisStorage(redis=redis)
 
         # Создаем диспетчер с storage
-        dp = Dispatcher(storage=storage)
+        dp_instance = Dispatcher(storage=storage)
 
         # Настраиваем бота (middlewares, роутеры, сервисы)
-        await setup_bot(bot, dp, redis)
+        await setup_bot(bot_instance, dp_instance, redis)
 
-        # Запускаем поллинг
-        await dp.start_polling(bot)
+        # Настройка обработки сигналов для корректной остановки
+        def signal_handler(signum, frame):
+            """Обработчик сигналов для корректной остановки."""
+            logger.info(f"Получен сигнал {signum}, начинаем остановку...")
+            shutdown_event.set()
 
+        signal.signal(signal.SIGINT, signal_handler)  # Ctrl+C
+        signal.signal(signal.SIGTERM, signal_handler)  # Docker stop, systemd stop
+
+        # Запускаем поллинг с поддержкой graceful shutdown
+        await dp_instance.start_polling(
+            bot_instance,
+            handle_as_tasks=True,
+            close_bot_session=True,
+        )
+
+    except KeyboardInterrupt:
+        logger.info("Получен сигнал прерывания (Ctrl+C)")
     except Exception as e:
-        logger.error("Failed to start bot: %s", e, exc_info=True)
+        logger.error("Не удалось запустить бота: %s", e, exc_info=True)
     finally:
-        logger.info("Bot stopped")
+        logger.info("Завершение работы бота...")
+        
+        # Явная остановка диспетчера и бота
+        # В aiogram 3.x stop_polling вызывается автоматически при получении сигнала
+        # и close_bot_session=True в start_polling закрывает сессию автоматически
+        # Дополнительные действия не требуются
+        
+        logger.info("Бот остановлен")
 
 
 if __name__ == "__main__":
-    asyncio.run(main())
+    try:
+        asyncio.run(main())
+    except KeyboardInterrupt:
+        logging.getLogger(__name__).info("Бот остановлен пользователем")
+    except Exception as e:
+        logging.getLogger(__name__).error("Критическая ошибка: %s", e, exc_info=True)
+        sys.exit(1)

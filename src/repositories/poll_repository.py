@@ -1,5 +1,6 @@
 from datetime import date, datetime, time
 from typing import Any, Dict, List, Optional
+from uuid import UUID as UUIDType
 import logging
 
 from sqlalchemy import select, update, insert
@@ -110,6 +111,14 @@ class PollRepository:
 
     async def get_poll_slots(self, poll_id: Any) -> List[PollSlot]:
         """Получить все слоты опроса."""
+        # Конвертируем строку в UUID если необходимо
+        if isinstance(poll_id, str):
+            try:
+                poll_id = UUIDType(poll_id)
+            except (ValueError, TypeError):
+                logger.error("Invalid UUID format: %s", poll_id)
+                return []
+        
         result = await self.session.execute(
             select(PollSlot).where(PollSlot.poll_id == poll_id).order_by(PollSlot.slot_number)
         )
@@ -124,6 +133,14 @@ class PollRepository:
 
     async def get_by_id(self, poll_id: Any) -> Optional[DailyPoll]:
         """Получить опрос по ID."""
+        # Конвертируем строку в UUID если необходимо
+        if isinstance(poll_id, str):
+            try:
+                poll_id = UUIDType(poll_id)
+            except (ValueError, TypeError):
+                logger.error("Invalid UUID format: %s", poll_id)
+                return None
+        
         result = await self.session.execute(
             select(DailyPoll).where(DailyPoll.id == poll_id)
         )
@@ -134,14 +151,99 @@ class PollRepository:
         poll = await self.get_by_id(poll_id)
         if poll:
             slots = await self.get_poll_slots(poll_id)
-            # Загружаем голоса для каждого слота
+            # Загружаем голоса для каждого слота с данными пользователей
             for slot in slots:
                 votes_result = await self.session.execute(
                     select(UserVote)
                     .where(UserVote.slot_id == slot.id)
-                    .join(User, UserVote.user_id == User.id, isouter=True)
+                    .options(selectinload(UserVote.user))
                 )
-                slot.votes = list(votes_result.scalars().all())
+                votes = list(votes_result.scalars().all())
+                slot.user_votes = votes
+                slot.votes = votes  # Для обратной совместимости
+            # Устанавливаем слоты в объект опроса
+            poll.poll_slots = slots
         return poll
+
+    async def get_slot_by_poll_and_number(self, poll_id: Any, slot_number: int) -> Optional[PollSlot]:
+        """Получить слот по номеру опроса и номеру слота."""
+        # Конвертируем строку в UUID если необходимо
+        if isinstance(poll_id, str):
+            try:
+                poll_id = UUIDType(poll_id)
+            except (ValueError, TypeError):
+                logger.error("Invalid UUID format: %s", poll_id)
+                return None
+        
+        result = await self.session.execute(
+            select(PollSlot).where(
+                PollSlot.poll_id == poll_id,
+                PollSlot.slot_number == slot_number
+            )
+        )
+        return result.scalar_one_or_none()
+
+    async def create_user_vote(
+        self,
+        poll_id: Any,
+        user_id: int,
+        user_name: str,
+        slot_id: Optional[int] = None,
+        voted_option: Optional[str] = None,
+    ) -> UserVote:
+        """Создать запись о голосе пользователя."""
+        # Конвертируем строку в UUID если необходимо
+        if isinstance(poll_id, str):
+            try:
+                poll_id = UUIDType(poll_id)
+            except (ValueError, TypeError):
+                logger.error("Invalid UUID format: %s", poll_id)
+                raise
+        
+        vote = UserVote(
+            poll_id=poll_id,
+            user_id=user_id,
+            user_name=user_name,
+            slot_id=slot_id,
+            voted_option=voted_option,
+        )
+        self.session.add(vote)
+        await self.session.flush()
+        return vote
+
+    async def update_slot_user_count(self, slot_id: int, user_id: int, increment: bool = True) -> bool:
+        """Обновить количество пользователей в слоте и список user_ids."""
+        try:
+            # Получаем слот
+            result = await self.session.execute(
+                select(PollSlot).where(PollSlot.id == slot_id)
+            )
+            slot = result.scalar_one_or_none()
+            
+            if not slot:
+                logger.warning("Slot %s not found", slot_id)
+                return False
+            
+            # Обновляем current_users и user_ids
+            if increment:
+                # Добавляем пользователя
+                user_ids_list = list(slot.user_ids) if slot.user_ids else []
+                if user_id not in user_ids_list:
+                    user_ids_list.append(user_id)
+                    slot.user_ids = user_ids_list
+                    slot.current_users = len(user_ids_list)
+            else:
+                # Удаляем пользователя
+                user_ids_list = list(slot.user_ids) if slot.user_ids else []
+                if user_id in user_ids_list:
+                    user_ids_list.remove(user_id)
+                    slot.user_ids = user_ids_list
+                    slot.current_users = len(user_ids_list)
+            
+            await self.session.flush()
+            return True
+        except Exception as e:  # noqa: BLE001
+            logger.error("Error updating slot %s: %s", slot_id, e)
+            return False
 
 

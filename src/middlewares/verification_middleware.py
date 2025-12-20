@@ -4,14 +4,39 @@ from typing import Any, Awaitable, Callable, Dict
 from aiogram import BaseMiddleware
 from aiogram.types import Message, TelegramObject
 
+from config.settings import settings
 from src.services.user_service import UserService
 from src.states.verification_states import VerificationStates
 
 logger = logging.getLogger(__name__)
 
+# Список кураторов, которые не требуют верификации
+CURATOR_USERNAMES = [
+    "Korolev_Nikita_20",
+    "Kuznetsova_Olyaa",
+    "Evgeniy_kuznetsoof",
+    "VV_Team_Mascot",
+]
+
 
 class VerificationMiddleware(BaseMiddleware):
     """Middleware для проверки верификации пользователей."""
+
+    def _is_curator(self, user) -> bool:
+        """Проверить, является ли пользователь куратором."""
+        if not user:
+            return False
+        
+        # Проверяем по username
+        if user.username and user.username.lower() in [c.lower() for c in CURATOR_USERNAMES]:
+            return True
+        
+        # Проверяем по полному имени
+        full_name = f"{user.first_name or ''} {user.last_name or ''}".strip()
+        if "VV_Team_Mascot" in full_name or "VV Team Mascot" in full_name:
+            return True
+        
+        return False
 
     async def __call__(
         self,
@@ -19,8 +44,17 @@ class VerificationMiddleware(BaseMiddleware):
         event: TelegramObject,
         data: Dict[str, Any],
     ) -> Any:
+        # Если верификация отключена, пропускаем все проверки
+        if not settings.ENABLE_VERIFICATION:
+            return await handler(event, data)
+        
         # Проверяем только сообщения от пользователей
         if not isinstance(event, Message):
+            return await handler(event, data)
+        
+        # Пропускаем кураторов без верификации
+        if event.from_user and self._is_curator(event.from_user):
+            logger.debug("Curator %s (%s) skipped verification", event.from_user.id, event.from_user.username)
             return await handler(event, data)
 
         # Пропускаем команду /start без проверки (для верификации)

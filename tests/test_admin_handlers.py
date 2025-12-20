@@ -5,7 +5,8 @@ import pytest
 from unittest.mock import AsyncMock, MagicMock, patch
 from datetime import date
 
-from aiogram.types import Message, User as TelegramUser, CommandObject
+from aiogram.types import Message, User as TelegramUser
+from aiogram.filters import CommandObject
 from aiogram.fsm.context import FSMContext
 
 from src.handlers.admin import cmd_start, cmd_stats, cmd_create_polls
@@ -204,4 +205,5 @@ async def test_cmd_create_polls_with_errors():
             assert "ошибк" in call_args.lower() or "error" in call_args.lower()
     finally:
         settings.ADMIN_IDS = original_admin_ids
+
 

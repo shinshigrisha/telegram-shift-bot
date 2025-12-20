@@ -6,6 +6,7 @@ from sqlalchemy import (
     Time,
     JSON,
 )
+from sqlalchemy.dialects.postgresql import UUID
 
 from .database import Base
 
@@ -14,7 +15,7 @@ class PollSlot(Base):
     __tablename__ = "poll_slots"
 
     id = Column(Integer, primary_key=True)
-    poll_id = Column("poll_id", nullable=False)
+    poll_id = Column(UUID(as_uuid=True), nullable=False)
     slot_number = Column(Integer, nullable=False)
     start_time = Column(Time, nullable=False)
     end_time = Column(Time, nullable=False)

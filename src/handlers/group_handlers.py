@@ -47,8 +47,8 @@ async def handle_new_member(
                     importlib.reload(config.settings)
                     logger.info("Auto-added admin %s to ADMIN_IDS", user_id)
         
-        # Для обычных участников - отправляем приветствие с кнопкой старт
-        if user_service and state:
+        # Для обычных участников - отправляем приветствие с кнопкой старт (только если верификация включена)
+        if settings.ENABLE_VERIFICATION and user_service and state:
             is_verified = await user_service.is_verified(user_id)
             
             if not is_verified:

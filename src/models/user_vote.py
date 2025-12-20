@@ -6,9 +6,10 @@ from sqlalchemy import (
     DateTime,
     BigInteger,
     Integer,
-    String,
+    String,    ForeignKey,
 )
 from sqlalchemy.dialects.postgresql import UUID
+from sqlalchemy.orm import relationship
 
 from .database import Base
 
@@ -18,10 +19,13 @@ class UserVote(Base):
 
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid4)
     poll_id = Column("poll_id", nullable=False)
-    user_id = Column(BigInteger, nullable=False)
+    user_id = Column(BigInteger, ForeignKey("users.id"), nullable=False)
     user_name = Column(String(100))
     slot_id = Column(Integer)
     voted_option = Column(String(50))
     voted_at = Column(DateTime, default=datetime.utcnow)
+    
+    # Relationship для загрузки данных пользователя
+    user = relationship("User", lazy="select")
 
 

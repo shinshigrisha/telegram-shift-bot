@@ -58,6 +58,16 @@ class Settings(BaseSettings):
     LOG_LEVEL: str = "INFO"
     LOG_FILE: Path = (BASE_DIR / "logs" / "bot.log")
 
+    # Spam control flags (set to False to disable)
+    ENABLE_ADMIN_NOTIFICATIONS: bool = True  # Уведомления админам (создание/закрытие опросов, ошибки)
+    ENABLE_GROUP_REMINDERS: bool = True  # Напоминания в группы (18:00)
+    ENABLE_COURIER_WARNINGS: bool = True  # Замечания курьерам (17:50)
+    ENABLE_POLL_CREATION_NOTIFICATIONS: bool = True  # Уведомления о создании опросов в группы
+    ENABLE_HEALTH_CHECK_NOTIFICATIONS: bool = True  # Уведомления админам о проблемах (health check)
+    
+    # Verification control (set to True to enable verification)
+    ENABLE_VERIFICATION: bool = False  # Верификация пользователей (по умолчанию отключена)
+
     class Config:
         env_file = ".env"
         env_file_encoding = "utf-8"

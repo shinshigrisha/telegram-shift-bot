@@ -75,6 +75,12 @@ async def process_slots_input(
 ) -> None:
     """Обработка ввода слотов."""
     logger.info("Processing slots input: %s", message.text)
+    
+    # Проверяем, что сообщение содержит текст
+    if not message.text:
+        await message.answer("❌ Пожалуйста, отправьте текстовое сообщение")
+        return
+    
     text = message.text.strip()
 
     # Проверяем на "готово" (без учета регистра)

@@ -40,6 +40,7 @@ class SchedulerService:
             id="create_polls",
         )
 
+        # Основная задача закрытия опросов в 19:00
         self.scheduler.add_job(
             self._close_polls_job,
             CronTrigger(
@@ -48,39 +49,60 @@ class SchedulerService:
             ),
             id="close_polls",
         )
-
-        # Ежечасные напоминания с 14:00 до 18:00
-        for hour in range(14, 19):  # 14, 15, 16, 17, 18
+        
+        # Периодическая проверка закрытия опросов каждые 5 минут с 19:05 до 19:55
+        # Это гарантирует, что опросы закроются даже если основная задача пропущена
+        # или бот был перезапущен после времени закрытия
+        for minute in range(settings.POLL_CLOSING_MINUTE + 5, 60, 5):
             self.scheduler.add_job(
-                self._hourly_reminder_job,
-                CronTrigger(hour=hour, minute=0),
-                id=f"hourly_reminder_{hour}",
+                self._close_polls_job,
+                CronTrigger(
+                    hour=settings.POLL_CLOSING_HOUR,
+                    minute=minute,
+                ),
+                id=f"close_polls_check_{minute}",
             )
         
-        # Финальное напоминание в 18:30
+        # Также проверяем в 20:00 на случай, если что-то пропустили
         self.scheduler.add_job(
-            self._final_reminder_job,
-            CronTrigger(hour=18, minute=30),
-            id="final_reminder",
+            self._close_polls_job,
+            CronTrigger(hour=20, minute=0),
+            id="close_polls_final_check",
         )
 
-        # Старые напоминания (если есть в settings)
-        for hour in settings.REMINDER_HOURS:
-            if hour not in range(14, 19):  # Не дублируем
-                self.scheduler.add_job(
-                    self._reminder_job,
-                    CronTrigger(hour=hour, minute=0),
-                    id=f"reminder_{hour}",
-                )
+        # Напоминание в 18:00 (один раз)
+        self.scheduler.add_job(
+            self._hourly_reminder_job,
+            CronTrigger(hour=18, minute=0),
+            id="reminder_18_00",
+        )
+        
+        # Проверка и отправка замечаний курьерам
+        # В 17:50
+        self.scheduler.add_job(
+            self._check_and_send_warnings_job,
+            CronTrigger(hour=17, minute=50),
+            id="check_warnings_17_50",
+        )
+
+        # Старые напоминания из settings больше не используются
+        # Все напоминания теперь только в 18:00
 
         self.scheduler.add_job(
             self._health_check_job,
             CronTrigger(minute=30),
             id="health_check",
         )
+        
+        # Проверка скриншотов отключена
 
         self.scheduler.start()
         logger.info("Scheduler started")
+        
+        # Проверяем и закрываем опросы при старте, если время закрытия уже прошло
+        # Это нужно на случай, если бот был перезапущен после времени закрытия
+        import asyncio
+        asyncio.create_task(self._check_and_close_polls_on_startup())
 
     async def _create_polls_job(self) -> None:
         logger.info("Running create_polls job")
@@ -106,24 +128,27 @@ class SchedulerService:
                 # Коммитим изменения
                 await session.commit()
 
-            if errors:
+            if errors and settings.ENABLE_ADMIN_NOTIFICATIONS:
                 await self.notification_service.notify_admins(
                     "⚠️ Ошибки при создании опросов:\n" + "\n".join(errors[:10])  # Первые 10 ошибок
                 )
 
-            await self.notification_service.notify_admins(
-                f"✅ Создано опросов: {created}\n"
-                f"❌ Ошибок: {len(errors)}"
-            )
+            if settings.ENABLE_ADMIN_NOTIFICATIONS:
+                await self.notification_service.notify_admins(
+                    f"✅ Создано опросов: {created}\n"
+                    f"❌ Ошибок: {len(errors)}"
+                )
 
         except Exception as e:  # noqa: BLE001
             logger.error("Error in create_polls job: %s", e)
-            await self.notification_service.notify_admins(
-                f"🚨 Критическая ошибка при создании опросов: {e}"
-            )
+            if settings.ENABLE_ADMIN_NOTIFICATIONS:
+                await self.notification_service.notify_admins(
+                    f"🚨 Критическая ошибка при создании опросов: {e}"
+                )
 
     async def _close_polls_job(self) -> None:
-        logger.info("Running close_polls job")
+        from datetime import datetime
+        logger.info("Running close_polls job at %s", datetime.now().strftime("%H:%M:%S"))
         try:
             from src.models.database import AsyncSessionLocal
             from src.repositories.group_repository import GroupRepository
@@ -145,119 +170,24 @@ class SchedulerService:
                 
                 # Коммитим изменения
                 await session.commit()
-            await self.notification_service.notify_admins(
-                f"🔒 Закрыто опросов: {closed}"
-            )
+            if settings.ENABLE_ADMIN_NOTIFICATIONS:
+                await self.notification_service.notify_admins(
+                    f"🔒 Закрыто опросов: {closed}"
+                )
         except Exception as e:  # noqa: BLE001
             logger.error("Error in close_polls job: %s", e)
-            await self.notification_service.notify_admins(
-                f"🚨 Ошибка при закрытии опросов: {e}"
-            )
+            if settings.ENABLE_ADMIN_NOTIFICATIONS:
+                await self.notification_service.notify_admins(
+                    f"🚨 Ошибка при закрытии опросов: {e}"
+                )
 
     async def _hourly_reminder_job(self) -> None:
-        """Ежечасные напоминания в общий чат с детальной статистикой по слотам."""
-        logger.info("Running hourly reminder job")
-        try:
-            from datetime import datetime, date, timedelta
-            from src.models.database import AsyncSessionLocal
-            from src.repositories.group_repository import GroupRepository
-            from src.repositories.poll_repository import PollRepository
-            
-            now = datetime.now()
-            hours_left = 19 - now.hour
-            
-            if hours_left <= 0:
-                return
-            
-            tomorrow = date.today() + timedelta(days=1)
-            
-            async with AsyncSessionLocal() as session:
-                group_repo = GroupRepository(session)
-                poll_repo = PollRepository(session)
-                groups = await group_repo.get_active_groups()
-                
-                for group in groups:
-                    general_topic_id = getattr(group, "general_chat_topic_id", None)
-                    if not general_topic_id:
-                        continue
-                    
-                    try:
-                        # Получаем опрос на завтра
-                        poll = await poll_repo.get_by_group_and_date(group.id, tomorrow)
-                        if not poll:
-                            continue
-                        
-                        # Получаем слоты опроса
-                        slots = await poll_repo.get_poll_slots(poll.id)
-                        
-                        # Формируем сообщение со статистикой
-                        message_parts = [
-                            f"⏰ <b>До окончания записи на завтра осталось: {hours_left} {self._pluralize_hours(hours_left)}</b>\n",
-                            f"<b>{group.name}</b>\n",
-                        ]
-                        
-                        for slot in slots:
-                            current = slot.current_users
-                            max_users = slot.max_users
-                            # Форматируем время без ведущего нуля для часов
-                            start_hour = slot.start_time.hour
-                            start_min = slot.start_time.strftime('%M')
-                            end_hour = slot.end_time.hour
-                            end_min = slot.end_time.strftime('%M')
-                            # Добавляем "С" перед временем начала только если час >= 10
-                            if start_hour >= 10:
-                                time_range = f"С {start_hour}:{start_min} до {end_hour}:{end_min}"
-                            else:
-                                time_range = f"{start_hour}:{start_min} до {end_hour}:{end_min}"
-                            
-                            if current > max_users:
-                                # Превышение лимита
-                                message_parts.append(
-                                    f"{time_range} - <b>[{current}/{max_users}]</b> ⚠️ превышение лимита, "
-                                    f"отмените голос и проголосуйте за свободный вариант"
-                                )
-                            elif current < max_users:
-                                # Не хватает людей
-                                needed = max_users - current
-                                courier_word = "курьера" if needed == 1 else "курьеров"
-                                message_parts.append(
-                                    f"{time_range} - <b>[{current}/{max_users}]</b> Не хватает {needed} {courier_word}"
-                                )
-                            else:
-                                # Слот заполнен
-                                message_parts.append(
-                                    f"{time_range} - <b>[{current}/{max_users}]</b> ✅ Слот заполнен, выберите свободный слот"
-                                )
-                        
-                        message_text = "\n".join(message_parts)
-                        
-                        # Отправляем стикер (используем эмодзи как стикер через send_message)
-                        try:
-                            # Отправляем эмодзи отдельным сообщением для выделения
-                            await self.bot.send_message(
-                                chat_id=group.telegram_chat_id,
-                                text="⏰",
-                                message_thread_id=general_topic_id,
-                            )
-                        except Exception:
-                            pass  # Если не удалось отправить, продолжаем
-                        
-                        # Отправляем детальное сообщение
-                        await self.bot.send_message(
-                            chat_id=group.telegram_chat_id,
-                            text=message_text,
-                            message_thread_id=general_topic_id,
-                        )
-                        logger.info("Sent hourly reminder with stats to group %s", group.name)
-                    except Exception as e:
-                        logger.error("Error sending reminder to group %s: %s", group.name, e)
-                        
-        except Exception as e:  # noqa: BLE001
-            logger.error("Error in hourly reminder job: %s", e)
-
-    async def _final_reminder_job(self) -> None:
-        """Финальное напоминание в 18:30 с детальной статистикой по слотам."""
-        logger.info("Running final reminder job")
+        """Напоминание в 18:00 - один раз с простым сообщением без статистики."""
+        if not settings.ENABLE_GROUP_REMINDERS:
+            logger.info("Group reminders disabled, skipping reminder job")
+            return
+        
+        logger.info("Running reminder job at 18:00")
         try:
             from datetime import date, timedelta
             from src.models.database import AsyncSessionLocal
@@ -282,73 +212,30 @@ class SchedulerService:
                         if not poll:
                             continue
                         
-                        # Получаем слоты опроса
-                        slots = await poll_repo.get_poll_slots(poll.id)
+                        # Простое сообщение без статистики по слотам
+                        message_text = (
+                            "⏰ <b>Остался один час до конца опроса!</b>\n\n"
+                            f"<b>{group.name}</b>\n\n"
+                            "Пожалуйста, отметьтесь в опросе до 19:00."
+                        )
                         
-                        # Формируем сообщение со статистикой
-                        message_parts = [
-                            "🚨 <b>ФИНАЛЬНОЕ: до конца записи 30 минут!</b>\n",
-                            f"<b>{group.name}</b>\n",
-                        ]
-                        
-                        for slot in slots:
-                            current = slot.current_users
-                            max_users = slot.max_users
-                            # Форматируем время без ведущего нуля для часов
-                            start_hour = slot.start_time.hour
-                            start_min = slot.start_time.strftime('%M')
-                            end_hour = slot.end_time.hour
-                            end_min = slot.end_time.strftime('%M')
-                            # Добавляем "С" перед временем начала только если час >= 10
-                            if start_hour >= 10:
-                                time_range = f"С {start_hour}:{start_min} до {end_hour}:{end_min}"
-                            else:
-                                time_range = f"{start_hour}:{start_min} до {end_hour}:{end_min}"
-                            
-                            if current > max_users:
-                                # Превышение лимита
-                                message_parts.append(
-                                    f"{time_range} - <b>[{current}/{max_users}]</b> ⚠️ превышение лимита, "
-                                    f"отмените голос и проголосуйте за свободный вариант"
-                                )
-                            elif current < max_users:
-                                # Не хватает людей
-                                needed = max_users - current
-                                courier_word = "курьера" if needed == 1 else "курьеров"
-                                message_parts.append(
-                                    f"{time_range} - <b>[{current}/{max_users}]</b> Не хватает {needed} {courier_word}"
-                                )
-                            else:
-                                # Слот заполнен
-                                message_parts.append(
-                                    f"{time_range} - <b>[{current}/{max_users}]</b> ✅ Слот заполнен, выберите свободный слот"
-                                )
-                        
-                        message_text = "\n".join(message_parts)
-                        
-                        # Отправляем стикер (используем эмодзи как стикер через send_message)
-                        try:
-                            # Отправляем эмодзи отдельным сообщением для выделения
-                            await self.bot.send_message(
-                                chat_id=group.telegram_chat_id,
-                                text="🚨",
-                                message_thread_id=general_topic_id,
-                            )
-                        except Exception:
-                            pass  # Если не удалось отправить, продолжаем
-                        
-                        # Отправляем детальное сообщение
+                        # Отправляем сообщение
                         await self.bot.send_message(
                             chat_id=group.telegram_chat_id,
                             text=message_text,
                             message_thread_id=general_topic_id,
                         )
-                        logger.info("Sent final reminder with stats to group %s", group.name)
+                        logger.info("Sent reminder to group %s", group.name)
                     except Exception as e:
-                        logger.error("Error sending final reminder to group %s: %s", group.name, e)
+                        logger.error("Error sending reminder to group %s: %s", group.name, e)
                         
         except Exception as e:  # noqa: BLE001
-            logger.error("Error in final reminder job: %s", e)
+            logger.error("Error in reminder job: %s", e)
+
+    async def _final_reminder_job(self) -> None:
+        """Метод больше не используется - финальное напоминание удалено."""
+        # Финальное напоминание в 18:30 больше не отправляется
+        pass
 
     def _pluralize_hours(self, hours: int) -> str:
         """Правильное склонение слова 'час'."""
@@ -412,7 +299,7 @@ class SchedulerService:
                         issues.append(f"❌ {group.name}: ошибка проверки ({str(e)[:50]})")
             
             # Отправляем уведомления админам, если есть проблемы
-            if issues:
+            if issues and settings.ENABLE_HEALTH_CHECK_NOTIFICATIONS:
                 message = "🔍 <b>Мониторинг состояния опросов</b>\n\n" + "\n".join(issues[:20])
                 if len(issues) > 20:
                     message += f"\n\n... и ещё {len(issues) - 20} проблем"
@@ -422,6 +309,132 @@ class SchedulerService:
                 
         except Exception as e:  # noqa: BLE001
             logger.error("Error in health check job: %s", e)
+
+    async def _check_and_send_warnings_job(self) -> None:
+        """Проверка незаполненных слотов и отправка замечаний курьерам."""
+        if not settings.ENABLE_COURIER_WARNINGS:
+            logger.info("Courier warnings disabled, skipping check_and_send_warnings job")
+            return
+        
+        logger.info("Running check_and_send_warnings job")
+        try:
+            from datetime import date, datetime
+            from src.models.database import AsyncSessionLocal
+            from src.repositories.group_repository import GroupRepository
+            from src.repositories.poll_repository import PollRepository
+            
+            today = date.today()
+            now = datetime.now()
+            current_hour = now.hour
+            is_final = (current_hour == 18 and now.minute >= 30) or current_hour == 19
+            warnings_sent = 0
+            
+            async with AsyncSessionLocal() as session:
+                group_repo = GroupRepository(session)
+                poll_repo = PollRepository(session)
+                
+                poll_service = PollService(
+                    bot=self.bot,
+                    poll_repo=poll_repo,
+                    group_repo=group_repo,
+                    screenshot_service=self.screenshot_service,
+                )
+                
+                # Получаем все активные группы
+                groups = await group_repo.get_active_groups()
+                logger.info("Checking %d groups for warnings", len(groups))
+                
+                for group in groups:
+                    try:
+                        # Получаем активный опрос на сегодня
+                        poll = await poll_repo.get_active_by_group_and_date(group.id, today)
+                        if not poll:
+                            continue
+                        
+                        # Отправляем замечания через метод poll_service
+                        await poll_service._send_warnings_to_couriers(
+                            group=group,
+                            poll_id=str(poll.id),
+                            poll_date=today,
+                            current_hour=current_hour,
+                            is_final=is_final,
+                        )
+                        warnings_sent += 1
+                        logger.info("Sent warnings for group %s", group.name)
+                    except Exception as e:
+                        logger.error("Error sending warnings for group %s: %s", group.name, e)
+                
+                await session.commit()
+            
+            logger.info("Check warnings job completed. Warnings sent: %d", warnings_sent)
+            
+        except Exception as e:  # noqa: BLE001
+            logger.error("Error in check_and_send_warnings job: %s", e, exc_info=True)
+            if settings.ENABLE_ADMIN_NOTIFICATIONS:
+                await self.notification_service.notify_admins(
+                    f"🚨 Ошибка при проверке и отправке замечаний: {e}"
+                )
+    
+    async def _check_screenshots_job(self) -> None:
+        """Метод больше не используется - проверка скриншотов отключена."""
+        # Автоматическая проверка скриншотов больше не выполняется
+        pass
+
+    async def _check_and_close_polls_on_startup(self) -> None:
+        """Проверить и закрыть опросы при старте бота, если время закрытия уже прошло."""
+        try:
+            from datetime import datetime
+            from src.models.database import AsyncSessionLocal
+            from src.repositories.group_repository import GroupRepository
+            from src.repositories.poll_repository import PollRepository
+            
+            # Небольшая задержка, чтобы дать боту полностью запуститься
+            import asyncio
+            await asyncio.sleep(5)
+            
+            from datetime import time
+            now = datetime.now()
+            current_time = now.time()
+            closing_time = time(settings.POLL_CLOSING_HOUR, settings.POLL_CLOSING_MINUTE)
+            
+            # Проверяем только если текущее время после времени закрытия
+            if current_time >= closing_time:
+                logger.info(
+                    "Checking for expired polls on startup (current time: %s, closing time: %s)",
+                    current_time.strftime("%H:%M"),
+                    closing_time.strftime("%H:%M")
+                )
+                
+                async with AsyncSessionLocal() as session:
+                    group_repo = GroupRepository(session)
+                    poll_repo = PollRepository(session)
+                    
+                    poll_service = PollService(
+                        bot=self.bot,
+                        poll_repo=poll_repo,
+                        group_repo=group_repo,
+                        screenshot_service=self.screenshot_service,
+                    )
+                    
+                    closed = await poll_service.close_expired_polls()
+                    await session.commit()
+                    
+                    if closed > 0:
+                        logger.info("✅ Closed %d expired polls on startup", closed)
+                        if settings.ENABLE_ADMIN_NOTIFICATIONS:
+                            await self.notification_service.notify_admins(
+                                f"✅ При запуске закрыто опросов: {closed}"
+                            )
+                    else:
+                        logger.info("No expired polls found on startup")
+            else:
+                logger.info(
+                    "Skipping poll check on startup (current time: %s < closing time: %s)",
+                    current_time.strftime("%H:%M"),
+                    closing_time.strftime("%H:%M")
+                )
+        except Exception as e:  # noqa: BLE001
+            logger.error("Error checking polls on startup: %s", e, exc_info=True)
 
     async def stop(self) -> None:
         self.scheduler.shutdown()

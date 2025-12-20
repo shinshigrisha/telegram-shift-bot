@@ -118,3 +118,4 @@ async def test_require_admin_callback_denied():
     finally:
         settings.ADMIN_IDS = original_admin_ids
 
+

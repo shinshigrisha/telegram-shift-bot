@@ -6,7 +6,8 @@ from unittest.mock import AsyncMock, MagicMock, patch
 from pathlib import Path
 from datetime import date
 
-from aiogram.types import Message, User as TelegramUser, CommandObject
+from aiogram.types import Message, User as TelegramUser
+from aiogram.filters import CommandObject
 from aiogram.fsm.context import FSMContext
 
 from src.handlers.report_handlers import cmd_get_report, cmd_generate_all_reports
@@ -182,4 +183,5 @@ async def test_cmd_generate_all_reports():
         assert "отчет" in call_args.lower() or "report" in call_args.lower()
     finally:
         settings.ADMIN_IDS = original_admin_ids
+
 

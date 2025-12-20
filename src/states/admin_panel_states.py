@@ -13,4 +13,6 @@ class AdminPanelStates(StatesGroup):
     waiting_for_poll_creation_time = State()  # Для ввода времени создания опросов
     waiting_for_poll_closing_time = State()  # Для ввода времени закрытия опросов
     waiting_for_reminder_hours = State()  # Для ввода часов напоминаний
+    waiting_for_manual_screenshots = State()  # Для загрузки скриншотов вручную (ЗИЗ-1 до ЗИЗ-14)
+    waiting_for_target_group_for_screenshots = State()  # Для выбора целевой группы для рассылки скриншотов
 

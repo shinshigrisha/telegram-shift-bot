@@ -37,8 +37,16 @@ async def cmd_start(
     user_id = message.from_user.id
     is_admin = user_id in settings.ADMIN_IDS
     
-    # Проверяем верификацию
-    if user_service and state:
+    # Проверяем, является ли пользователь куратором
+    curator_usernames = ["Korolev_Nikita_20", "Kuznetsova_Olyaa", "Evgeniy_kuznetsoof", "VV_Team_Mascot"]
+    is_curator = False
+    if user.username and user.username.lower() in [c.lower() for c in curator_usernames]:
+        is_curator = True
+    elif user.full_name and ("VV_Team_Mascot" in user.full_name or "VV Team Mascot" in user.full_name):
+        is_curator = True
+    
+    # Проверяем верификацию (только если включена и пользователь не куратор)
+    if settings.ENABLE_VERIFICATION and not is_curator and user_service and state:
         is_verified = await user_service.is_verified(user_id)
         
         if not is_verified:
@@ -151,7 +159,6 @@ async def cmd_setup_ziz(
 async def cmd_list_groups(
     message: Message,
     group_service: GroupService,
-    state: FSMContext | None = None,
 ) -> None:
     """Список всех групп."""
     groups = await group_service.get_all_groups()
@@ -160,15 +167,29 @@ async def cmd_list_groups(
         await message.answer("📭 Нет зарегистрированных групп")
         return
 
+    def clean_group_name_for_display(name: str) -> str:
+        """Очистить название группы от '(тест)' и '(тэст)' для отображения."""
+        if not name:
+            return name
+        import re
+        # Удаляем "(тест)" или "(тэст)" в любом регистре, с пробелами или без
+        cleaned = re.sub(r'\s*\(тест\)\s*', '', name, flags=re.IGNORECASE)
+        cleaned = re.sub(r'\s*\(тэст\)\s*', '', cleaned, flags=re.IGNORECASE)
+        cleaned = re.sub(r'\s*\(test\)\s*', '', cleaned, flags=re.IGNORECASE)
+        return cleaned.strip()
+    
     text = "📋 Список групп:\n\n"
     for group in groups:
         status = "✅" if group.is_active else "❌"
         night = "🌙" if group.is_night else "☀️"
         slots = len(group.get_slots_config())
+        
+        # Очищаем название от "(тест)" для отображения
+        display_name = clean_group_name_for_display(group.name)
 
         topic_info = f" | Topic: {group.telegram_topic_id}" if getattr(group, "telegram_topic_id", None) else ""
         text += (
-            f"{status} {night} <b>{group.name}</b>\n"
+            f"{status} {night} <b>{display_name}</b>\n"
             f"   ID: {group.id} | Chat: {group.telegram_chat_id}{topic_info}\n"
             f"   Слотов: {slots} | Закрытие: {group.poll_close_time}\n\n"
         )
@@ -297,7 +318,7 @@ async def cmd_create_polls(
     group_repo: GroupRepository,
     state: FSMContext | None = None,
 ) -> None:
-    """Создать опросы вручную (для тестирования)."""
+    """Создать опросы вручную."""
     try:
         from src.services.poll_service import PollService
         

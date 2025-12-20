@@ -157,3 +157,4 @@ async def test_get_system_stats():
     assert stats["active_polls"] == 5
     assert stats["today_votes"] == 15
 
+

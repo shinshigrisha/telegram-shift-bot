@@ -1,5 +1,5 @@
 import logging
-from typing import Optional
+from typing import Optional, Any
 
 from aiogram import Router, Bot
 from aiogram.filters import Command, StateFilter
@@ -19,6 +19,33 @@ logger = logging.getLogger(__name__)
 router = Router()
 
 
+def clean_group_name_for_display(name: str) -> str:
+    """Очистить название группы от '(тест)' и '(тэст)' для отображения."""
+    if not name:
+        return name
+    import re
+    # Удаляем "(тест)" или "(тэст)" в любом регистре, с пробелами или без
+    cleaned = re.sub(r'\s*\(тест\)\s*', '', name, flags=re.IGNORECASE)
+    cleaned = re.sub(r'\s*\(тэст\)\s*', '', cleaned, flags=re.IGNORECASE)
+    cleaned = re.sub(r'\s*\(test\)\s*', '', cleaned, flags=re.IGNORECASE)
+    return cleaned.strip()
+
+
+def get_screenshot_service(data: dict | None = None):
+    """Получить screenshot_service из data или создать новый (fallback)."""
+    from src.services.screenshot_service import ScreenshotService
+    
+    # Пытаемся получить из data (должен быть добавлен через middleware)
+    if data and 'screenshot_service' in data:
+        screenshot_service = data.get('screenshot_service')
+        if screenshot_service:
+            return screenshot_service
+    
+    # Если не найден, создаем новый (не инициализирован - будет использован fallback)
+    logger.warning("Screenshot service not found in data, using fallback")
+    return ScreenshotService()  # Не инициализирован, будет использован fallback
+
+
 def get_admin_panel_keyboard() -> InlineKeyboardMarkup:
     """Создать клавиатуру админ-панели."""
     keyboard = [
@@ -28,9 +55,13 @@ def get_admin_panel_keyboard() -> InlineKeyboardMarkup:
         [InlineKeyboardButton(text="📌 Установить тему", callback_data="admin:set_topic_menu")],
         [InlineKeyboardButton(text="📝 Создать опросы вручную", callback_data="admin:create_polls")],
         [InlineKeyboardButton(text="🔄 Пересоздать опросы", callback_data="admin:force_create_polls")],
+        [InlineKeyboardButton(text="🔍 Проверить слоты", callback_data="admin:check_slots")],
         [InlineKeyboardButton(text="📊 Вывести результат", callback_data="admin:show_results")],
         [InlineKeyboardButton(text="🔒 Досрочно закрыть опрос", callback_data="admin:close_poll_early")],
+        [InlineKeyboardButton(text="🔎 Найти и открыть опросы на завтра", callback_data="admin:find_tomorrow_polls")],
+        [InlineKeyboardButton(text="📸 Ручная отправка скриншотов выхода", callback_data="admin:manual_screenshots")],
         [InlineKeyboardButton(text="📢 Рассылка по группам", callback_data="admin:broadcast")],
+        [InlineKeyboardButton(text="🔍 Группы со словом 'в'", callback_data="admin:list_groups_with_v")],
     ]
     return InlineKeyboardMarkup(inline_keyboard=keyboard)
 
@@ -626,7 +657,7 @@ async def callback_set_topic_type(
         for group in groups:
             keyboard_buttons.append([
                 InlineKeyboardButton(
-                    text=group.name,
+                    text=clean_group_name_for_display(group.name),
                     callback_data=f"admin:select_group_topic_{topic_type}_{group.id}",
                 ),
             ])
@@ -958,7 +989,7 @@ async def callback_select_group_for_topic(
         
         await callback.message.edit_text(
             f"✅ <b>Тема установлена!</b>\n\n"
-            f"Группа: <b>{group.name}</b>\n"
+            f"Группа: <b>{clean_group_name_for_display(group.name)}</b>\n"
             f"Тип темы: <b>{display_topic_name}</b>\n"
             f"Topic ID: <b>{topic_id}</b>\n\n"
             "Теперь опросы и уведомления будут отправляться в указанную тему.",
@@ -1078,15 +1109,14 @@ async def callback_create_polls(
     poll_repo: PollRepository,
     group_repo: GroupRepository,
     group_service: GroupService,
+    data: dict,  # type: ignore
 ) -> None:
     """Создать опросы вручную."""
     logger.info("Manual poll creation requested via admin panel")
     await callback.answer("⏳ Создание опросов...")
     
     try:
-        from src.services.screenshot_service import ScreenshotService
-        
-        screenshot_service = ScreenshotService()
+        screenshot_service = get_screenshot_service(data)
         poll_service = PollService(
             bot=bot,
             poll_repo=poll_repo,
@@ -1182,14 +1212,14 @@ async def callback_force_create_polls(
     poll_repo: PollRepository,
     group_repo: GroupRepository,
     group_service: GroupService,
+    data: dict,  # type: ignore
 ) -> None:
     """Принудительно создать опросы (с закрытием существующих)."""
     logger.info("Force poll creation requested via admin panel")
     await callback.answer("⏳ Пересоздание опросов...")
     
     try:
-        from src.services.screenshot_service import ScreenshotService
-        screenshot_service = ScreenshotService()
+        screenshot_service = get_screenshot_service(data)
         
         poll_service = PollService(
             bot=bot,
@@ -1239,6 +1269,106 @@ async def callback_force_create_polls(
         )
 
 
+@router.callback_query(lambda c: c.data == "admin:check_slots")
+@require_admin_callback
+async def callback_check_slots(
+    callback: CallbackQuery,
+    bot: Bot,
+    poll_repo: PollRepository,
+    group_repo: GroupRepository,
+    data: dict,  # type: ignore
+) -> None:
+    """Проверить слоты и отправить замечания курьерам."""
+    logger.info("Check slots requested via admin panel")
+    await callback.answer("⏳ Проверка слотов...")
+    
+    try:
+        from datetime import date
+        
+        screenshot_service = get_screenshot_service(data)
+        poll_service = PollService(
+            bot=bot,
+            poll_repo=poll_repo,
+            group_repo=group_repo,
+            screenshot_service=screenshot_service,
+        )
+        
+        # Получаем все активные группы
+        groups = await group_repo.get_active_groups()
+        if not groups:
+            await callback.message.edit_text(
+                "❌ Нет активных групп для проверки",
+                reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+                    [InlineKeyboardButton(text="◀️ Назад", callback_data="admin:back_to_main")],
+                ]),
+            )
+            return
+        
+        today = date.today()
+        checked_count = 0
+        warnings_sent = 0
+        errors = []
+        
+        # Проверяем каждую группу
+        for group in groups:
+            try:
+                # Получаем активный опрос на сегодня
+                poll = await poll_repo.get_active_by_group_and_date(group.id, today)
+                if not poll:
+                    continue
+                
+                # Отправляем замечания через метод poll_service
+                from datetime import datetime
+                now = datetime.now()
+                current_hour = now.hour
+                is_final = (current_hour == 18 and now.minute >= 30) or current_hour == 19
+                await poll_service._send_warnings_to_couriers(
+                    group=group,
+                    poll_id=str(poll.id),
+                    poll_date=today,
+                    current_hour=current_hour,
+                    is_final=is_final,
+                )
+                checked_count += 1
+                warnings_sent += 1
+                logger.info("Sent warnings for group %s", group.name)
+            except Exception as e:
+                error_msg = f"{group.name}: {str(e)[:50]}"
+                errors.append(error_msg)
+                logger.error("Error checking group %s: %s", group.name, e)
+        
+        # Формируем ответ
+        text = (
+            f"✅ <b>Проверка слотов завершена</b>\n\n"
+            f"Проверено групп: {checked_count}\n"
+            f"Отправлено замечаний: {warnings_sent}"
+        )
+        
+        if errors:
+            text += f"\n\n❌ <b>Ошибки:</b>\n" + "\n".join(f"• {e}" for e in errors[:5])
+            if len(errors) > 5:
+                text += f"\n... и ещё {len(errors) - 5}"
+        
+        if checked_count == 0:
+            text += "\n\n💡 Активных опросов на сегодня не найдено"
+        
+        await callback.message.edit_text(
+            text,
+            reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+                [InlineKeyboardButton(text="◀️ Назад", callback_data="admin:back_to_main")],
+            ]),
+        )
+        
+    except Exception as e:
+        logger.error("Error in check_slots: %s", e, exc_info=True)
+        await callback.message.edit_text(
+            f"❌ <b>Ошибка при проверке слотов</b>\n\n{str(e)}",
+            reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+                [InlineKeyboardButton(text="◀️ Назад", callback_data="admin:back_to_main")],
+            ]),
+        )
+
+
 @router.callback_query(lambda c: c.data == "admin:show_results")
 @require_admin_callback
 async def callback_show_results(
@@ -1246,7 +1376,7 @@ async def callback_show_results(
     state: FSMContext,
     group_service: GroupService,
 ) -> None:
-    """Вывести результаты опроса (тестовая функция)."""
+    """Вывести результаты опроса."""
     groups = await group_service.get_all_groups()
     if not groups:
         await callback.answer("❌ Нет зарегистрированных групп", show_alert=True)
@@ -1254,9 +1384,11 @@ async def callback_show_results(
     
     keyboard_buttons = []
     for group in groups:
+        # Очищаем название от "(тест)" для отображения
+        display_name = clean_group_name_for_display(group.name)
         keyboard_buttons.append([
             InlineKeyboardButton(
-                text=group.name,
+                text=display_name,
                 callback_data=f"admin:show_results_group_{group.id}",
             ),
         ])
@@ -1273,6 +1405,568 @@ async def callback_show_results(
     await callback.answer()
 
 
+@router.callback_query(lambda c: c.data == "admin:find_tomorrow_polls")
+@require_admin_callback
+async def callback_find_tomorrow_polls(
+    callback: CallbackQuery,
+    bot: Bot,
+    poll_repo: PollRepository,
+    group_repo: GroupRepository,
+    **kwargs: Any,
+) -> None:
+    """Найти и открыть все опросы на завтра с результатами."""
+    logger.info("Find tomorrow polls requested via admin panel")
+    await callback.answer("⏳ Поиск и открытие опросов на завтра...")
+    
+    try:
+        from datetime import date, timedelta
+        from aiogram.types import FSInputFile
+        
+        tomorrow = date.today() + timedelta(days=1)
+        # Получаем screenshot_service из bot.data (добавлен в setup_bot)
+        screenshot_service = None
+        if hasattr(bot, "data") and bot.data and "screenshot_service" in bot.data:
+            screenshot_service = bot.data["screenshot_service"]
+        if not screenshot_service:
+            screenshot_service = get_screenshot_service(None)
+        
+        poll_service = PollService(
+            bot=bot,
+            poll_repo=poll_repo,
+            group_repo=group_repo,
+            screenshot_service=screenshot_service,
+        )
+        
+        # Получаем все активные группы
+        groups = await group_repo.get_active_groups()
+        if not groups:
+            await callback.message.edit_text(
+                "❌ Нет активных групп",
+                reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+                    [InlineKeyboardButton(text="◀️ Назад", callback_data="admin:back_to_main")],
+                ]),
+            )
+            return
+        
+        found_count = 0
+        opened_count = 0
+        errors = []
+        
+        # Проверяем опросы в БД и создаем для них отчеты
+        await callback.message.edit_text("⏳ Проверка опросов в базе данных...")
+        
+        for group in groups:
+            try:
+                # Проверяем, есть ли опрос в БД
+                existing_poll = await poll_repo.get_by_group_and_date(group.id, tomorrow)
+                
+                if not existing_poll:
+                    # Пытаемся найти опрос в БД (может быть уже синхронизирован ранее)
+                    logger.info("Опрос не найден в БД для группы %s", group.name)
+                    # Примечание: автоматический поиск в Telegram ограничен API
+                    # Используйте скрипт sync_polls_from_telegram.py для синхронизации
+                    continue
+                
+                if existing_poll:
+                    found_count += 1
+                    # Открываем результаты опроса
+                    admin_id = callback.from_user.id
+                    date_str = tomorrow.strftime("%d.%m.%Y")
+                    report_sent = False
+                    
+                    try:
+                        # Получаем текстовый отчет (используем UUID объект напрямую)
+                        text_report = await poll_service.get_poll_results_text(str(existing_poll.id))
+                        
+                        # Создаем скриншот
+                        screenshot_path = None
+                        if screenshot_service and existing_poll.telegram_message_id:
+                            try:
+                                # Используем UUID объект напрямую, не строку
+                                poll_with_data = await poll_repo.get_poll_with_votes_and_users(existing_poll.id)
+                                poll_slots_data = []
+                                if poll_with_data and hasattr(poll_with_data, 'poll_slots'):
+                                    for slot in poll_with_data.poll_slots:
+                                        poll_slots_data.append({'slot': slot})
+                                
+                                screenshot_path = await screenshot_service.create_poll_screenshot(
+                                    bot=bot,
+                                    chat_id=group.telegram_chat_id,
+                                    message_id=existing_poll.telegram_message_id,
+                                    group_name=group.name,
+                                    poll_date=tomorrow,
+                                    poll_results_text=text_report,
+                                    poll_slots_data=poll_slots_data,
+                                )
+                            except Exception as screenshot_error:
+                                logger.warning("Не удалось создать скриншот для %s: %s", group.name, screenshot_error)
+                        
+                        # Пытаемся отправить скриншот, если он есть
+                        if screenshot_path and screenshot_path.exists():
+                            # Проверяем расширение файла - если это .txt, это текстовый отчет
+                            if screenshot_path.suffix.lower() == '.txt':
+                                logger.info("Text report file detected for %s, reading content", group.name)
+                                try:
+                                    # Читаем содержимое текстового файла
+                                    with open(screenshot_path, 'r', encoding='utf-8') as f:
+                                        file_content = f.read()
+                                    
+                                    # Отправляем текстовый отчет
+                                    report_text = (
+                                        f"📊 <b>Результаты опроса на {date_str}</b>\n"
+                                        f"Группа: <b>{group.name}</b>\n\n"
+                                        f"{file_content}"
+                                    )
+                                    await bot.send_message(
+                                        chat_id=admin_id,
+                                        text=report_text,
+                                        parse_mode="HTML",
+                                    )
+                                    report_sent = True
+                                    logger.info("Successfully sent text report from file for %s", group.name)
+                                except Exception as txt_error:
+                                    logger.error("Failed to read/send text report from file for %s: %s", group.name, txt_error, exc_info=True)
+                            else:
+                                # Это изображение - пытаемся отправить как фото
+                                try:
+                                    # Проверяем размер файла (Telegram ограничивает до 10MB для фото)
+                                    file_size = screenshot_path.stat().st_size
+                                    if file_size > 10 * 1024 * 1024:  # Больше 10MB
+                                        logger.warning("Screenshot file too large (%d bytes) for %s, sending text report", file_size, group.name)
+                                    elif file_size == 0:
+                                        logger.warning("Screenshot file is empty for %s, sending text report", group.name)
+                                    else:
+                                        # Проверяем, что файл является валидным изображением
+                                        try:
+                                            from PIL import Image
+                                            with Image.open(screenshot_path) as img:
+                                                img.verify()  # Проверяем валидность изображения
+                                            # Переоткрываем после verify (verify закрывает файл)
+                                            with Image.open(screenshot_path) as img:
+                                                img.load()  # Загружаем данные
+                                        except Exception as img_error:
+                                            logger.error("Invalid image file for %s: %s, sending text report", group.name, img_error)
+                                        else:
+                                            # Отправляем скриншот
+                                            photo = FSInputFile(str(screenshot_path))
+                                            caption = (
+                                                f"📊 <b>Результаты опроса на {date_str}</b>\n"
+                                                f"Группа: <b>{group.name}</b>\n\n"
+                                                f"{text_report}"
+                                            )
+                                            await bot.send_photo(
+                                                chat_id=admin_id,
+                                                photo=photo,
+                                                caption=caption,
+                                                parse_mode="HTML",
+                                            )
+                                            report_sent = True
+                                            logger.info("Successfully sent screenshot for %s", group.name)
+                                except Exception as photo_error:
+                                    logger.error("Failed to send photo for %s: %s", group.name, photo_error, exc_info=True)
+                        
+                        # Всегда отправляем текстовый отчет, даже если скриншот был отправлен
+                        # Это гарантирует, что данные всегда будут доступны
+                        try:
+                            report_text = (
+                                f"📊 <b>Результаты опроса на {date_str}</b>\n"
+                                f"Группа: <b>{group.name}</b>\n\n"
+                                f"{text_report}"
+                            )
+                            await bot.send_message(
+                                chat_id=admin_id,
+                                text=report_text,
+                                parse_mode="HTML",
+                            )
+                            report_sent = True
+                            logger.info("Sent text report for %s", group.name)
+                        except Exception as send_error:
+                            logger.error("Failed to send text report for %s: %s", group.name, send_error, exc_info=True)
+                            if not report_sent:  # Если и скриншот не был отправлен
+                                errors.append(f"{group.name} - ошибка отправки текстового отчета: {str(send_error)[:50]}")
+                        
+                        if report_sent:
+                            opened_count += 1
+                            logger.info("Открыты результаты опроса для группы %s", group.name)
+                        else:
+                            errors.append(f"{group.name} - не удалось отправить отчет")
+                        
+                    except Exception as open_error:
+                        error_msg = str(open_error)
+                        logger.error("Ошибка при открытии результатов для %s: %s", group.name, open_error, exc_info=True)
+                        
+                        # Пытаемся отправить хотя бы базовую информацию об ошибке
+                        try:
+                            error_text = (
+                                f"❌ <b>Ошибка при получении результатов для {group.name}</b>\n"
+                                f"Дата: {date_str}\n\n"
+                                f"Ошибка: {error_msg[:200]}"
+                            )
+                            await bot.send_message(
+                                chat_id=admin_id,
+                                text=error_text,
+                                parse_mode="HTML",
+                            )
+                        except Exception:
+                            pass
+                        
+                        # Формируем более информативное сообщение об ошибке
+                        if "IMAGE_PROCESS" in error_msg:
+                            error_desc = "ошибка обработки изображения (скриншот)"
+                        elif "Bad Request" in error_msg:
+                            error_desc = "ошибка отправки в Telegram"
+                        else:
+                            error_desc = f"ошибка: {error_msg[:30]}"
+                        
+                        errors.append(f"{group.name} - {error_desc}")
+                        # Продолжаем обработку других групп
+                        continue
+                        
+            except Exception as e:
+                logger.error("Ошибка при обработке группы %s: %s", group.name, e, exc_info=True)
+                errors.append(f"{group.name} - ошибка: {str(e)[:50]}")
+                # Продолжаем обработку других групп
+                continue
+        
+        # Формируем итоговое сообщение
+        result_text = (
+            f"✅ <b>Поиск и открытие опросов завершено</b>\n\n"
+            f"📅 Дата: {tomorrow.strftime('%d.%m.%Y')}\n\n"
+            f"📊 Найдено опросов в БД: {found_count}\n"
+            f"📸 Открыто результатов: {opened_count}"
+        )
+        
+        if found_count < len(groups):
+            missing_count = len(groups) - found_count
+            result_text += (
+                f"\n\n⚠️ <b>Не найдено опросов: {missing_count}</b>\n"
+                f"Если опросы есть в Telegram, но отсутствуют в БД, "
+                f"используйте скрипт:\n"
+                f"<code>python scripts/sync_polls_from_telegram.py</code>"
+            )
+        
+        if errors:
+            result_text += f"\n\n❌ <b>Ошибки:</b>\n" + "\n".join(f"• {e}" for e in errors[:5])
+            if len(errors) > 5:
+                result_text += f"\n... и ещё {len(errors) - 5}"
+        
+        keyboard = InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text="◀️ Назад", callback_data="admin:back_to_main")],
+        ])
+        
+        await callback.message.edit_text(result_text, reply_markup=keyboard)
+        
+    except Exception as e:
+        logger.error("Error finding tomorrow polls: %s", e, exc_info=True)
+        await callback.message.edit_text(
+            f"❌ Ошибка при поиске опросов: {str(e)[:200]}",
+            reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+                [InlineKeyboardButton(text="◀️ Назад", callback_data="admin:back_to_main")],
+            ]),
+        )
+
+
+@router.callback_query(lambda c: c.data == "admin:manual_screenshots")
+@require_admin_callback
+async def callback_manual_screenshots(
+    callback: CallbackQuery,
+    state: FSMContext,
+    group_repo: GroupRepository,
+) -> None:
+    """Начать процесс ручной загрузки скриншотов выхода."""
+    logger.info("Manual screenshots upload requested")
+    await callback.answer("⏳ Начинаем загрузку скриншотов...")
+    
+    # Список групп ЗИЗ-1 до ЗИЗ-14
+    ziz_groups = [f"ЗИЗ-{i}" for i in range(1, 15)]
+    
+    # Проверяем, какие группы существуют
+    existing_groups = []
+    for ziz_name in ziz_groups:
+        group = await group_repo.get_by_name(ziz_name)
+        if group:
+            existing_groups.append(ziz_name)
+    
+    if not existing_groups:
+        await callback.message.edit_text(
+            "❌ Не найдено групп ЗИЗ-1 до ЗИЗ-14",
+            reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+                [InlineKeyboardButton(text="◀️ Назад", callback_data="admin:back_to_main")],
+            ]),
+        )
+        return
+    
+    # Инициализируем состояние
+    await state.update_data(
+        screenshots={},  # Словарь: {group_name: file_id}
+        groups_to_process=existing_groups.copy(),
+        current_group_index=0,
+        last_message_id=callback.message.message_id,  # Сохраняем ID исходного сообщения для обновления
+    )
+    
+    # Запрашиваем первый скриншот
+    first_group = existing_groups[0]
+    text = (
+        f"📸 <b>Ручная отправка скриншотов выхода</b>\n\n"
+        f"Отправьте скриншот для группы: <b>{first_group}</b>\n\n"
+        f"Осталось: {len(existing_groups)} групп\n"
+        f"Прогресс: 0/{len(existing_groups)}"
+    )
+    
+    keyboard = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="❌ Отменить", callback_data="admin:cancel_manual_screenshots")],
+    ])
+    
+    await callback.message.edit_text(text, reply_markup=keyboard)
+    await state.set_state(AdminPanelStates.waiting_for_manual_screenshots)
+
+
+@router.callback_query(lambda c: c.data == "admin:cancel_manual_screenshots")
+@require_admin_callback
+async def callback_cancel_manual_screenshots(
+    callback: CallbackQuery,
+    state: FSMContext,
+) -> None:
+    """Отменить процесс загрузки скриншотов."""
+    await state.clear()
+    await callback.message.edit_text(
+        "❌ Загрузка скриншотов отменена",
+        reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text="◀️ Назад", callback_data="admin:back_to_main")],
+        ]),
+    )
+    await callback.answer()
+
+
+@router.message(StateFilter(AdminPanelStates.waiting_for_manual_screenshots))
+async def process_manual_screenshot(
+    message: Message,
+    state: FSMContext,
+    bot: Bot,
+    group_repo: GroupRepository,
+) -> None:
+    """Обработка загруженного скриншота."""
+    # Проверяем, что это фото
+    if not message.photo:
+        await message.answer("❌ Пожалуйста, отправьте фото (скриншот)")
+        return
+    
+    data = await state.get_data()
+    screenshots = data.get("screenshots", {})
+    groups_to_process = data.get("groups_to_process", [])
+    current_group_index = data.get("current_group_index", 0)
+    last_message_id = data.get("last_message_id")
+    
+    if current_group_index >= len(groups_to_process):
+        await message.answer("❌ Все скриншоты уже получены")
+        return
+    
+    # Получаем текущую группу
+    current_group_name = groups_to_process[current_group_index]
+    
+    # Сохраняем file_id самого большого фото
+    largest_photo = message.photo[-1]  # Последний элемент - самое большое фото
+    screenshots[current_group_name] = largest_photo.file_id
+    
+    # Увеличиваем индекс
+    current_group_index += 1
+    
+    # Обновляем состояние
+    await state.update_data(
+        screenshots=screenshots,
+        current_group_index=current_group_index,
+    )
+    
+    # Отправляем уведомление об успешной загрузке
+    await message.answer(f"✅ Скриншот для <b>{current_group_name}</b> успешно загружен!", parse_mode="HTML")
+    
+    # Проверяем, все ли скриншоты получены
+    if current_group_index >= len(groups_to_process):
+        # Все скриншоты получены, запрашиваем целевую группу
+        text = (
+            f"✅ <b>Все скриншоты получены!</b>\n\n"
+            f"Получено скриншотов: {len(screenshots)}\n\n"
+            f"Теперь выберите группу для рассылки скриншотов:"
+        )
+        
+        # Получаем список активных групп для выбора
+        groups = await group_repo.get_active_groups()
+        keyboard_buttons = []
+        for group in groups:
+            keyboard_buttons.append([
+                InlineKeyboardButton(
+                    text=clean_group_name_for_display(group.name),
+                    callback_data=f"admin:send_screenshots_to_{group.id}"
+                )
+            ])
+        keyboard_buttons.append([
+            InlineKeyboardButton(text="❌ Отменить", callback_data="admin:cancel_manual_screenshots")
+        ])
+        
+        keyboard = InlineKeyboardMarkup(inline_keyboard=keyboard_buttons)
+        
+        # Обновляем исходное сообщение, если есть его ID
+        if last_message_id:
+            try:
+                await bot.edit_message_text(
+                    chat_id=message.chat.id,
+                    message_id=last_message_id,
+                    text=text,
+                    reply_markup=keyboard,
+                )
+            except Exception as e:
+                logger.warning("Не удалось обновить сообщение, отправляем новое: %s", e)
+                await message.answer(text, reply_markup=keyboard)
+        else:
+            await message.answer(text, reply_markup=keyboard)
+        
+        await state.set_state(AdminPanelStates.waiting_for_target_group_for_screenshots)
+    else:
+        # Запрашиваем следующий скриншот
+        next_group_name = groups_to_process[current_group_index]
+        remaining = len(groups_to_process) - current_group_index
+        text = (
+            f"📸 <b>Ручная отправка скриншотов выхода</b>\n\n"
+            f"✅ Скриншот для <b>{current_group_name}</b> получен\n\n"
+            f"Отправьте скриншот для группы: <b>{next_group_name}</b>\n\n"
+            f"Осталось: {remaining} групп\n"
+            f"Прогресс: {current_group_index}/{len(groups_to_process)}"
+        )
+        
+        keyboard = InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text="❌ Отменить", callback_data="admin:cancel_manual_screenshots")],
+        ])
+        
+        # Обновляем исходное сообщение, если есть его ID
+        if last_message_id:
+            try:
+                await bot.edit_message_text(
+                    chat_id=message.chat.id,
+                    message_id=last_message_id,
+                    text=text,
+                    reply_markup=keyboard,
+                )
+            except Exception as e:
+                logger.warning("Не удалось обновить сообщение, отправляем новое: %s", e)
+                sent_msg = await message.answer(text, reply_markup=keyboard)
+                # Сохраняем ID нового сообщения
+                await state.update_data(last_message_id=sent_msg.message_id)
+        else:
+            sent_msg = await message.answer(text, reply_markup=keyboard)
+            # Сохраняем ID нового сообщения
+            await state.update_data(last_message_id=sent_msg.message_id)
+
+
+@router.callback_query(lambda c: c.data.startswith("admin:send_screenshots_to_"))
+@require_admin_callback
+async def callback_send_screenshots_to_group(
+    callback: CallbackQuery,
+    state: FSMContext,
+    bot: Bot,
+    group_repo: GroupRepository,
+) -> None:
+    """Отправить все скриншоты в выбранную группу."""
+    group_id = int(callback.data.split("_")[-1])
+    group = await group_repo.get_by_id(group_id)
+    
+    if not group:
+        await callback.answer("❌ Группа не найдена", show_alert=True)
+        return
+    
+    data = await state.get_data()
+    screenshots = data.get("screenshots", {})
+    
+    if not screenshots:
+        await callback.answer("❌ Нет скриншотов для отправки", show_alert=True)
+        return
+    
+    # Получаем topic_id для темы "отметка на слот"
+    topic_id = getattr(group, "telegram_topic_id", None)
+    
+    if not topic_id:
+        await callback.answer(
+            "❌ У группы не настроена тема 'отметка на слот'",
+            show_alert=True
+        )
+        return
+    
+    await callback.answer("⏳ Отправка скриншотов...")
+    
+    # Отправляем все скриншоты
+    sent_count = 0
+    errors = []
+    
+    for group_name, file_id in screenshots.items():
+        try:
+            # Проверяем права бота в группе перед отправкой
+            try:
+                bot_member = await bot.get_chat_member(group.telegram_chat_id, bot.id)
+                if bot_member.status not in ["administrator", "member"]:
+                    errors.append(f"{group_name}: бот не является участником группы")
+                    continue
+            except Exception as check_error:
+                error_msg = str(check_error).lower()
+                if "forbidden" in error_msg or "chat not found" in error_msg:
+                    errors.append(f"{group_name}: бот не имеет доступа к группе")
+                    continue
+                logger.warning("Не удалось проверить права бота для %s: %s", group_name, check_error)
+            
+            # Пытаемся отправить в тему
+            try:
+                await bot.send_photo(
+                    chat_id=group.telegram_chat_id,
+                    photo=file_id,
+                    caption=f"📊 Скриншот выхода: {group_name}",
+                    message_thread_id=topic_id,
+                )
+                sent_count += 1
+                logger.info("Отправлен скриншот %s в группу %s (тема %s)", group_name, group.name, topic_id)
+            except Exception as topic_error:
+                error_msg = str(topic_error).lower()
+                # Если ошибка связана с темой, пробуем отправить в общий чат
+                if "topic not found" in error_msg or "message thread not found" in error_msg:
+                    logger.warning("Тема %s не найдена для %s, пробуем отправить в общий чат", topic_id, group_name)
+                    try:
+                        await bot.send_photo(
+                            chat_id=group.telegram_chat_id,
+                            photo=file_id,
+                            caption=f"📊 Скриншот выхода: {group_name}",
+                        )
+                        sent_count += 1
+                        logger.info("Отправлен скриншот %s в группу %s (общий чат)", group_name, group.name)
+                    except Exception as general_error:
+                        logger.error("Ошибка при отправке скриншота %s в общий чат: %s", group_name, general_error)
+                        errors.append(f"{group_name}: {str(general_error)[:50]}")
+                elif "forbidden" in error_msg:
+                    errors.append(f"{group_name}: нет прав на отправку в группу/тему")
+                else:
+                    logger.error("Ошибка при отправке скриншота %s: %s", group_name, topic_error)
+                    errors.append(f"{group_name}: {str(topic_error)[:50]}")
+        except Exception as e:
+            logger.error("Неожиданная ошибка при отправке скриншота %s: %s", group_name, e, exc_info=True)
+            errors.append(f"{group_name}: {str(e)[:50]}")
+    
+    # Формируем итоговое сообщение
+    result_text = (
+        f"✅ <b>Рассылка скриншотов завершена</b>\n\n"
+        f"Группа: <b>{group.name}</b>\n"
+        f"Тема: Отметка на слот\n\n"
+        f"Отправлено: {sent_count} из {len(screenshots)}"
+    )
+    
+    if errors:
+        result_text += f"\n\n❌ <b>Ошибки:</b>\n" + "\n".join(f"• {e}" for e in errors[:5])
+        if len(errors) > 5:
+            result_text += f"\n... и ещё {len(errors) - 5}"
+    
+    keyboard = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="◀️ Назад", callback_data="admin:back_to_main")],
+    ])
+    
+    await callback.message.edit_text(result_text, reply_markup=keyboard)
+    await state.clear()
+
+
 @router.callback_query(lambda c: c.data.startswith("admin:show_results_group_"))
 @require_admin_callback
 async def callback_show_results_for_group(
@@ -1280,6 +1974,7 @@ async def callback_show_results_for_group(
     bot: Bot,
     poll_repo: PollRepository,
     group_repo: GroupRepository,
+    data: dict,  # type: ignore
 ) -> None:
     """Вывести результаты опроса для выбранной группы."""
     group_id = int(callback.data.split("_")[-1])
@@ -1287,7 +1982,6 @@ async def callback_show_results_for_group(
     
     try:
         from datetime import date
-        from src.services.screenshot_service import ScreenshotService
         
         group = await group_repo.get_by_id(group_id)
         if not group:
@@ -1299,7 +1993,7 @@ async def callback_show_results_for_group(
         
         if not poll:
             await callback.message.edit_text(
-                f"❌ Опрос для группы <b>{group.name}</b> за {today.strftime('%d.%m.%Y')} не найден",
+                f"❌ Опрос для группы <b>{clean_group_name_for_display(group.name)}</b> за {today.strftime('%d.%m.%Y')} не найден",
                 reply_markup=InlineKeyboardMarkup(inline_keyboard=[
                     [InlineKeyboardButton(text="◀️ Назад", callback_data="admin:back_to_main")],
                 ]),
@@ -1307,15 +2001,24 @@ async def callback_show_results_for_group(
             return
         
         # Пытаемся создать скриншот
-        screenshot_service = ScreenshotService()
+        screenshot_service = get_screenshot_service(data)
         screenshot_path = None
         
         try:
+            # Получаем данные слотов с пользователями для добавления имен на скриншот
+            poll_with_data = await poll_repo.get_poll_with_votes_and_users(str(poll.id))
+            poll_slots_data = []
+            if poll_with_data and hasattr(poll_with_data, 'poll_slots'):
+                for slot in poll_with_data.poll_slots:
+                    poll_slots_data.append({'slot': slot})
+            
             screenshot_path = await screenshot_service.create_poll_screenshot(
+                bot=bot,
                 chat_id=group.telegram_chat_id,
                 message_id=poll.telegram_message_id,
                 group_name=group.name,
                 poll_date=today,
+                poll_slots_data=poll_slots_data,
             )
         except Exception as e:
             logger.warning("Failed to create screenshot: %s", e)
@@ -1327,7 +2030,7 @@ async def callback_show_results_for_group(
             await bot.send_photo(
                 chat_id=callback.message.chat.id,
                 photo=photo,
-                caption=f"📊 Результаты опроса для {group.name} за {today.strftime('%d.%m.%Y')}",
+                caption=f"📊 Результаты опроса для {clean_group_name_for_display(group.name)} за {today.strftime('%d.%m.%Y')}",
             )
             text = "✅ Скриншот отправлен"
         else:
@@ -1339,10 +2042,10 @@ async def callback_show_results_for_group(
                 group_repo=group_repo,
                 screenshot_service=screenshot_service,
             )
-            results_text = await poll_service.get_poll_results_text(poll.id)
+            results_text = await poll_service.get_poll_results_text(str(poll.id))
             text = (
                 f"📊 <b>Результаты опроса</b>\n\n"
-                f"Группа: <b>{group.name}</b>\n"
+                f"Группа: <b>{clean_group_name_for_display(group.name)}</b>\n"
                 f"Дата: {today.strftime('%d.%m.%Y')}\n\n"
                 f"{results_text}"
             )
@@ -1357,6 +2060,60 @@ async def callback_show_results_for_group(
         logger.error("Error showing results: %s", e, exc_info=True)
         await callback.message.edit_text(
             f"❌ Ошибка: {e}",
+            reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+                [InlineKeyboardButton(text="◀️ Назад", callback_data="admin:back_to_main")],
+            ]),
+        )
+
+
+@router.callback_query(lambda c: c.data == "admin:list_groups_with_v")
+@require_admin_callback
+async def callback_list_groups_with_v(
+    callback: CallbackQuery,
+    group_repo: GroupRepository,
+) -> None:
+    """Вывести все группы, в названии которых есть слово 'в'."""
+    await callback.answer("⏳ Поиск групп...")
+    
+    try:
+        # Получаем все активные группы
+        all_groups = await group_repo.get_active_groups()
+        
+        # Фильтруем группы, в названии которых есть буква "в" (в любом месте)
+        groups_with_v = [group for group in all_groups if "в" in group.name.lower()]
+        
+        if not groups_with_v:
+            text = "❌ <b>Группы со словом 'в' не найдены</b>"
+            keyboard = InlineKeyboardMarkup(inline_keyboard=[
+                [InlineKeyboardButton(text="◀️ Назад", callback_data="admin:back_to_main")],
+            ])
+            await callback.message.edit_text(text, reply_markup=keyboard)
+            return
+        
+        # Формируем список групп
+        groups_list = []
+        for i, group in enumerate(groups_with_v, 1):
+            status = "✅ Активна" if group.is_active else "❌ Неактивна"
+            # Очищаем название от "(тест)" для отображения
+            display_name = clean_group_name_for_display(group.name)
+            groups_list.append(f"{i}. <b>{display_name}</b> - {status}")
+        
+        text = (
+            f"🔍 <b>Группы со словом 'в' в названии</b>\n\n"
+            f"Найдено групп: <b>{len(groups_with_v)}</b>\n\n"
+            + "\n".join(groups_list)
+        )
+        
+        keyboard = InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text="◀️ Назад", callback_data="admin:back_to_main")],
+        ])
+        
+        await callback.message.edit_text(text, reply_markup=keyboard)
+        
+    except Exception as e:
+        logger.error("Error listing groups with 'в': %s", e, exc_info=True)
+        await callback.message.edit_text(
+            f"❌ Ошибка при поиске групп: {str(e)[:200]}",
             reply_markup=InlineKeyboardMarkup(inline_keyboard=[
                 [InlineKeyboardButton(text="◀️ Назад", callback_data="admin:back_to_main")],
             ]),
@@ -1404,6 +2161,7 @@ async def callback_close_poll_for_group(
     bot: Bot,
     poll_repo: PollRepository,
     group_repo: GroupRepository,
+    data: dict,  # type: ignore
 ) -> None:
     """Досрочно закрыть опрос для выбранной группы."""
     group_id = int(callback.data.split("_")[-1])
@@ -1411,7 +2169,6 @@ async def callback_close_poll_for_group(
     
     try:
         from datetime import date, datetime
-        from src.services.screenshot_service import ScreenshotService
         
         group = await group_repo.get_by_id(group_id)
         if not group:
@@ -1440,15 +2197,24 @@ async def callback_close_poll_for_group(
         await poll_repo.update(poll.id, status="closed", closed_at=now)
         
         # Создаем скриншот и отправляем
-        screenshot_service = ScreenshotService()
+        screenshot_service = get_screenshot_service(data)
         screenshot_path = None
         
         try:
+            # Получаем данные слотов с пользователями для добавления имен на скриншот
+            poll_with_data = await poll_repo.get_poll_with_votes_and_users(str(poll.id))
+            poll_slots_data = []
+            if poll_with_data and hasattr(poll_with_data, 'poll_slots'):
+                for slot in poll_with_data.poll_slots:
+                    poll_slots_data.append({'slot': slot})
+            
             screenshot_path = await screenshot_service.create_poll_screenshot(
+                bot=bot,
                 chat_id=group.telegram_chat_id,
                 message_id=poll.telegram_message_id,
                 group_name=group.name,
                 poll_date=today,
+                poll_slots_data=poll_slots_data,
             )
             if screenshot_path:
                 await poll_repo.update(poll.id, screenshot_path=str(screenshot_path))
@@ -1472,7 +2238,7 @@ async def callback_close_poll_for_group(
         
         text = (
             f"✅ <b>Опрос закрыт досрочно</b>\n\n"
-            f"Группа: <b>{group.name}</b>\n"
+            f"Группа: <b>{clean_group_name_for_display(group.name)}</b>\n"
             f"Дата: {today.strftime('%d.%m.%Y')}\n"
         )
         

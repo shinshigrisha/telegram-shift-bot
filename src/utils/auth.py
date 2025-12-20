@@ -43,6 +43,8 @@ def require_admin_callback(func: Callable) -> Callable:
             await callback.answer("⛔ У вас нет прав для выполнения этой команды", show_alert=True)
             return
 
+        # Передаем все kwargs, включая data от middleware
+        # В aiogram 3.x dependency injection работает автоматически через типы параметров
         return await func(callback, *args, **kwargs)
 
     return wrapper

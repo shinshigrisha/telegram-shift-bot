@@ -142,3 +142,4 @@ async def test_process_last_name_verification_failed():
     assert "Ошибка" in call_args or "ошибка" in call_args.lower()
     mock_state.clear.assert_not_called()
 
+

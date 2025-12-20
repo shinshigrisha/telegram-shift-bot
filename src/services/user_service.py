@@ -18,7 +18,7 @@ class UserService:
         last_name: Optional[str] = None,
         username: Optional[str] = None,
     ) -> User:
-        """Получить пользователя или создать нового."""
+        """Получить пользователя или создать нового. Обновляет данные, если пользователь уже существует."""
         user = await self.user_repo.get_by_id(user_id)
         if not user:
             user = await self.user_repo.create(
@@ -28,6 +28,20 @@ class UserService:
                 username=username,
             )
             await self.session.commit()
+        else:
+            # Обновляем данные пользователя, если они изменились
+            updated = False
+            if first_name is not None and user.first_name != first_name:
+                user.first_name = first_name
+                updated = True
+            if last_name is not None and user.last_name != last_name:
+                user.last_name = last_name
+                updated = True
+            if username is not None and user.username != username:
+                user.username = username
+                updated = True
+            if updated:
+                await self.session.commit()
         return user
 
     async def verify_user(self, user_id: int, first_name: str, last_name: str) -> Optional[User]:

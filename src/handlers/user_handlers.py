@@ -41,8 +41,8 @@ def get_admin_commands() -> str:
    • ⏰ Настройка автоматического расписания
    • 📌 Установить тему (3 типа тем)
    • 📝 Создать опросы вручную
-   • 📊 Вывести результат (тест)
-   • 🔒 Досрочно закрыть опрос (тест)
+   • 📊 Вывести результат
+   • 🔒 Досрочно закрыть опрос
 
 📝 <b>Управление группами:</b>
 ➕ <b>/add_group</b> - Добавить новую группу
@@ -62,7 +62,7 @@ def get_admin_commands() -> str:
 🔍 <b>/get_topic_id</b> - Показать topic_id из контекста
 
 📊 <b>Опросы и отчеты:</b>
-📝 <b>/create_polls</b> - Создать опросы вручную (для тестирования)
+📝 <b>/create_polls</b> - Создать опросы вручную
 📄 <b>/get_report</b> - Получить отчет по группе
    Использование: /get_report ЗИЗ-1 [дата ДД.ММ.ГГГГ]
 
@@ -124,14 +124,26 @@ async def cmd_my_votes(
         return
     
     user_id = message.from_user.id
-    is_verified = await user_service.is_verified(user_id)
+    user = message.from_user
     
-    if not is_verified:
-        await message.answer(
-            "❌ Для просмотра ваших голосов необходимо пройти верификацию.\n\n"
-            "Пожалуйста, используйте команду /start для начала работы."
-        )
-        return
+    # Проверяем, является ли пользователь куратором
+    curator_usernames = ["Korolev_Nikita_20", "Kuznetsova_Olyaa", "Evgeniy_kuznetsoof", "VV_Team_Mascot"]
+    is_curator = False
+    if user.username and user.username.lower() in [c.lower() for c in curator_usernames]:
+        is_curator = True
+    elif user.full_name and ("VV_Team_Mascot" in user.full_name or "VV Team Mascot" in user.full_name):
+        is_curator = True
+    
+    # Проверяем верификацию только если она включена и пользователь не куратор
+    if settings.ENABLE_VERIFICATION and not is_curator:
+        is_verified = await user_service.is_verified(user_id)
+        
+        if not is_verified:
+            await message.answer(
+                "❌ Для просмотра ваших голосов необходимо пройти верификацию.\n\n"
+                "Пожалуйста, используйте команду /start для начала работы."
+            )
+            return
     
     # TODO: Реализовать получение голосов пользователя
     await message.answer("🗳️ Функция /my_votes будет добавлена позже.")
@@ -148,14 +160,26 @@ async def cmd_schedule(
         return
     
     user_id = message.from_user.id
-    is_verified = await user_service.is_verified(user_id)
+    user = message.from_user
     
-    if not is_verified:
-        await message.answer(
-            "❌ Для просмотра расписания необходимо пройти верификацию.\n\n"
-            "Пожалуйста, используйте команду /start для начала работы."
-        )
-        return
+    # Проверяем, является ли пользователь куратором
+    curator_usernames = ["Korolev_Nikita_20", "Kuznetsova_Olyaa", "Evgeniy_kuznetsoof", "VV_Team_Mascot"]
+    is_curator = False
+    if user.username and user.username.lower() in [c.lower() for c in curator_usernames]:
+        is_curator = True
+    elif user.full_name and ("VV_Team_Mascot" in user.full_name or "VV Team Mascot" in user.full_name):
+        is_curator = True
+    
+    # Проверяем верификацию только если она включена и пользователь не куратор
+    if settings.ENABLE_VERIFICATION and not is_curator:
+        is_verified = await user_service.is_verified(user_id)
+        
+        if not is_verified:
+            await message.answer(
+                "❌ Для просмотра расписания необходимо пройти верификацию.\n\n"
+                "Пожалуйста, используйте команду /start для начала работы."
+            )
+            return
     
     # TODO: Реализовать получение расписания
     await message.answer("📅 Функция /schedule будет добавлена позже.")
