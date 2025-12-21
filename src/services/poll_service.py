@@ -140,6 +140,16 @@ class PollService:
                         getattr(group, "telegram_chat_id", "Unknown"),
                     )
                     errors.append(f"{group_name} (чат не найден)")
+                elif "bot was kicked" in error_msg.lower() or "bot was blocked" in error_msg.lower():
+                    logger.error(
+                        "Bot was kicked from group %s (chat_id: %s). "
+                        "Please add the bot back to the group or deactivate the group using: "
+                        "UPDATE groups SET is_active = FALSE WHERE name = '%s';",
+                        group_name,
+                        getattr(group, "telegram_chat_id", "Unknown"),
+                        group_name,
+                    )
+                    errors.append(f"{group_name} (бот исключен из группы - добавьте бота обратно или деактивируйте группу)")
                 else:
                     logger.error("Error creating poll for %s: %s", group_name, e)
                     errors.append(f"{group_name} ({error_msg[:50]})")
@@ -251,6 +261,15 @@ class PollService:
                         # Без message_thread_id - в общий чат
                     )
                     topic_id = None  # Сбрасываем topic_id, так как опрос создан в общем чате
+                elif "bot was kicked" in error_msg or "bot was blocked" in error_msg or "forbidden: bot was kicked" in error_msg:
+                    # Бот исключен из группы - логируем и пробрасываем ошибку для обработки выше
+                    logger.error(
+                        "Bot was kicked from group %s (chat_id: %s). "
+                        "Please add the bot back to the group or deactivate the group.",
+                        group.name,
+                        group.telegram_chat_id,
+                    )
+                    raise
                 else:
                     raise  # Пробрасываем другие ошибки
 

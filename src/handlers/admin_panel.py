@@ -61,7 +61,6 @@ def get_admin_panel_keyboard() -> InlineKeyboardMarkup:
         [InlineKeyboardButton(text="🔎 Найти и открыть опросы на завтра", callback_data="admin:find_tomorrow_polls")],
         [InlineKeyboardButton(text="📸 Ручная отправка скриншотов выхода", callback_data="admin:manual_screenshots")],
         [InlineKeyboardButton(text="📢 Рассылка по группам", callback_data="admin:broadcast")],
-        [InlineKeyboardButton(text="🔍 Группы со словом 'в'", callback_data="admin:list_groups_with_v")],
     ]
     return InlineKeyboardMarkup(inline_keyboard=keyboard)
 
@@ -1974,7 +1973,7 @@ async def callback_show_results_for_group(
     bot: Bot,
     poll_repo: PollRepository,
     group_repo: GroupRepository,
-    data: dict,  # type: ignore
+    data: dict | None = None,  # type: ignore
 ) -> None:
     """Вывести результаты опроса для выбранной группы."""
     group_id = int(callback.data.split("_")[-1])
@@ -2066,60 +2065,6 @@ async def callback_show_results_for_group(
         )
 
 
-@router.callback_query(lambda c: c.data == "admin:list_groups_with_v")
-@require_admin_callback
-async def callback_list_groups_with_v(
-    callback: CallbackQuery,
-    group_repo: GroupRepository,
-) -> None:
-    """Вывести все группы, в названии которых есть слово 'в'."""
-    await callback.answer("⏳ Поиск групп...")
-    
-    try:
-        # Получаем все активные группы
-        all_groups = await group_repo.get_active_groups()
-        
-        # Фильтруем группы, в названии которых есть буква "в" (в любом месте)
-        groups_with_v = [group for group in all_groups if "в" in group.name.lower()]
-        
-        if not groups_with_v:
-            text = "❌ <b>Группы со словом 'в' не найдены</b>"
-            keyboard = InlineKeyboardMarkup(inline_keyboard=[
-                [InlineKeyboardButton(text="◀️ Назад", callback_data="admin:back_to_main")],
-            ])
-            await callback.message.edit_text(text, reply_markup=keyboard)
-            return
-        
-        # Формируем список групп
-        groups_list = []
-        for i, group in enumerate(groups_with_v, 1):
-            status = "✅ Активна" if group.is_active else "❌ Неактивна"
-            # Очищаем название от "(тест)" для отображения
-            display_name = clean_group_name_for_display(group.name)
-            groups_list.append(f"{i}. <b>{display_name}</b> - {status}")
-        
-        text = (
-            f"🔍 <b>Группы со словом 'в' в названии</b>\n\n"
-            f"Найдено групп: <b>{len(groups_with_v)}</b>\n\n"
-            + "\n".join(groups_list)
-        )
-        
-        keyboard = InlineKeyboardMarkup(inline_keyboard=[
-            [InlineKeyboardButton(text="◀️ Назад", callback_data="admin:back_to_main")],
-        ])
-        
-        await callback.message.edit_text(text, reply_markup=keyboard)
-        
-    except Exception as e:
-        logger.error("Error listing groups with 'в': %s", e, exc_info=True)
-        await callback.message.edit_text(
-            f"❌ Ошибка при поиске групп: {str(e)[:200]}",
-            reply_markup=InlineKeyboardMarkup(inline_keyboard=[
-                [InlineKeyboardButton(text="◀️ Назад", callback_data="admin:back_to_main")],
-            ]),
-        )
-
-
 @router.callback_query(lambda c: c.data == "admin:close_poll_early")
 @require_admin_callback
 async def callback_close_poll_early(
@@ -2161,7 +2106,7 @@ async def callback_close_poll_for_group(
     bot: Bot,
     poll_repo: PollRepository,
     group_repo: GroupRepository,
-    data: dict,  # type: ignore
+    data: dict | None = None,  # type: ignore
 ) -> None:
     """Досрочно закрыть опрос для выбранной группы."""
     group_id = int(callback.data.split("_")[-1])

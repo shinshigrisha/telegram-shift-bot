@@ -46,21 +46,58 @@ class ScreenshotService:
                 logger.error("Failed to start Playwright")
                 return False
             
-            self.browser = await self.playwright.chromium.launch(
-                headless=True,
-                args=["--no-sandbox", "--disable-dev-shm-usage"],
-                timeout=30000,  # 30 секунд на запуск
-            )
-
-            if not self.browser:
-                logger.error("Failed to launch browser")
-                return False
+            # Пробуем сначала Chromium
+            browsers_to_try = [
+                ("chromium", lambda: self.playwright.chromium.launch(
+                    headless=True,
+                    args=[
+                        "--no-sandbox",
+                        "--disable-dev-shm-usage",
+                        "--disable-gpu",
+                        "--disable-software-rasterizer",
+                        "--disable-extensions",
+                    ],
+                    timeout=30000,
+                )),
+                ("firefox", lambda: self.playwright.firefox.launch(
+                    headless=True,
+                    timeout=30000,
+                )),
+            ]
             
-            # Небольшая задержка для стабилизации
-            await asyncio.sleep(0.5)
+            browser_launched = False
+            for browser_name, launch_func in browsers_to_try:
+                try:
+                    logger.info(f"Trying to launch {browser_name}...")
+                    self.browser = await launch_func()
+                    
+                    if self.browser:
+                        # Небольшая задержка для стабилизации
+                        await asyncio.sleep(0.5)
+                        
+                        if self.browser.is_connected():
+                            logger.info(f"Successfully launched {browser_name}")
+                            browser_launched = True
+                            break
+                        else:
+                            logger.warning(f"{browser_name} launched but not connected, trying next browser")
+                            try:
+                                await self.browser.close()
+                            except Exception:
+                                pass
+                            self.browser = None
+                except Exception as e:
+                    logger.warning(f"Failed to launch {browser_name}: {e}")
+                    if self.browser:
+                        try:
+                            await self.browser.close()
+                        except Exception:
+                            pass
+                        self.browser = None
+                    continue
             
-            if not self.browser.is_connected():
-                logger.error("Browser is not connected after launch")
+            if not browser_launched or not self.browser:
+                logger.error("Failed to launch any browser")
                 return False
 
             self.context = await self.browser.new_context(

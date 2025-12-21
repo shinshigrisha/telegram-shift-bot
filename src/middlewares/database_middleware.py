@@ -77,6 +77,14 @@ class DatabaseMiddleware(BaseMiddleware):
             data["user_service"] = user_service
             data["poll_service"] = poll_service
 
-            return await handler(event, data)
+            try:
+                result = await handler(event, data)
+                # Коммитим изменения после успешного выполнения обработчика
+                await session.commit()
+                return result
+            except Exception as e:
+                # Откатываем изменения при ошибке
+                await session.rollback()
+                raise
 
 
