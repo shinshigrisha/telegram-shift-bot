@@ -969,7 +969,6 @@ async def callback_select_group_for_topic(
             logger.error("Failed to update group %s", group_id)
             return
         
-        await group_service.session.commit()
         logger.info("Group updated successfully in database")
         
         topic_names = {
@@ -1088,15 +1087,7 @@ async def _create_polls_with_commit(
     created, errors = await poll_service.create_daily_polls(force=force)
     logger.info("create_daily_polls completed: created=%s, errors=%s", created, len(errors))
     
-    # Коммитим изменения в БД
-    try:
-        await group_service.session.commit()
-        logger.info("Database changes committed successfully")
-    except Exception as commit_error:
-        logger.error("Error committing database changes: %s", commit_error, exc_info=True)
-        await group_service.session.rollback()
-        raise
-    
+    # DatabaseMiddleware автоматически сделает commit после успешного выполнения handler
     return created, errors
 
 
@@ -1160,12 +1151,7 @@ async def callback_create_polls(
         
     except Exception as e:
         logger.error("Error creating polls: %s", e, exc_info=True)
-        try:
-            # Пытаемся откатить изменения в случае ошибки
-            await group_service.session.rollback()
-            logger.info("Database changes rolled back")
-        except Exception as rollback_error:
-            logger.error("Error rolling back: %s", rollback_error)
+        # DatabaseMiddleware автоматически сделает rollback при ошибке
         
         await callback.message.edit_text(
             f"❌ Ошибка при создании опросов: {str(e)[:200]}",
@@ -1253,12 +1239,7 @@ async def callback_force_create_polls(
         
     except Exception as e:
         logger.error("Error force creating polls: %s", e, exc_info=True)
-        try:
-            # Пытаемся откатить изменения в случае ошибки
-            await group_service.session.rollback()
-            logger.info("Database changes rolled back")
-        except Exception as rollback_error:
-            logger.error("Error rolling back: %s", rollback_error)
+        # DatabaseMiddleware автоматически сделает rollback при ошибке
         
         await callback.message.edit_text(
             f"❌ Ошибка при пересоздании опросов: {str(e)[:200]}",

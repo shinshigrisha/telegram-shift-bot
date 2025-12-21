@@ -420,7 +420,6 @@ async def cmd_set_topic(
         from src.repositories.group_repository import GroupRepository
         group_repo = GroupRepository(group_service.session)
         await group_repo.update(group.id, telegram_topic_id=topic_id)
-        await group_service.session.commit()
         await group_service.session.refresh(group)
         
         # Проверяем, что группа соответствует chat_id из сообщения
@@ -549,7 +548,6 @@ async def _set_topic_for_field(
         from src.repositories.group_repository import GroupRepository
         group_repo = GroupRepository(group_service.session)
         await group_repo.update(group.id, **{field_name: topic_id})
-        await group_service.session.commit()
         await group_service.session.refresh(group)
         
         await message.answer(

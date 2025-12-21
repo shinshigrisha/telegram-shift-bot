@@ -813,7 +813,7 @@ class PollService:
                                                 last_name=last_name,
                                                 username=None
                                             )
-                                            await session.commit()
+                                            await session.flush()  # Flush для получения ID, commit сделает middleware/scheduler
                                             logger.info(
                                                 "Автоматически добавлен курьер по тегу: %s (ID: %s)",
                                                 user_name,

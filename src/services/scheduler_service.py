@@ -291,8 +291,49 @@ class SchedulerService:
                             )
                             if chat_member.status not in ["administrator", "member", "creator"]:
                                 issues.append(f"🚨 {group.name}: бот не может войти в группу (статус: {chat_member.status})")
-                        except Exception as e:
-                            issues.append(f"🚨 {group.name}: бот не может войти в группу ({str(e)[:50]})")
+                        except Exception as e:  # noqa: BLE001
+                            error_msg = str(e).lower()
+                            error_type = type(e).__name__
+                            
+                            # Различаем сетевые ошибки от ошибок Telegram API
+                            if "clientconnectorerror" in error_type.lower() or "cannot connect" in error_msg:
+                                # Сетевая ошибка - временная проблема
+                                logger.warning(
+                                    "Network error checking bot status in group %s: %s",
+                                    group.name,
+                                    e
+                                )
+                                issues.append(f"⚠️ {group.name}: временная проблема подключения к Telegram API")
+                            elif "chat not found" in error_msg:
+                                logger.error(
+                                    "Chat not found for group %s (chat_id: %s). Bot may have been removed.",
+                                    group.name,
+                                    group.telegram_chat_id
+                                )
+                                issues.append(f"🚨 {group.name}: чат не найден (бот удален из группы?)")
+                            elif "bot was kicked" in error_msg or "bot was blocked" in error_msg:
+                                logger.error(
+                                    "Bot was kicked from group %s (chat_id: %s). Please add bot back or deactivate group.",
+                                    group.name,
+                                    group.telegram_chat_id
+                                )
+                                issues.append(f"🚨 {group.name}: бот исключен из группы")
+                            elif "timeout" in error_msg or "timed out" in error_msg:
+                                logger.warning(
+                                    "Timeout checking bot status in group %s: %s",
+                                    group.name,
+                                    e
+                                )
+                                issues.append(f"⚠️ {group.name}: таймаут при проверке статуса")
+                            else:
+                                # Неизвестная ошибка
+                                logger.error(
+                                    "Error checking bot status in group %s: %s",
+                                    group.name,
+                                    e,
+                                    exc_info=True
+                                )
+                                issues.append(f"🚨 {group.name}: ошибка проверки статуса ({error_type})")
                             
                     except Exception as e:
                         logger.error("Error checking group %s: %s", group.name, e)

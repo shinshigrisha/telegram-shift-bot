@@ -27,7 +27,7 @@ class UserService:
                 last_name=last_name,
                 username=username,
             )
-            await self.session.commit()
+            # DatabaseMiddleware автоматически сделает commit после успешного выполнения handler
         else:
             # Обновляем данные пользователя, если они изменились
             updated = False
@@ -40,15 +40,13 @@ class UserService:
             if username is not None and user.username != username:
                 user.username = username
                 updated = True
-            if updated:
-                await self.session.commit()
+            # DatabaseMiddleware автоматически сделает commit после успешного выполнения handler
         return user
 
     async def verify_user(self, user_id: int, first_name: str, last_name: str) -> Optional[User]:
         """Верифицировать пользователя."""
         user = await self.user_repo.verify_user(user_id, first_name, last_name)
-        if user:
-            await self.session.commit()
+        # DatabaseMiddleware автоматически сделает commit после успешного выполнения handler
         return user
 
     async def is_verified(self, user_id: int) -> bool:

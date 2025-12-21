@@ -43,7 +43,7 @@ class GroupService:
             telegram_topic_id=telegram_topic_id,
             is_night=is_night,
         )
-        await self.session.commit()
+        # DatabaseMiddleware автоматически сделает commit после успешного выполнения handler
         return group
 
     async def update_group_slots(self, group_id: int, slots: list) -> bool:
@@ -53,7 +53,7 @@ class GroupService:
             return False
 
         group.update_slots(slots)
-        await self.session.commit()
+        # DatabaseMiddleware автоматически сделает commit после успешного выполнения handler
         # Обновляем объект в сессии, чтобы изменения были видны
         await self.session.refresh(group)
         return True
