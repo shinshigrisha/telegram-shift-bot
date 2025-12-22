@@ -1,11 +1,11 @@
-from typing import Callable, Dict, Any, Awaitable
+from typing import Callable, Dict, Any, Awaitable, Optional
 
-from aiogram import BaseMiddleware
-from aiogram.types import Message
+from aiogram import Bot, BaseMiddleware
+from aiogram.types import TelegramObject
 
 from src.models.database import AsyncSessionLocal
 from src.repositories.group_repository import GroupRepository
-from src.repositories.poll_repository import PollRepository  # type: ignore
+from src.repositories.poll_repository import PollRepository
 from src.repositories.user_repository import UserRepository
 from src.repositories.screenshot_check_repository import ScreenshotCheckRepository
 from src.services.group_service import GroupService
@@ -18,8 +18,8 @@ class DatabaseMiddleware(BaseMiddleware):
 
     async def __call__(
         self,
-        handler: Callable[[Any, Dict[str, Any]], Awaitable[Any]],
-        event: Any,
+        handler: Callable[[TelegramObject, Dict[str, Any]], Awaitable[Any]],
+        event: TelegramObject,
         data: Dict[str, Any],
     ) -> Any:
         async with AsyncSessionLocal() as session:
@@ -31,14 +31,10 @@ class DatabaseMiddleware(BaseMiddleware):
             user_service = UserService(session)
             
             # Получаем bot и screenshot_service для создания PollService
-            bot = data.get("bot")
+            bot: Optional[Bot] = data.get("bot")
             # Fallback: пытаемся получить bot через Bot.get_current()
             if not bot:
-                try:
-                    from aiogram import Bot
-                    bot = Bot.get_current(no_error=True)
-                except Exception:
-                    pass
+                bot = Bot.get_current(no_error=True)
             
             screenshot_service = None
             if bot and hasattr(bot, "data"):
@@ -80,11 +76,15 @@ class DatabaseMiddleware(BaseMiddleware):
             try:
                 result = await handler(event, data)
                 # Коммитим изменения после успешного выполнения обработчика
-                await session.commit()
+                # Проверяем, что сессия активна и не в rollback состоянии
+                if session.is_active:
+                    await session.commit()
                 return result
             except Exception as e:
                 # Откатываем изменения при ошибке
-                await session.rollback()
+                # Проверяем, что сессия еще активна перед rollback
+                if session.is_active:
+                    await session.rollback()
                 raise
 
 

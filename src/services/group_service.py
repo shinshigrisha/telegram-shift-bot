@@ -5,8 +5,8 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.models.group import Group
-from src.models.daily_poll import DailyPoll  # type: ignore
-from src.models.user_vote import UserVote  # type: ignore
+from src.models.daily_poll import DailyPoll
+from src.models.user_vote import UserVote
 from src.repositories.group_repository import GroupRepository
 
 

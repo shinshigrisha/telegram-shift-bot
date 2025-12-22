@@ -10,6 +10,7 @@ from config.settings import settings
 from src.utils.auth import require_admin, require_admin_callback
 from src.services.group_service import GroupService
 from src.services.poll_service import PollService
+from src.services.screenshot_service import ScreenshotService
 from src.repositories.group_repository import GroupRepository
 from src.repositories.poll_repository import PollRepository
 from src.states.setup_states import SetupStates
@@ -33,8 +34,6 @@ def clean_group_name_for_display(name: str) -> str:
 
 def get_screenshot_service(data: dict | None = None):
     """Получить screenshot_service из data или создать новый (fallback)."""
-    from src.services.screenshot_service import ScreenshotService
-    
     # Пытаемся получить из data (должен быть добавлен через middleware)
     if data and 'screenshot_service' in data:
         screenshot_service = data.get('screenshot_service')
@@ -55,9 +54,10 @@ def get_admin_panel_keyboard() -> InlineKeyboardMarkup:
         [InlineKeyboardButton(text="📌 Установить тему", callback_data="admin:set_topic_menu")],
         [InlineKeyboardButton(text="📝 Создать опросы вручную", callback_data="admin:create_polls")],
         [InlineKeyboardButton(text="🔄 Пересоздать опросы", callback_data="admin:force_create_polls")],
-        [InlineKeyboardButton(text="🔍 Проверить слоты", callback_data="admin:check_slots")],
         [InlineKeyboardButton(text="📊 Вывести результат", callback_data="admin:show_results")],
+        [InlineKeyboardButton(text="⏹️ Остановить опрос", callback_data="admin:stop_poll")],
         [InlineKeyboardButton(text="🔒 Досрочно закрыть опрос", callback_data="admin:close_poll_early")],
+        [InlineKeyboardButton(text="🔒 Закрыть все опросы", callback_data="admin:close_all_polls")],
         [InlineKeyboardButton(text="🔎 Найти и открыть опросы на завтра", callback_data="admin:find_tomorrow_polls")],
         [InlineKeyboardButton(text="📸 Ручная отправка скриншотов выхода", callback_data="admin:manual_screenshots")],
         [InlineKeyboardButton(text="📢 Рассылка по группам", callback_data="admin:broadcast")],
@@ -99,12 +99,15 @@ async def cmd_admin_panel(
 @router.callback_query(lambda c: c.data == "admin:back_to_main")
 async def callback_back_to_main(callback: CallbackQuery) -> None:
     """Вернуться в главное меню админ-панели."""
-    await callback.message.edit_text(
+    from src.utils.telegram_helpers import safe_edit_message, safe_answer_callback
+    
+    await safe_edit_message(
+        callback.message,
         "👑 <b>Админ-панель</b>\n\n"
         "Выберите действие:",
         reply_markup=get_admin_panel_keyboard(),
     )
-    await callback.answer()
+    await safe_answer_callback(callback)
 
 
 @router.callback_query(lambda c: c.data == "admin:create_group")
@@ -1249,104 +1252,6 @@ async def callback_force_create_polls(
         )
 
 
-@router.callback_query(lambda c: c.data == "admin:check_slots")
-@require_admin_callback
-async def callback_check_slots(
-    callback: CallbackQuery,
-    bot: Bot,
-    poll_repo: PollRepository,
-    group_repo: GroupRepository,
-    data: dict,  # type: ignore
-) -> None:
-    """Проверить слоты и отправить замечания курьерам."""
-    logger.info("Check slots requested via admin panel")
-    await callback.answer("⏳ Проверка слотов...")
-    
-    try:
-        from datetime import date
-        
-        screenshot_service = get_screenshot_service(data)
-        poll_service = PollService(
-            bot=bot,
-            poll_repo=poll_repo,
-            group_repo=group_repo,
-            screenshot_service=screenshot_service,
-        )
-        
-        # Получаем все активные группы
-        groups = await group_repo.get_active_groups()
-        if not groups:
-            await callback.message.edit_text(
-                "❌ Нет активных групп для проверки",
-                reply_markup=InlineKeyboardMarkup(inline_keyboard=[
-                    [InlineKeyboardButton(text="◀️ Назад", callback_data="admin:back_to_main")],
-                ]),
-            )
-            return
-        
-        today = date.today()
-        checked_count = 0
-        warnings_sent = 0
-        errors = []
-        
-        # Проверяем каждую группу
-        for group in groups:
-            try:
-                # Получаем активный опрос на сегодня
-                poll = await poll_repo.get_active_by_group_and_date(group.id, today)
-                if not poll:
-                    continue
-                
-                # Отправляем замечания через метод poll_service
-                from datetime import datetime
-                now = datetime.now()
-                current_hour = now.hour
-                is_final = (current_hour == 18 and now.minute >= 30) or current_hour == 19
-                await poll_service._send_warnings_to_couriers(
-                    group=group,
-                    poll_id=str(poll.id),
-                    poll_date=today,
-                    current_hour=current_hour,
-                    is_final=is_final,
-                )
-                checked_count += 1
-                warnings_sent += 1
-                logger.info("Sent warnings for group %s", group.name)
-            except Exception as e:
-                error_msg = f"{group.name}: {str(e)[:50]}"
-                errors.append(error_msg)
-                logger.error("Error checking group %s: %s", group.name, e)
-        
-        # Формируем ответ
-        text = (
-            f"✅ <b>Проверка слотов завершена</b>\n\n"
-            f"Проверено групп: {checked_count}\n"
-            f"Отправлено замечаний: {warnings_sent}"
-        )
-        
-        if errors:
-            text += f"\n\n❌ <b>Ошибки:</b>\n" + "\n".join(f"• {e}" for e in errors[:5])
-            if len(errors) > 5:
-                text += f"\n... и ещё {len(errors) - 5}"
-        
-        if checked_count == 0:
-            text += "\n\n💡 Активных опросов на сегодня не найдено"
-        
-        await callback.message.edit_text(
-            text,
-            reply_markup=InlineKeyboardMarkup(inline_keyboard=[
-                [InlineKeyboardButton(text="◀️ Назад", callback_data="admin:back_to_main")],
-            ]),
-        )
-        
-    except Exception as e:
-        logger.error("Error in check_slots: %s", e, exc_info=True)
-        await callback.message.edit_text(
-            f"❌ <b>Ошибка при проверке слотов</b>\n\n{str(e)}",
-            reply_markup=InlineKeyboardMarkup(inline_keyboard=[
-                [InlineKeyboardButton(text="◀️ Назад", callback_data="admin:back_to_main")],
-            ]),
-        )
 
 
 @router.callback_query(lambda c: c.data == "admin:show_results")
@@ -1677,12 +1582,22 @@ async def callback_manual_screenshots(
         return
     
     # Инициализируем состояние
+    logger.info("=== INITIALIZING MANUAL SCREENSHOTS PROCESS ===")
+    logger.info("Groups to process: %s", existing_groups)
+    logger.info("Admin chat_id: %s", callback.message.chat.id)
+    
     await state.update_data(
         screenshots={},  # Словарь: {group_name: file_id}
         groups_to_process=existing_groups.copy(),
         current_group_index=0,
-        last_message_id=callback.message.message_id,  # Сохраняем ID исходного сообщения для обновления
+        admin_chat_id=callback.message.chat.id,  # Сохраняем ID чата админа
+        last_message_id=None,  # Будет обновляться при каждом новом сообщении
     )
+    
+    # Устанавливаем состояние
+    await state.set_state(AdminPanelStates.waiting_for_manual_screenshots)
+    current_state = await state.get_state()
+    logger.info("State set to: %s", current_state)
     
     # Запрашиваем первый скриншот
     first_group = existing_groups[0]
@@ -1698,7 +1613,7 @@ async def callback_manual_screenshots(
     ])
     
     await callback.message.edit_text(text, reply_markup=keyboard)
-    await state.set_state(AdminPanelStates.waiting_for_manual_screenshots)
+    logger.info("=== MANUAL SCREENSHOTS PROCESS INITIALIZED ===")
 
 
 @router.callback_query(lambda c: c.data == "admin:cancel_manual_screenshots")
@@ -1726,16 +1641,44 @@ async def process_manual_screenshot(
     group_repo: GroupRepository,
 ) -> None:
     """Обработка загруженного скриншота."""
+    logger.info("=== PROCESS_MANUAL_SCREENSHOT CALLED ===")
+    logger.info("Processing manual screenshot from user %s (chat_id=%s, message_id=%s)", 
+                message.from_user.id if message.from_user else "unknown",
+                message.chat.id,
+                message.message_id)
+    
+    # Проверяем текущее состояние
+    current_state = await state.get_state()
+    logger.info("Current FSM state: %s", current_state)
+    
+    # Проверяем, что состояние действительно установлено
+    if current_state != AdminPanelStates.waiting_for_manual_screenshots:
+        logger.error("State mismatch! Expected: %s, Got: %s", 
+                    AdminPanelStates.waiting_for_manual_screenshots, current_state)
+        await message.answer("❌ Ошибка: состояние потеряно. Начните заново.")
+        return
+    
     # Проверяем, что это фото
     if not message.photo:
+        logger.warning("Message is not a photo, ignoring")
         await message.answer("❌ Пожалуйста, отправьте фото (скриншот)")
         return
+    
+    logger.info("Photo detected, processing...")
     
     data = await state.get_data()
     screenshots = data.get("screenshots", {})
     groups_to_process = data.get("groups_to_process", [])
     current_group_index = data.get("current_group_index", 0)
+    admin_chat_id = data.get("admin_chat_id")
     last_message_id = data.get("last_message_id")
+    
+    logger.info("Current state: index=%d, total_groups=%d, screenshots=%d", current_group_index, len(groups_to_process), len(screenshots))
+    
+    if not groups_to_process:
+        await message.answer("❌ Ошибка: список групп не найден. Начните заново.")
+        await state.clear()
+        return
     
     if current_group_index >= len(groups_to_process):
         await message.answer("❌ Все скриншоты уже получены")
@@ -1743,6 +1686,7 @@ async def process_manual_screenshot(
     
     # Получаем текущую группу
     current_group_name = groups_to_process[current_group_index]
+    logger.info("Processing screenshot for group: %s", current_group_name)
     
     # Сохраняем file_id самого большого фото
     largest_photo = message.photo[-1]  # Последний элемент - самое большое фото
@@ -1758,7 +1702,11 @@ async def process_manual_screenshot(
     )
     
     # Отправляем уведомление об успешной загрузке
-    await message.answer(f"✅ Скриншот для <b>{current_group_name}</b> успешно загружен!", parse_mode="HTML")
+    try:
+        await message.answer(f"✅ Скриншот для <b>{current_group_name}</b> успешно загружен!", parse_mode="HTML")
+        logger.info("Screenshot received for group %s (index %d/%d)", current_group_name, current_group_index, len(groups_to_process))
+    except Exception as e:
+        logger.error("Failed to send confirmation message: %s", e, exc_info=True)
     
     # Проверяем, все ли скриншоты получены
     if current_group_index >= len(groups_to_process):
@@ -1785,20 +1733,14 @@ async def process_manual_screenshot(
         
         keyboard = InlineKeyboardMarkup(inline_keyboard=keyboard_buttons)
         
-        # Обновляем исходное сообщение, если есть его ID
-        if last_message_id:
-            try:
-                await bot.edit_message_text(
-                    chat_id=message.chat.id,
-                    message_id=last_message_id,
-                    text=text,
-                    reply_markup=keyboard,
-                )
-            except Exception as e:
-                logger.warning("Не удалось обновить сообщение, отправляем новое: %s", e)
-                await message.answer(text, reply_markup=keyboard)
-        else:
-            await message.answer(text, reply_markup=keyboard)
+        # Отправляем новое сообщение с выбором группы
+        try:
+            sent_msg = await message.answer(text, reply_markup=keyboard)
+            await state.update_data(last_message_id=sent_msg.message_id)
+            logger.info("All screenshots received, showing group selection menu")
+        except Exception as e:
+            logger.error("Failed to send group selection message: %s", e, exc_info=True)
+            await message.answer("❌ Ошибка при отправке сообщения. Попробуйте еще раз.")
         
         await state.set_state(AdminPanelStates.waiting_for_target_group_for_screenshots)
     else:
@@ -1817,24 +1759,36 @@ async def process_manual_screenshot(
             [InlineKeyboardButton(text="❌ Отменить", callback_data="admin:cancel_manual_screenshots")],
         ])
         
-        # Обновляем исходное сообщение, если есть его ID
-        if last_message_id:
-            try:
-                await bot.edit_message_text(
-                    chat_id=message.chat.id,
-                    message_id=last_message_id,
-                    text=text,
-                    reply_markup=keyboard,
-                )
-            except Exception as e:
-                logger.warning("Не удалось обновить сообщение, отправляем новое: %s", e)
-                sent_msg = await message.answer(text, reply_markup=keyboard)
-                # Сохраняем ID нового сообщения
-                await state.update_data(last_message_id=sent_msg.message_id)
-        else:
-            sent_msg = await message.answer(text, reply_markup=keyboard)
-            # Сохраняем ID нового сообщения
+        # Отправляем новое сообщение с запросом следующего скриншота
+        try:
+            logger.info("=== SENDING REQUEST FOR NEXT SCREENSHOT ===")
+            logger.info("Next group: %s, index: %d/%d, remaining: %d", 
+                       next_group_name, current_group_index, len(groups_to_process), remaining)
+            logger.info("Sending message to chat_id: %s", message.chat.id)
+            
+            sent_msg = await message.answer(text, reply_markup=keyboard, parse_mode="HTML")
             await state.update_data(last_message_id=sent_msg.message_id)
+            
+            logger.info("=== SUCCESSFULLY SENT REQUEST ===")
+            logger.info("Message sent successfully (message_id=%d, chat_id=%s)", 
+                       sent_msg.message_id, sent_msg.chat.id)
+        except Exception as e:
+            logger.error("Failed to send next screenshot request: %s", e, exc_info=True)
+            try:
+                # Пробуем отправить без форматирования
+                fallback_text = (
+                    f"📸 Ручная отправка скриншотов выхода\n\n"
+                    f"✅ Скриншот для {current_group_name} получен\n\n"
+                    f"Отправьте скриншот для группы: {next_group_name}\n\n"
+                    f"Осталось: {remaining} групп\n"
+                    f"Прогресс: {current_group_index}/{len(groups_to_process)}"
+                )
+                sent_msg = await message.answer(fallback_text, reply_markup=keyboard)
+                await state.update_data(last_message_id=sent_msg.message_id)
+                logger.info("Sent fallback message for next screenshot")
+            except Exception as e2:
+                logger.error("Failed to send fallback message: %s", e2, exc_info=True)
+                await message.answer(f"❌ Ошибка при отправке сообщения. Попробуйте отправить скриншот для {next_group_name} еще раз.")
 
 
 @router.callback_query(lambda c: c.data.startswith("admin:send_screenshots_to_"))
@@ -1872,12 +1826,20 @@ async def callback_send_screenshots_to_group(
     
     await callback.answer("⏳ Отправка скриншотов...")
     
+    # Получаем дату для подписи (сегодняшняя дата)
+    from datetime import date
+    today = date.today()
+    date_str = today.strftime('%d.%m.%y')  # Формат: dd.mm.yy
+    
     # Отправляем все скриншоты
     sent_count = 0
     errors = []
     
     for group_name, file_id in screenshots.items():
         try:
+            # Формируем подпись: "Смена на dd.mm.yy | ЗИЗ-X"
+            caption = f"Смена на {date_str} | {group_name}"
+            
             # Проверяем права бота в группе перед отправкой
             try:
                 bot_member = await bot.get_chat_member(group.telegram_chat_id, bot.id)
@@ -1896,7 +1858,7 @@ async def callback_send_screenshots_to_group(
                 await bot.send_photo(
                     chat_id=group.telegram_chat_id,
                     photo=file_id,
-                    caption=f"📊 Скриншот выхода: {group_name}",
+                    caption=caption,
                     message_thread_id=topic_id,
                 )
                 sent_count += 1
@@ -1910,7 +1872,7 @@ async def callback_send_screenshots_to_group(
                         await bot.send_photo(
                             chat_id=group.telegram_chat_id,
                             photo=file_id,
-                            caption=f"📊 Скриншот выхода: {group_name}",
+                            caption=caption,
                         )
                         sent_count += 1
                         logger.info("Отправлен скриншот %s в группу %s (общий чат)", group_name, group.name)
@@ -1925,6 +1887,9 @@ async def callback_send_screenshots_to_group(
         except Exception as e:
             logger.error("Неожиданная ошибка при отправке скриншота %s: %s", group_name, e, exc_info=True)
             errors.append(f"{group_name}: {str(e)[:50]}")
+    
+    # Очищаем состояние после отправки
+    await state.clear()
     
     # Формируем итоговое сообщение
     result_text = (
@@ -2046,6 +2011,207 @@ async def callback_show_results_for_group(
         )
 
 
+@router.callback_query(lambda c: c.data == "admin:stop_poll")
+@require_admin_callback
+async def callback_stop_poll(
+    callback: CallbackQuery,
+    group_service: GroupService,
+) -> None:
+    """Остановить опрос (без создания скриншота и отправки результатов)."""
+    groups = await group_service.get_all_groups()
+    if not groups:
+        await callback.answer("❌ Нет зарегистрированных групп", show_alert=True)
+        return
+    
+    keyboard_buttons = []
+    for group in groups:
+        keyboard_buttons.append([
+            InlineKeyboardButton(
+                text=group.name,
+                callback_data=f"admin:stop_poll_group_{group.id}",
+            ),
+        ])
+    keyboard_buttons.append([
+        InlineKeyboardButton(text="◀️ Назад", callback_data="admin:back_to_main"),
+    ])
+    
+    await callback.message.edit_text(
+        "⏹️ <b>Остановить опрос</b>\n\n"
+        "Выберите группу (опрос будет остановлен без создания скриншота):",
+        reply_markup=InlineKeyboardMarkup(inline_keyboard=keyboard_buttons),
+    )
+    await callback.answer()
+
+
+@router.callback_query(lambda c: c.data.startswith("admin:stop_poll_group_"))
+@require_admin_callback
+async def callback_stop_poll_for_group(
+    callback: CallbackQuery,
+    bot: Bot,
+    poll_repo: PollRepository,
+    group_repo: GroupRepository,
+    data: dict | None = None,  # type: ignore
+) -> None:
+    """Остановить опрос для выбранной группы (без создания скриншота)."""
+    group_id = int(callback.data.split("_")[-1])
+    await callback.answer("⏳ Остановка опроса...")
+    
+    try:
+        from datetime import date, datetime
+        
+        group = await group_repo.get_by_id(group_id)
+        if not group:
+            await callback.answer("❌ Группа не найдена", show_alert=True)
+            return
+        
+        today = date.today()
+        poll = await poll_repo.get_active_by_group_and_date(group.id, today)
+        
+        if not poll:
+            await callback.message.edit_text(
+                f"❌ Активный опрос для группы <b>{group.name}</b> за {today.strftime('%d.%m.%Y')} не найден",
+                reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+                    [InlineKeyboardButton(text="◀️ Назад", callback_data="admin:back_to_main")],
+                ]),
+            )
+            return
+        
+        # Останавливаем опрос (message_thread_id не поддерживается в stop_poll API)
+        try:
+            await bot.stop_poll(
+                chat_id=group.telegram_chat_id,
+                message_id=poll.telegram_message_id,
+            )
+        except Exception as poll_error:  # noqa: BLE001
+            # Если опрос уже закрыт или сообщение не найдено, просто обновляем статус в БД
+            if "not found" in str(poll_error).lower() or "already closed" in str(poll_error).lower():
+                logger.warning("Poll already closed for group %s, updating status in DB", group.name)
+            else:
+                raise
+        
+        now = datetime.now()
+        await poll_repo.update(poll.id, status="closed", closed_at=now)
+        
+        text = (
+            f"✅ <b>Опрос остановлен</b>\n\n"
+            f"Группа: <b>{clean_group_name_for_display(group.name)}</b>\n"
+            f"Дата: {today.strftime('%d.%m.%Y')}\n\n"
+            f"⚠️ Скриншот не создан, результаты не отправлены"
+        )
+        
+        keyboard = InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text="◀️ Назад", callback_data="admin:back_to_main")],
+        ])
+        
+        await callback.message.edit_text(text, reply_markup=keyboard)
+        logger.info("Poll stopped for group %s (without screenshot)", group.name)
+        
+    except Exception as e:
+        logger.error("Error stopping poll: %s", e, exc_info=True)
+        await callback.message.edit_text(
+            f"❌ Ошибка: {e}",
+            reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+                [InlineKeyboardButton(text="◀️ Назад", callback_data="admin:back_to_main")],
+            ]),
+        )
+
+
+@router.callback_query(lambda c: c.data == "admin:close_all_polls")
+@require_admin_callback
+async def callback_close_all_polls(
+    callback: CallbackQuery,
+    bot: Bot,
+    poll_repo: PollRepository,
+    group_repo: GroupRepository,
+    screenshot_service: ScreenshotService,
+    data: dict | None = None,  # type: ignore
+) -> None:
+    """Закрыть все активные опросы для всех групп."""
+    await callback.answer("⏳ Закрытие всех опросов...")
+    
+    try:
+        from datetime import date, datetime
+        
+        from src.services.poll_service import PollService
+        
+        today = date.today()
+        groups = await group_repo.get_active_groups()
+        
+        if not groups:
+            await callback.message.edit_text(
+                "❌ Нет активных групп",
+                reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+                    [InlineKeyboardButton(text="◀️ Назад", callback_data="admin:back_to_main")],
+                ]),
+            )
+            return
+        
+        poll_service = PollService(
+            bot=bot,
+            poll_repo=poll_repo,
+            group_repo=group_repo,
+            screenshot_service=screenshot_service,
+        )
+        
+        closed_count = 0
+        errors = []
+        
+        for group in groups:
+            try:
+                poll = await poll_repo.get_active_by_group_and_date(group.id, today)
+                if poll:
+                    # Закрываем опрос напрямую
+                    try:
+                        await bot.stop_poll(
+                            chat_id=group.telegram_chat_id,
+                            message_id=poll.telegram_message_id,
+                        )
+                        await poll_repo.update(poll.id, status="closed", closed_at=datetime.now())
+                        closed_count += 1
+                        logger.info("Closed poll for group %s", group.name)
+                    except Exception as poll_error:  # noqa: BLE001
+                        # Если опрос уже закрыт или сообщение не найдено, просто обновляем статус в БД
+                        if "not found" in str(poll_error).lower() or "already closed" in str(poll_error).lower():
+                            await poll_repo.update(poll.id, status="closed", closed_at=datetime.now())
+                            closed_count += 1
+                            logger.info("Poll already closed for group %s, updated status in DB", group.name)
+                        else:
+                            raise
+            except Exception as e:  # noqa: BLE001
+                error_msg = f"{group.name}: {str(e)}"
+                errors.append(error_msg)
+                logger.error("Error closing poll for %s: %s", group.name, e, exc_info=True)
+        
+        # Формируем сообщение с результатами
+        text = f"✅ <b>Закрытие опросов завершено</b>\n\n"
+        text += f"Закрыто опросов: <b>{closed_count}</b>\n"
+        text += f"Всего групп: <b>{len(groups)}</b>\n"
+        
+        if errors:
+            text += f"\n⚠️ Ошибки: <b>{len(errors)}</b>\n"
+            if len(errors) <= 5:
+                text += "\n".join([f"• {e}" for e in errors])
+            else:
+                text += "\n".join([f"• {e}" for e in errors[:5]])
+                text += f"\n... и еще {len(errors) - 5} ошибок"
+        
+        keyboard = InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text="◀️ Назад", callback_data="admin:back_to_main")],
+        ])
+        
+        await callback.message.edit_text(text, reply_markup=keyboard)
+        logger.info("Closed %d polls for all groups", closed_count)
+        
+    except Exception as e:  # noqa: BLE001
+        logger.error("Error closing all polls: %s", e, exc_info=True)
+        await callback.message.edit_text(
+            f"❌ Ошибка при закрытии всех опросов: {e}",
+            reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+                [InlineKeyboardButton(text="◀️ Назад", callback_data="admin:back_to_main")],
+            ]),
+        )
+
+
 @router.callback_query(lambda c: c.data == "admin:close_poll_early")
 @require_admin_callback
 async def callback_close_poll_early(
@@ -2114,10 +2280,18 @@ async def callback_close_poll_for_group(
             return
         
         # Закрываем опрос (message_thread_id не поддерживается в stop_poll API)
-        await bot.stop_poll(
-            chat_id=group.telegram_chat_id,
-            message_id=poll.telegram_message_id,
-        )
+        try:
+            await bot.stop_poll(
+                chat_id=group.telegram_chat_id,
+                message_id=poll.telegram_message_id,
+            )
+        except Exception as poll_error:  # noqa: BLE001
+            # Если опрос уже закрыт или сообщение не найдено, просто обновляем статус в БД
+            error_msg = str(poll_error).lower()
+            if "not found" in error_msg or "already closed" in error_msg or "poll is not active" in error_msg:
+                logger.warning("Poll already closed for group %s, updating status in DB", group.name)
+            else:
+                raise
         
         now = datetime.now()
         await poll_repo.update(poll.id, status="closed", closed_at=now)
@@ -2212,8 +2386,9 @@ async def callback_broadcast_menu(
         [InlineKeyboardButton(text="◀️ Назад", callback_data="admin:back_to_main")],
     ])
     
-    await callback.message.edit_text(text, reply_markup=keyboard)
-    await callback.answer()
+    from src.utils.telegram_helpers import safe_edit_message, safe_answer_callback
+    await safe_edit_message(callback.message, text, reply_markup=keyboard)
+    await safe_answer_callback(callback)
 
 
 @router.callback_query(lambda c: c.data.startswith("admin:broadcast:"))

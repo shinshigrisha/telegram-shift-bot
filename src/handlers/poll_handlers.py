@@ -6,6 +6,7 @@ from aiogram.types import PollAnswer
 from config.settings import settings
 from src.services.user_service import UserService
 from src.repositories.poll_repository import PollRepository
+from src.utils.auth import is_curator
 
 logger = logging.getLogger(__name__)
 router = Router()
@@ -46,15 +47,10 @@ async def handle_poll_answer(
             )
 
         # Проверяем, является ли пользователь куратором
-        curator_usernames = ["Korolev_Nikita_20", "Kuznetsova_Olyaa", "Evgeniy_kuznetsoof", "VV_Team_Mascot"]
-        is_curator = False
-        if poll_answer.user.username and poll_answer.user.username.lower() in [c.lower() for c in curator_usernames]:
-            is_curator = True
-        elif poll_answer.user.full_name and ("VV_Team_Mascot" in poll_answer.user.full_name or "VV Team Mascot" in poll_answer.user.full_name):
-            is_curator = True
+        user_is_curator = is_curator(poll_answer.user)
         
         # Проверяем верификацию пользователя (только если верификация включена и пользователь не куратор)
-        if settings.ENABLE_VERIFICATION and not is_curator and not user.is_verified:
+        if settings.ENABLE_VERIFICATION and not user_is_curator and not user.is_verified:
             logger.warning("Unverified user %s tried to vote in poll %s", user_id, poll_id)
             # Отправляем уведомление пользователю через бота
             # (но у нас нет доступа к bot здесь, поэтому просто логируем)
@@ -121,6 +117,7 @@ async def handle_poll_answer(
 
         # Проверяем, не голосовал ли пользователь уже в этом опросе
         from sqlalchemy import select
+        from sqlalchemy.exc import IntegrityError
         from src.models.user_vote import UserVote
         existing_vote_result = await poll_repo.session.execute(
             select(UserVote).where(
@@ -149,26 +146,69 @@ async def handle_poll_answer(
                 await poll_repo.update_slot_user_count(slot_id, user_id, increment=True)
         else:
             # Создаем новую запись голоса
-            vote = await poll_repo.create_user_vote(
-                poll_id=poll.id,
-                user_id=user_id,
-                user_name=user_name,
-                slot_id=slot_id,
-                voted_option=voted_option,
-            )
-            
-            # Обновляем счетчик пользователей в слоте
-            if slot_id:
-                await poll_repo.update_slot_user_count(slot_id, user_id, increment=True)
-            
-            logger.info(
-                "User %s (%s) voted in poll %s, option: %s, slot_id: %s",
-                user.get_full_name(),
-                user_id,
-                poll_id,
-                option_ids,
-                slot_id,
-            )
+            # Обрабатываем race condition: если два запроса одновременно создают голос
+            # Сохраняем poll.id ДО возможного rollback, чтобы использовать после
+            # (после rollback объект poll отсоединяется от сессии и доступ к poll.id вызывает ошибку)
+            poll_db_id = poll.id
+            try:
+                vote = await poll_repo.create_user_vote(
+                    poll_id=poll_db_id,
+                    user_id=user_id,
+                    user_name=user_name,
+                    slot_id=slot_id,
+                    voted_option=voted_option,
+                )
+                
+                # Обновляем счетчик пользователей в слоте
+                if slot_id:
+                    await poll_repo.update_slot_user_count(slot_id, user_id, increment=True)
+                
+                logger.info(
+                    "User %s (%s) voted in poll %s, option: %s, slot_id: %s",
+                    user.get_full_name(),
+                    user_id,
+                    poll_id,
+                    option_ids,
+                    slot_id,
+                )
+            except IntegrityError:
+                # Race condition: другой запрос уже создал голос
+                # Откатываем текущую транзакцию и обновляем существующую запись
+                await poll_repo.session.rollback()
+                
+                # Повторно получаем существующий голос
+                # Используем сохраненный poll_db_id вместо poll.id (poll может быть отсоединен от сессии)
+                existing_vote_result = await poll_repo.session.execute(
+                    select(UserVote).where(
+                        UserVote.poll_id == poll_db_id,
+                        UserVote.user_id == user_id
+                    )
+                )
+                existing_vote = existing_vote_result.scalar_one_or_none()
+                
+                if existing_vote:
+                    logger.info("User %s already voted (race condition), updating vote", user_id)
+                    
+                    # Удаляем пользователя из старого слота
+                    if existing_vote.slot_id:
+                        await poll_repo.update_slot_user_count(existing_vote.slot_id, user_id, increment=False)
+                    
+                    # Обновляем запись голоса
+                    existing_vote.slot_id = slot_id
+                    existing_vote.voted_option = voted_option
+                    existing_vote.user_name = user_name
+                    await poll_repo.session.flush()
+                    
+                    # Добавляем пользователя в новый слот
+                    if slot_id:
+                        await poll_repo.update_slot_user_count(slot_id, user_id, increment=True)
+                else:
+                    logger.error(
+                        "Failed to find existing vote after IntegrityError for user %s, poll %s",
+                        user_id,
+                        poll_id
+                    )
+                    raise
 
     except Exception as e:
         logger.error("Error handling poll answer: %s", e, exc_info=True)

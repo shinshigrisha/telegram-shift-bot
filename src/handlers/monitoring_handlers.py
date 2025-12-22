@@ -6,7 +6,7 @@ from aiogram.filters import Command
 from aiogram.fsm.context import FSMContext
 from aiogram.types import Message
 
-from src.utils.auth import require_admin  # type: ignore
+from src.utils.auth import require_admin
 
 
 router = Router()

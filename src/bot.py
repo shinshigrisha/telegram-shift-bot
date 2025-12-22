@@ -7,16 +7,25 @@ from redis.asyncio import Redis
 
 from config.settings import settings
 
-# Эти модули будут реализованы на следующих этапах, сейчас используем их как контракты
-from src.middlewares.auth_middleware import AdminMiddleware  # type: ignore
-from src.middlewares.rate_limit_middleware import RateLimitMiddleware  # type: ignore
-from src.middlewares.database_middleware import DatabaseMiddleware  # type: ignore
-from src.middlewares.verification_middleware import VerificationMiddleware  # type: ignore
-from src.middlewares.message_cleanup_middleware import MessageCleanupMiddleware  # type: ignore
+from src.middlewares.auth_middleware import AdminMiddleware
+from src.middlewares.rate_limit_middleware import RateLimitMiddleware
+from src.middlewares.database_middleware import DatabaseMiddleware
+from src.middlewares.verification_middleware import VerificationMiddleware
+from src.middlewares.message_cleanup_middleware import MessageCleanupMiddleware
 
-from src.services.screenshot_service import ScreenshotService  # type: ignore
+from src.services.screenshot_service import ScreenshotService
 
-from src.handlers import admin_handlers, setup_handlers, report_handlers, user_handlers, monitoring_handlers, verification_handlers, poll_handlers, admin_panel, group_handlers  # type: ignore
+from src.handlers import (
+    admin_handlers,
+    setup_handlers,
+    report_handlers,
+    user_handlers,
+    monitoring_handlers,
+    verification_handlers,
+    poll_handlers,
+    admin_panel,
+    group_handlers,
+)
 
 
 logger = logging.getLogger(__name__)

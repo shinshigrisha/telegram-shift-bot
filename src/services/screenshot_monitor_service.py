@@ -12,6 +12,7 @@ from aiogram.types import User
 from src.repositories.group_repository import GroupRepository
 from src.repositories.screenshot_check_repository import ScreenshotCheckRepository
 from src.services.poll_service import PollService
+from src.utils.auth import is_curator
 
 
 logger = logging.getLogger(__name__)
@@ -49,20 +50,11 @@ class ScreenshotMonitorService:
         curators = []
         try:
             administrators = await self.bot.get_chat_administrators(chat_id)
-            curator_usernames = [
-                "Korolev_Nikita_20",
-                "Kuznetsova_Olyaa",
-                "Evgeniy_kuznetsoof",
-                "VV_Team_Mascot",
-            ]
             
             for admin in administrators:
                 user = admin.user
-                # Проверяем по username
-                if user.username and user.username.lower() in [c.lower() for c in curator_usernames]:
-                    curators.append(user)
-                # Проверяем по полному имени
-                elif user.full_name and ("VV_Team_Mascot" in user.full_name or "VV Team Mascot" in user.full_name):
+                # Используем централизованную функцию проверки кураторов
+                if is_curator(user):
                     curators.append(user)
         
         except Exception as e:

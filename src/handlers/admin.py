@@ -9,13 +9,13 @@ from aiogram.types import Message
 
 from config.settings import settings
 from src.services.user_service import UserService
-from src.services.group_service import GroupService  # type: ignore
-from src.services.poll_service import PollService  # type: ignore
-from src.repositories.poll_repository import PollRepository  # type: ignore
-from src.repositories.group_repository import GroupRepository  # type: ignore
-from src.states.setup_states import SetupStates  # type: ignore
-from src.states.admin_panel_states import AdminPanelStates  # type: ignore
-from src.utils.auth import require_admin  # type: ignore
+from src.services.group_service import GroupService
+from src.services.poll_service import PollService
+from src.repositories.poll_repository import PollRepository
+from src.repositories.group_repository import GroupRepository
+from src.states.setup_states import SetupStates
+from src.states.admin_panel_states import AdminPanelStates
+from src.utils.auth import require_admin, is_curator
 
 
 logger = logging.getLogger(__name__)
@@ -38,15 +38,10 @@ async def cmd_start(
     is_admin = user_id in settings.ADMIN_IDS
     
     # Проверяем, является ли пользователь куратором
-    curator_usernames = ["Korolev_Nikita_20", "Kuznetsova_Olyaa", "Evgeniy_kuznetsoof", "VV_Team_Mascot"]
-    is_curator = False
-    if user.username and user.username.lower() in [c.lower() for c in curator_usernames]:
-        is_curator = True
-    elif user.full_name and ("VV_Team_Mascot" in user.full_name or "VV Team Mascot" in user.full_name):
-        is_curator = True
+    user_is_curator = is_curator(user)
     
     # Проверяем верификацию (только если включена и пользователь не куратор)
-    if settings.ENABLE_VERIFICATION and not is_curator and user_service and state:
+    if settings.ENABLE_VERIFICATION and not user_is_curator and user_service and state:
         is_verified = await user_service.is_verified(user_id)
         
         if not is_verified:

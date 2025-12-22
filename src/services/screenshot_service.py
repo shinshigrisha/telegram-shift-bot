@@ -168,140 +168,186 @@ class ScreenshotService:
         poll_slots_data: Optional[list] = None,
     ) -> Optional[Path]:
         """
-        Создать скриншот опроса в формате PNG 1920x1080.
+        Создать изображение с результатами опроса в формате PNG 1920x1080.
+        
+        Генерирует красивое изображение программно на основе данных из БД.
         
         Args:
-            bot: Экземпляр бота для получения сообщения
-            chat_id: ID чата
-            message_id: ID сообщения с опросом
+            bot: Экземпляр бота для получения сообщения (не используется, для совместимости)
+            chat_id: ID чата (не используется, для совместимости)
+            message_id: ID сообщения с опросом (не используется, для совместимости)
             group_name: Название группы (например, "ЗИЗ-1")
             poll_date: Дата опроса
             poll_results_text: Текстовое представление результатов (для альтернативного отчета)
+            poll_slots_data: Данные о слотах и голосах из БД
         
         Returns:
             Path к сохраненному файлу или None при ошибке
         """
         try:
-            # Пытаемся создать скриншот через Playwright
-            # Убеждаемся, что браузер запущен
-            if await self._ensure_browser():
-                return await self._create_playwright_screenshot(
-                    bot, chat_id, message_id, group_name, poll_date, poll_slots_data
-                )
-            else:
-                logger.warning("Failed to initialize browser, falling back to text report")
+            # Генерируем изображение программно на основе данных из БД
+            return await self._create_programmatic_image(
+                group_name, poll_date, poll_slots_data, poll_results_text
+            )
         except Exception as e:
-            logger.error("Error creating Playwright screenshot: %s", e, exc_info=True)
-        
-        # Если не удалось создать скриншот, создаем альтернативный текстовый отчет
-        logger.warning("Falling back to text report")
-        return await self._create_text_report(group_name, poll_date, poll_results_text)
+            logger.error("Error creating programmatic image: %s", e, exc_info=True)
+            # Fallback на текстовый отчет
+            logger.warning("Falling back to text report")
+            return await self._create_text_report(group_name, poll_date, poll_results_text)
 
-    async def _create_playwright_screenshot(
+    async def _create_programmatic_image(
         self,
-        bot,
-        chat_id: int,
-        message_id: int,
         group_name: str,
         poll_date: date,
         poll_slots_data: Optional[list] = None,
+        poll_results_text: Optional[str] = None,
     ) -> Optional[Path]:
-        """Создать скриншот через Playwright."""
+        """Создать красивое изображение с результатами опроса программно."""
         try:
-            # Получаем ссылку на сообщение в Telegram Web
-            # Используем прямую ссылку на сообщение
-            message_link = f"https://t.me/c/{str(chat_id)[4:]}/{message_id}"
+            # Размеры изображения
+            width, height = 1920, 1080
             
-            page = await self.context.new_page()
+            # Создаем изображение с белым фоном
+            image = Image.new('RGB', (width, height), color=(255, 255, 255))
+            draw = ImageDraw.Draw(image)
             
-            # Переходим на страницу сообщения
-            await page.goto(message_link, wait_until="networkidle")
-            await asyncio.sleep(2)  # Ждем загрузки
+            # Загружаем шрифты с большим размером для читаемости
+            try:
+                title_font = ImageFont.truetype("/System/Library/Fonts/Helvetica.ttc", 80)
+                header_font = ImageFont.truetype("/System/Library/Fonts/Helvetica.ttc", 64)
+                text_font = ImageFont.truetype("/System/Library/Fonts/Helvetica.ttc", 52)
+            except:
+                try:
+                    title_font = ImageFont.truetype("arial.ttf", 80)
+                    header_font = ImageFont.truetype("arial.ttf", 64)
+                    text_font = ImageFont.truetype("arial.ttf", 52)
+                except:
+                    # Fallback на дефолтный шрифт (будет меньше, но лучше чем ничего)
+                    title_font = ImageFont.load_default()
+                    header_font = ImageFont.load_default()
+                    text_font = ImageFont.load_default()
             
-            # Находим элемент опроса
-            poll_element = await page.query_selector(".tgme_widget_message_poll")
-            if not poll_element:
-                logger.warning("Poll element not found, trying alternative method")
-                # Альтернативный способ - скриншот всего сообщения
-                message_element = await page.query_selector(".tgme_widget_message")
-                if message_element:
-                    screenshot_bytes = await message_element.screenshot(type="png")
-                else:
-                    screenshot_bytes = await page.screenshot(type="png", full_page=False)
-            else:
-                # Скриншот только области опроса
-                screenshot_bytes = await poll_element.screenshot(type="png")
+            # Цвета
+            title_color = (33, 150, 243)  # Синий для заголовка
+            header_color = (66, 66, 66)  # Темно-серый для заголовков слотов
+            text_color = (33, 33, 33)  # Черный для текста
+            empty_color = (158, 158, 158)  # Серый для "Нет записей"
+            divider_color = (224, 224, 224)  # Светло-серый для разделителей
             
-            await page.close()
+            # Отступы
+            padding = 100
+            y_position = padding
             
-            # Обрабатываем изображение
-            image = Image.open(io.BytesIO(screenshot_bytes))
+            # Заголовок
+            title_text = f"Выход на {poll_date.strftime('%d.%m.%Y')}"
+            title_bbox = draw.textbbox((0, 0), title_text, font=title_font)
+            title_width = title_bbox[2] - title_bbox[0]
+            title_x = (width - title_width) // 2
+            draw.text((title_x, y_position), title_text, fill=title_color, font=title_font)
+            y_position += title_bbox[3] - title_bbox[1] + 30
             
-            # Обрезаем до нужного размера (1920x1080)
-            width, height = image.size
-            target_width, target_height = 1920, 1080
+            # Название группы
+            group_text = group_name
+            group_bbox = draw.textbbox((0, 0), group_text, font=header_font)
+            group_width = group_bbox[2] - group_bbox[0]
+            group_x = (width - group_width) // 2
+            draw.text((group_x, y_position), group_text, fill=header_color, font=header_font)
+            y_position += group_bbox[3] - group_bbox[1] + 80
             
-            # Если изображение больше, обрезаем по центру
-            if width > target_width or height > target_height:
-                left = (width - target_width) // 2
-                top = (height - target_height) // 2
-                right = left + target_width
-                bottom = top + target_height
-                image = image.crop((left, top, right, bottom))
+            # Разделительная линия
+            draw.line([(padding, y_position), (width - padding, y_position)], fill=divider_color, width=4)
+            y_position += 50
             
-            # Если изображение меньше, увеличиваем с сохранением пропорций
-            if width < target_width or height < target_height:
-                image = image.resize((target_width, target_height), Image.Resampling.LANCZOS)
-            
-            # Добавляем подпись
-            image = self._add_caption(image, group_name, poll_date)
-            
-            # Добавляем подписи с именами курьеров, если есть данные
+            # Данные слотов
             if poll_slots_data:
-                image = self._add_user_names_to_screenshot(image, poll_slots_data)
+                for slot_data in poll_slots_data:
+                    slot = slot_data.get('slot')
+                    if not slot:
+                        continue
+                    
+                    # Проверяем, не выходим ли за пределы изображения
+                    if y_position > height - 200:
+                        # Добавляем сообщение о том, что есть еще данные
+                        more_text = "... (еще данные не поместились)"
+                        more_bbox = draw.textbbox((0, 0), more_text, font=text_font)
+                        draw.text((padding, y_position), more_text, fill=empty_color, font=text_font)
+                        break
+                    
+                    # Время слота (жирным и крупным)
+                    start_time = slot.start_time.strftime('%H:%M') if hasattr(slot.start_time, 'strftime') else str(slot.start_time)
+                    end_time = slot.end_time.strftime('%H:%M') if hasattr(slot.end_time, 'strftime') else str(slot.end_time)
+                    time_text = f"{start_time} - {end_time}"
+                    
+                    # Рисуем время слота
+                    time_bbox = draw.textbbox((0, 0), time_text, font=header_font)
+                    draw.text((padding, y_position), time_text, fill=header_color, font=header_font)
+                    y_position += time_bbox[3] - time_bbox[1] + 20
+                    
+                    # Имена пользователей
+                    user_names = []
+                    if hasattr(slot, 'user_votes') and slot.user_votes:
+                        for vote in slot.user_votes:
+                            if hasattr(vote, 'user') and vote.user:
+                                full_name = vote.user.get_full_name()
+                                user_names.append(full_name)
+                            elif hasattr(vote, 'user_id'):
+                                user_names.append(f"User {vote.user_id}")
+                    
+                    if user_names:
+                        # Рисуем имена пользователей с переносом строк
+                        users_text = ", ".join(user_names)
+                        # Разбиваем на строки, если текст слишком длинный
+                        max_line_width = width - padding * 2 - 120
+                        words = users_text.split(", ")
+                        current_line = ""
+                        
+                        for word in words:
+                            test_line = current_line + (", " if current_line else "") + word
+                            test_bbox = draw.textbbox((0, 0), test_line, font=text_font)
+                            test_width = test_bbox[2] - test_bbox[0]
+                            
+                            if test_width > max_line_width and current_line:
+                                # Рисуем текущую строку и начинаем новую
+                                text_bbox = draw.textbbox((0, 0), current_line, font=text_font)
+                                draw.text((padding + 60, y_position), current_line, fill=text_color, font=text_font)
+                                y_position += text_bbox[3] - text_bbox[1] + 15
+                                current_line = word
+                            else:
+                                current_line = test_line
+                        
+                        # Рисуем последнюю строку
+                        if current_line:
+                            text_bbox = draw.textbbox((0, 0), current_line, font=text_font)
+                            draw.text((padding + 60, y_position), current_line, fill=text_color, font=text_font)
+                            y_position += text_bbox[3] - text_bbox[1] + 30
+                    else:
+                        # Нет записей
+                        empty_text = "Нет записей"
+                        empty_bbox = draw.textbbox((0, 0), empty_text, font=text_font)
+                        draw.text((padding + 60, y_position), empty_text, fill=empty_color, font=text_font)
+                        y_position += empty_bbox[3] - empty_bbox[1] + 30
+                    
+                    # Разделитель между слотами
+                    y_position += 10
+                    draw.line([(padding, y_position), (width - padding, y_position)], fill=divider_color, width=2)
+                    y_position += 30
             
-            # Конвертируем в RGB, если изображение имеет альфа-канал (RGBA)
-            # Это необходимо для корректной работы с некоторыми форматами
-            if image.mode in ('RGBA', 'LA', 'P'):
-                # Создаем белый фон
-                rgb_image = Image.new('RGB', image.size, (255, 255, 255))
-                if image.mode == 'P':
-                    image = image.convert('RGBA')
-                rgb_image.paste(image, mask=image.split()[-1] if image.mode in ('RGBA', 'LA') else None)
-                image = rgb_image
-            elif image.mode != 'RGB':
-                image = image.convert('RGB')
-            
-            # Сохраняем в PNG с оптимизацией размера
+            # Сохраняем изображение
             reports_dir = settings.REPORTS_DIR / group_name
             reports_dir.mkdir(parents=True, exist_ok=True)
             
             date_str = poll_date.strftime("%Y-%m-%d")
             file_path = reports_dir / f"{date_str}.png"
             
-            # Оптимизируем изображение для уменьшения размера файла
-            # Сохраняем с оптимизацией, но без потери качества
-            image.save(file_path, "PNG", optimize=True, compress_level=6)
+            image.save(file_path, "PNG", optimize=True)
             
-            # Проверяем размер файла
             file_size = file_path.stat().st_size
-            logger.info("Created screenshot: %s (size: %d bytes)", file_path, file_size)
-            
-            # Если файл слишком большой (>8MB), пытаемся сжать сильнее
-            if file_size > 8 * 1024 * 1024:
-                logger.warning("Screenshot file is large (%d bytes), attempting to compress", file_size)
-                try:
-                    # Уменьшаем качество для уменьшения размера
-                    image.save(file_path, "PNG", optimize=True, compress_level=9)
-                    new_size = file_path.stat().st_size
-                    logger.info("Compressed screenshot to %d bytes", new_size)
-                except Exception as compress_error:
-                    logger.warning("Failed to compress screenshot: %s", compress_error)
+            logger.info("Created programmatic image: %s (size: %d bytes)", file_path, file_size)
             
             return file_path
             
         except Exception as e:
-            logger.error("Error in Playwright screenshot creation: %s", e, exc_info=True)
+            logger.error("Error creating programmatic image: %s", e, exc_info=True)
             return None
 
     def _add_caption(

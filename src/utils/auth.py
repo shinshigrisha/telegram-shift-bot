@@ -1,10 +1,58 @@
 from functools import wraps
-from typing import Callable, Any
+from typing import Callable, Any, Union
 
-from aiogram.types import Message, CallbackQuery
+from aiogram.types import Message, CallbackQuery, User as TelegramUser
 from aiogram.fsm.context import FSMContext
 
 from config.settings import settings
+from src.models.user import User as DbUser
+
+
+# Список кураторов, которые не требуют верификации и имеют особые права
+CURATOR_USERNAMES = [
+    "Korolev_Nikita_20",
+    "Kuznetsova_Olyaa",
+    "Evgeniy_kuznetsoof",
+    "VV_Team_Mascot",
+]
+
+
+def is_curator(user: Union[TelegramUser, DbUser, None]) -> bool:
+    """
+    Проверить, является ли пользователь куратором.
+    
+    Args:
+        user: Объект пользователя (Telegram User или модель User из БД)
+    
+    Returns:
+        True если пользователь является куратором, иначе False
+    """
+    if not user:
+        return False
+    
+    # Проверяем по username
+    username = getattr(user, "username", None)
+    if username:
+        username_lower = username.lower()
+        if any(username_lower == curator.lower() for curator in CURATOR_USERNAMES):
+            return True
+    
+    # Проверяем по полному имени (для VV_Team_Mascot, который может не иметь username)
+    if isinstance(user, DbUser):
+        full_name = user.get_full_name()
+    else:
+        # Для Telegram User
+        first_name = getattr(user, "first_name", None) or ""
+        last_name = getattr(user, "last_name", None) or ""
+        full_name = f"{first_name} {last_name}".strip()
+        # Также проверяем full_name атрибут если есть
+        if hasattr(user, "full_name") and user.full_name:
+            full_name = user.full_name
+    
+    if "VV_Team_Mascot" in full_name or "VV Team Mascot" in full_name:
+        return True
+    
+    return False
 
 
 def require_admin(func: Callable) -> Callable:

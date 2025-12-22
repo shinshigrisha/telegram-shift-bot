@@ -6,10 +6,11 @@ import asyncio
 from aiogram import Bot
 
 from src.models.daily_poll import DailyPoll
-from src.repositories.poll_repository import PollRepository  # type: ignore
+from src.repositories.poll_repository import PollRepository
 from src.repositories.group_repository import GroupRepository
-from src.services.screenshot_service import ScreenshotService  # type: ignore
+from src.services.screenshot_service import ScreenshotService
 from src.utils.warning_templates import WarningTemplates
+from src.utils.auth import is_curator
 from config.settings import settings
 
 
@@ -440,107 +441,55 @@ class PollService:
                 continue
 
             try:
-                # message_thread_id не поддерживается в stop_poll API
-                await self.bot.stop_poll(
-                    chat_id=group.telegram_chat_id,
-                    message_id=poll.telegram_message_id,
-                )
-
-                await self.poll_repo.update(
-                    poll.id,
-                    status="closed",
-                    closed_at=now,
-                )
-
+                await self._close_single_poll(group, poll, today, now)
                 closed_count += 1
-                logger.info("Closed poll for %s", group.name)
-
-                # Создаем скриншот результатов
-                screenshot_path = None
-                if self.screenshot_service:
-                    # Получаем текстовое представление результатов для альтернативного отчета
-                    poll_results_text = await self.get_poll_results_text(str(poll.id))
-                    # Получаем данные слотов с пользователями для добавления имен на скриншот
-                    poll_with_data = await self.poll_repo.get_poll_with_votes_and_users(str(poll.id))
-                    poll_slots_data = []
-                    if poll_with_data and hasattr(poll_with_data, 'poll_slots'):
-                        for slot in poll_with_data.poll_slots:
-                            poll_slots_data.append({'slot': slot})
-                    screenshot_path = await self.screenshot_service.create_poll_screenshot(
-                        bot=self.bot,
-                        chat_id=group.telegram_chat_id,
-                        message_id=poll.telegram_message_id,
-                        group_name=group.name,
-                        poll_date=today,
-                        poll_results_text=poll_results_text,
-                        poll_slots_data=poll_slots_data,
-                    )
-                    if screenshot_path:
-                        await self.poll_repo.update(
-                            poll.id,
-                            screenshot_path=str(screenshot_path),
-                        )
-
-                # Отправляем скриншот или текстовый отчет в тему "приход/уход"
-                arrival_departure_topic_id = getattr(group, "arrival_departure_topic_id", None)
-                if screenshot_path and arrival_departure_topic_id:
-                    try:
-                        from aiogram.types import FSInputFile
-                        
-                        # Определяем тип файла по расширению
-                        if screenshot_path.suffix == ".png":
-                            # Отправляем фото
-                            photo = FSInputFile(str(screenshot_path))
-                            caption = f"📊 Выход на {today.strftime('%d.%m.%Y')} | {group.name}"
-                            await self.bot.send_photo(
-                                chat_id=group.telegram_chat_id,
-                                photo=photo,
-                                caption=caption,
-                                message_thread_id=arrival_departure_topic_id,
-                            )
-                        else:
-                            # Отправляем текстовый отчет
-                            text_report = await self.get_poll_results_text(str(poll.id))
-                            await self.bot.send_message(
-                                chat_id=group.telegram_chat_id,
-                                text=f"📊 Выход на {today.strftime('%d.%m.%Y')} | {group.name}\n\n{text_report}",
-                                message_thread_id=arrival_departure_topic_id,
-                            )
-                        logger.info("Sent results to arrival/departure topic for %s", group.name)
-                    except Exception as e:
-                        logger.error("Failed to send results to arrival/departure topic for %s: %s", group.name, e)
-                        # Отправляем текстовый отчет как альтернативу
-                        try:
-                            text_report = await self.get_poll_results_text(str(poll.id))
-                            await self.bot.send_message(
-                                chat_id=group.telegram_chat_id,
-                                text=f"📊 Выход на {today.strftime('%d.%m.%Y')} | {group.name}\n\n{text_report}",
-                                message_thread_id=arrival_departure_topic_id,
-                            )
-                        except Exception as e2:
-                            logger.error("Failed to send text report as fallback: %s", e2)
-
-                # Отправляем замечания курьерам, которые не отметились
-                try:
-                    from datetime import datetime
-                    now = datetime.now()
-                    current_hour = now.hour
-                    is_final = (current_hour == 18 and now.minute >= 30) or current_hour == 19
-                    await self._send_warnings_to_couriers(
-                        group=group,
-                        poll_id=str(poll.id),
-                        poll_date=today,
-                        current_hour=current_hour,
-                        is_final=is_final,
-                    )
-                except Exception as e:
-                    logger.error("Failed to send warnings for group %s: %s", group.name, e)
-
             except Exception as e:  # noqa: BLE001
                 logger.error("Error closing poll for %s: %s", group.name, e)
 
         logger.info("Closed %s polls (skipped %s groups with time not reached)", closed_count, skipped_count)
         return closed_count
+
+    async def _close_single_poll(
+        self,
+        group,
+        poll: DailyPoll,
+        poll_date: date,
+        close_time: datetime | None = None,
+    ) -> None:
+        """
+        Закрыть один опрос для группы.
+        
+        Args:
+            group: Группа
+            poll: Опрос для закрытия
+            poll_date: Дата опроса
+            close_time: Время закрытия (если None, используется текущее время)
+        """
+        if close_time is None:
+            close_time = datetime.now()
+        
+        # message_thread_id не поддерживается в stop_poll API
+        try:
+            await self.bot.stop_poll(
+                chat_id=group.telegram_chat_id,
+                message_id=poll.telegram_message_id,
+            )
+        except Exception as poll_error:  # noqa: BLE001
+            # Если опрос уже закрыт или сообщение не найдено, просто обновляем статус в БД
+            error_msg = str(poll_error).lower()
+            if "not found" in error_msg or "already closed" in error_msg or "poll is not active" in error_msg:
+                logger.warning("Poll already closed or not found for %s, updating status in DB", group.name)
+            else:
+                # Другие ошибки пробрасываем дальше
+                raise
+
+        await self.poll_repo.update(
+            poll.id,
+            status="closed",
+            closed_at=close_time,
+        )
+
+        logger.info("Closed poll for %s", group.name)
 
     async def get_poll_results_text(self, poll_id: str) -> str:
         """Получить текстовое представление результатов опроса."""
@@ -899,18 +848,16 @@ class PollService:
                         is_courier_by_tag = any(tag in display_name for tag in courier_tags) if display_name else False
                         
                         # Проверяем, не является ли куратором
-                        is_curator = False
+                        user_is_curator = False
                         if user:
-                            is_curator = self._is_curator(user)
+                            # Проверяем модель User из БД
+                            user_is_curator = is_curator(user)
                         else:
-                            # Проверяем по username для кураторов
-                            curator_usernames = ["Korolev_Nikita_20", "Kuznetsova_Olyaa", 
-                                                "Evgeniy_kuznetsoof", "VV_Team_Mascot"]
-                            if member_user.username and member_user.username in curator_usernames:
-                                is_curator = True
+                            # Проверяем Telegram User объект
+                            user_is_curator = is_curator(member_user)
                         
                         # Добавляем в список неотметившихся, если это курьер
-                        if not is_curator and (user and user.is_verified or is_courier_by_tag):
+                        if not user_is_curator and (user and user.is_verified or is_courier_by_tag):
                             # Используем данные из БД, если есть, иначе из Telegram
                             if user:
                                 full_name = user.get_full_name()
@@ -931,7 +878,7 @@ class PollService:
                         # Если не удалось получить через API, используем данные из БД
                         user = users_data.get(user_id)
                         if user and user.is_verified:
-                            if not self._is_curator(user):
+                            if not is_curator(user):
                                 return {
                                     'user_id': user_id,
                                     'username': user.username,
@@ -960,30 +907,6 @@ class PollService:
         except Exception as e:
             logger.error("Error getting users who didn't vote: %s", e, exc_info=True)
             return []
-
-    def _is_curator(self, user) -> bool:
-        """Проверить, является ли пользователь куратором."""
-        if not user:
-            return False
-        
-        curator_usernames = [
-            "Korolev_Nikita_20",
-            "Kuznetsova_Olyaa",
-            "Evgeniy_kuznetsoof",
-            "VV_Team_Mascot",
-        ]
-        
-        # Проверяем по username
-        if user.username:
-            if user.username.lower() in [c.lower() for c in curator_usernames]:
-                return True
-        
-        # Проверяем по полному имени (для VV_Team_Mascot, который может не иметь username)
-        full_name = user.get_full_name()
-        if "VV_Team_Mascot" in full_name or "VV Team Mascot" in full_name:
-            return True
-        
-        return False
 
     async def _get_underfilled_slots(self, poll_id: str) -> List[dict]:
         """Получить список незаполненных слотов (где current_users < max_users)."""

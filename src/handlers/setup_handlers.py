@@ -8,7 +8,7 @@ from aiogram.fsm.context import FSMContext
 from aiogram.types import Message
 
 from src.states.setup_states import SetupStates
-from src.services.group_service import GroupService  # type: ignore
+from src.services.group_service import GroupService
 
 
 logger = logging.getLogger(__name__)

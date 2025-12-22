@@ -1,4 +1,5 @@
 import logging
+from datetime import datetime
 from typing import Optional, Any
 
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
@@ -7,7 +8,7 @@ from aiogram import Bot
 
 from config.settings import settings
 from src.services.poll_service import PollService
-from src.services.notification_service import NotificationService  # type: ignore
+from src.services.notification_service import NotificationService
 
 
 logger = logging.getLogger(__name__)
@@ -77,21 +78,13 @@ class SchedulerService:
             id="reminder_18_00",
         )
         
-        # Проверка и отправка замечаний курьерам
-        # В 17:50
-        self.scheduler.add_job(
-            self._check_and_send_warnings_job,
-            CronTrigger(hour=17, minute=50),
-            id="check_warnings_17_50",
-        )
-
-        # Старые напоминания из settings больше не используются
-        # Все напоминания теперь только в 18:00
+        # Проверка и отправка замечаний курьерам отключена
 
         self.scheduler.add_job(
             self._health_check_job,
             CronTrigger(minute=30),
             id="health_check",
+            misfire_grace_time=3600,  # Прощаем задержки до 1 часа (на случай длительных перезагрузок)
         )
         
         # Проверка скриншотов отключена
@@ -147,7 +140,6 @@ class SchedulerService:
                 )
 
     async def _close_polls_job(self) -> None:
-        from datetime import datetime
         logger.info("Running close_polls job at %s", datetime.now().strftime("%H:%M:%S"))
         try:
             from src.models.database import AsyncSessionLocal
@@ -351,71 +343,6 @@ class SchedulerService:
         except Exception as e:  # noqa: BLE001
             logger.error("Error in health check job: %s", e)
 
-    async def _check_and_send_warnings_job(self) -> None:
-        """Проверка незаполненных слотов и отправка замечаний курьерам."""
-        if not settings.ENABLE_COURIER_WARNINGS:
-            logger.info("Courier warnings disabled, skipping check_and_send_warnings job")
-            return
-        
-        logger.info("Running check_and_send_warnings job")
-        try:
-            from datetime import date, datetime
-            from src.models.database import AsyncSessionLocal
-            from src.repositories.group_repository import GroupRepository
-            from src.repositories.poll_repository import PollRepository
-            
-            today = date.today()
-            now = datetime.now()
-            current_hour = now.hour
-            is_final = (current_hour == 18 and now.minute >= 30) or current_hour == 19
-            warnings_sent = 0
-            
-            async with AsyncSessionLocal() as session:
-                group_repo = GroupRepository(session)
-                poll_repo = PollRepository(session)
-                
-                poll_service = PollService(
-                    bot=self.bot,
-                    poll_repo=poll_repo,
-                    group_repo=group_repo,
-                    screenshot_service=self.screenshot_service,
-                )
-                
-                # Получаем все активные группы
-                groups = await group_repo.get_active_groups()
-                logger.info("Checking %d groups for warnings", len(groups))
-                
-                for group in groups:
-                    try:
-                        # Получаем активный опрос на сегодня
-                        poll = await poll_repo.get_active_by_group_and_date(group.id, today)
-                        if not poll:
-                            continue
-                        
-                        # Отправляем замечания через метод poll_service
-                        await poll_service._send_warnings_to_couriers(
-                            group=group,
-                            poll_id=str(poll.id),
-                            poll_date=today,
-                            current_hour=current_hour,
-                            is_final=is_final,
-                        )
-                        warnings_sent += 1
-                        logger.info("Sent warnings for group %s", group.name)
-                    except Exception as e:
-                        logger.error("Error sending warnings for group %s: %s", group.name, e)
-                
-                await session.commit()
-            
-            logger.info("Check warnings job completed. Warnings sent: %d", warnings_sent)
-            
-        except Exception as e:  # noqa: BLE001
-            logger.error("Error in check_and_send_warnings job: %s", e, exc_info=True)
-            if settings.ENABLE_ADMIN_NOTIFICATIONS:
-                await self.notification_service.notify_admins(
-                    f"🚨 Ошибка при проверке и отправке замечаний: {e}"
-                )
-    
     async def _check_screenshots_job(self) -> None:
         """Метод больше не используется - проверка скриншотов отключена."""
         # Автоматическая проверка скриншотов больше не выполняется

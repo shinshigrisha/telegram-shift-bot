@@ -146,3 +146,4 @@ async def test_cmd_logs_long_content():
         settings.ADMIN_IDS = original_admin_ids
 
 
+

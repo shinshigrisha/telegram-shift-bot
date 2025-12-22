@@ -7,36 +7,13 @@ from aiogram.types import Message, TelegramObject
 from config.settings import settings
 from src.services.user_service import UserService
 from src.states.verification_states import VerificationStates
+from src.utils.auth import is_curator
 
 logger = logging.getLogger(__name__)
-
-# Список кураторов, которые не требуют верификации
-CURATOR_USERNAMES = [
-    "Korolev_Nikita_20",
-    "Kuznetsova_Olyaa",
-    "Evgeniy_kuznetsoof",
-    "VV_Team_Mascot",
-]
 
 
 class VerificationMiddleware(BaseMiddleware):
     """Middleware для проверки верификации пользователей."""
-
-    def _is_curator(self, user) -> bool:
-        """Проверить, является ли пользователь куратором."""
-        if not user:
-            return False
-        
-        # Проверяем по username
-        if user.username and user.username.lower() in [c.lower() for c in CURATOR_USERNAMES]:
-            return True
-        
-        # Проверяем по полному имени
-        full_name = f"{user.first_name or ''} {user.last_name or ''}".strip()
-        if "VV_Team_Mascot" in full_name or "VV Team Mascot" in full_name:
-            return True
-        
-        return False
 
     async def __call__(
         self,
@@ -53,7 +30,7 @@ class VerificationMiddleware(BaseMiddleware):
             return await handler(event, data)
         
         # Пропускаем кураторов без верификации
-        if event.from_user and self._is_curator(event.from_user):
+        if event.from_user and is_curator(event.from_user):
             logger.debug("Curator %s (%s) skipped verification", event.from_user.id, event.from_user.username)
             return await handler(event, data)
 

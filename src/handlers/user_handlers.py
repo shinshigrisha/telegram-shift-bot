@@ -4,6 +4,7 @@ from aiogram.types import Message
 
 from config.settings import settings
 from src.services.user_service import UserService
+from src.utils.auth import is_curator
 
 
 router = Router()
@@ -127,15 +128,10 @@ async def cmd_my_votes(
     user = message.from_user
     
     # Проверяем, является ли пользователь куратором
-    curator_usernames = ["Korolev_Nikita_20", "Kuznetsova_Olyaa", "Evgeniy_kuznetsoof", "VV_Team_Mascot"]
-    is_curator = False
-    if user.username and user.username.lower() in [c.lower() for c in curator_usernames]:
-        is_curator = True
-    elif user.full_name and ("VV_Team_Mascot" in user.full_name or "VV Team Mascot" in user.full_name):
-        is_curator = True
+    user_is_curator = is_curator(user)
     
     # Проверяем верификацию только если она включена и пользователь не куратор
-    if settings.ENABLE_VERIFICATION and not is_curator:
+    if settings.ENABLE_VERIFICATION and not user_is_curator:
         is_verified = await user_service.is_verified(user_id)
         
         if not is_verified:
@@ -163,15 +159,10 @@ async def cmd_schedule(
     user = message.from_user
     
     # Проверяем, является ли пользователь куратором
-    curator_usernames = ["Korolev_Nikita_20", "Kuznetsova_Olyaa", "Evgeniy_kuznetsoof", "VV_Team_Mascot"]
-    is_curator = False
-    if user.username and user.username.lower() in [c.lower() for c in curator_usernames]:
-        is_curator = True
-    elif user.full_name and ("VV_Team_Mascot" in user.full_name or "VV Team Mascot" in user.full_name):
-        is_curator = True
+    user_is_curator = is_curator(user)
     
     # Проверяем верификацию только если она включена и пользователь не куратор
-    if settings.ENABLE_VERIFICATION and not is_curator:
+    if settings.ENABLE_VERIFICATION and not user_is_curator:
         is_verified = await user_service.is_verified(user_id)
         
         if not is_verified:

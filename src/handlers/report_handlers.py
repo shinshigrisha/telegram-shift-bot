@@ -8,7 +8,7 @@ from aiogram.fsm.context import FSMContext
 from aiogram.types import Message, FSInputFile
 
 from config.settings import settings
-from src.utils.auth import require_admin  # type: ignore
+from src.utils.auth import require_admin
 
 
 logger = logging.getLogger(__name__)
