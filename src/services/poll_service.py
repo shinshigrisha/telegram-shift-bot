@@ -9,7 +9,6 @@ from src.models.daily_poll import DailyPoll
 from src.repositories.poll_repository import PollRepository
 from src.repositories.group_repository import GroupRepository
 from src.services.screenshot_service import ScreenshotService
-from src.utils.warning_templates import WarningTemplates
 from src.utils.auth import is_curator
 from config.settings import settings
 
@@ -927,116 +926,6 @@ class PollService:
             logger.error("Error getting underfilled slots: %s", e)
             return []
 
-    async def _send_warnings_to_couriers(
-        self,
-        group: any,
-        poll_id: str,
-        poll_date: date,
-        current_hour: Optional[int] = None,
-        is_final: bool = False,
-    ) -> None:
-        """Отправить замечания курьерам, которые не отметились."""
-        if not settings.ENABLE_COURIER_WARNINGS:
-            logger.debug("Courier warnings disabled, skipping warnings for group %s", group.name)
-            return
-        
-        try:
-            # Получаем незаполненные слоты
-            underfilled_slots = await self._get_underfilled_slots(poll_id)
-            
-            # Получаем курьеров, которые не проголосовали
-            non_voters = await self._get_users_who_didnt_vote(
-                poll_id,
-                group.telegram_chat_id,
-            )
-            
-            # Если нет проблем, но это финальное напоминание - все равно отправляем сообщение
-            if not underfilled_slots and not non_voters and not is_final:
-                return  # Все слоты заполнены и все отметились (но не финальное напоминание)
-            
-            # Формируем список упоминаний для неотметившихся курьеров
-            mentions = []
-            if non_voters:
-                for non_voter in non_voters:
-                    user_id = non_voter.get('user_id')
-                    username = non_voter.get('username')
-                    full_name = non_voter.get('full_name', f"User {user_id}")
-                    
-                    # Используем user_id для тэгания (надежнее чем username)
-                    if user_id:
-                        # Формат для тэгания через user_id: <a href="tg://user?id=USER_ID">Имя</a>
-                        display_name = username if username else full_name
-                        mentions.append(f'<a href="tg://user?id={user_id}">{display_name}</a>')
-                    elif username:
-                        mentions.append(f"@{username}")
-                    else:
-                        mentions.append(full_name)
-            
-            # Используем шаблоны для формирования сообщения
-            warning_message = WarningTemplates.build_warning_message(
-                group_name=group.name,
-                poll_date=poll_date,
-                underfilled_slots=underfilled_slots,
-                non_voters_mentions=mentions,
-                current_hour=current_hour,
-                is_final=is_final,
-                pluralize_courier_func=self._pluralize_courier
-            )
-            
-            # Отправляем замечания в другую группу (не в ту, где опрос)
-            # Ищем первую другую активную группу с темой "общий чат"
-            all_groups = await self.group_repo.get_active_groups()
-            target_group = None
-            
-            for other_group in all_groups:
-                if other_group.id != group.id:
-                    general_topic_id = getattr(other_group, "general_chat_topic_id", None)
-                    if general_topic_id:
-                        target_group = other_group
-                        break
-            
-            if target_group:
-                # Отправляем в тему "общий чат" другой группы
-                try:
-                    general_topic_id = getattr(target_group, "general_chat_topic_id")
-                    await self.bot.send_message(
-                        chat_id=target_group.telegram_chat_id,
-                        text=warning_message,
-                        message_thread_id=general_topic_id,
-                        parse_mode="HTML",  # Включаем HTML для тэгания через user_id
-                    )
-                    logger.info("Sent warnings to couriers in group %s (for group %s)", target_group.name, group.name)
-                except Exception as e:
-                    logger.error("Failed to send warnings to group %s: %s", target_group.name, e)
-                    # Fallback: отправляем админам
-                    await self._send_warnings_to_admins(warning_message)
-            else:
-                # Если нет другой группы с темой "общий чат", отправляем админам
-                await self._send_warnings_to_admins(warning_message)
-        
-        except Exception as e:
-            logger.error("Error sending warnings to couriers: %s", e, exc_info=True)
-
-    def _pluralize_courier(self, count: int) -> str:
-        """Правильное склонение слова 'курьер'."""
-        if count == 1:
-            return "курьера"
-        elif 2 <= count <= 4:
-            return "курьеров"
-        else:
-            return "курьеров"
-
-    async def _send_warnings_to_admins(self, warning_message: str) -> None:
-        """Отправить замечания админам в личку."""
-        from config.settings import settings
-        for admin_id in settings.ADMIN_IDS:
-            try:
-                await self.bot.send_message(
-                    chat_id=admin_id,
-                    text=warning_message,
-                )
-            except Exception as e:
-                logger.error("Failed to send warning to admin %s: %s", admin_id, e)
 
     async def sync_poll_by_message_id(
         self,

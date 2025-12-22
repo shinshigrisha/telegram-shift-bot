@@ -2,15 +2,25 @@ import logging
 from typing import Optional, Any
 
 from aiogram import Router, Bot
+from aiogram.enums import ContentType
 from aiogram.filters import Command, StateFilter
 from aiogram.fsm.context import FSMContext
-from aiogram.types import Message, CallbackQuery, InlineKeyboardMarkup, InlineKeyboardButton
+from aiogram.types import Message, CallbackQuery, InlineKeyboardMarkup, InlineKeyboardButton, ReplyKeyboardMarkup, KeyboardButton, ReplyKeyboardRemove
 
 from config.settings import settings
 from src.utils.auth import require_admin, require_admin_callback
+from src.utils.group_formatters import clean_group_name_for_display
+from src.utils.admin_keyboards import (
+    get_admin_panel_keyboard,
+    get_groups_menu_keyboard,
+    get_settings_menu_keyboard,
+    get_polls_menu_keyboard,
+    get_monitoring_menu_keyboard,
+    get_topic_setup_keyboard,
+    create_time_selection_keyboard,
+)
 from src.services.group_service import GroupService
 from src.services.poll_service import PollService
-from src.services.screenshot_service import ScreenshotService
 from src.repositories.group_repository import GroupRepository
 from src.repositories.poll_repository import PollRepository
 from src.states.setup_states import SetupStates
@@ -20,61 +30,174 @@ logger = logging.getLogger(__name__)
 router = Router()
 
 
-def clean_group_name_for_display(name: str) -> str:
-    """Очистить название группы от '(тест)' и '(тэст)' для отображения."""
-    if not name:
-        return name
-    import re
-    # Удаляем "(тест)" или "(тэст)" в любом регистре, с пробелами или без
-    cleaned = re.sub(r'\s*\(тест\)\s*', '', name, flags=re.IGNORECASE)
-    cleaned = re.sub(r'\s*\(тэст\)\s*', '', cleaned, flags=re.IGNORECASE)
-    cleaned = re.sub(r'\s*\(test\)\s*', '', cleaned, flags=re.IGNORECASE)
-    return cleaned.strip()
+@router.callback_query(lambda c: c.data == "admin:groups_menu")
+@require_admin_callback
+async def callback_groups_menu(callback: CallbackQuery) -> None:
+    """Меню управления группами."""
+    text = (
+        "📋 <b>Управление группами</b>\n\n"
+        "Выберите действие:"
+    )
+    await callback.message.edit_text(text, reply_markup=get_groups_menu_keyboard())
+    await callback.answer()
 
 
-def get_screenshot_service(data: dict | None = None):
-    """Получить screenshot_service из data или создать новый (fallback)."""
-    # Пытаемся получить из data (должен быть добавлен через middleware)
-    if data and 'screenshot_service' in data:
-        screenshot_service = data.get('screenshot_service')
-        if screenshot_service:
-            return screenshot_service
+@router.callback_query(lambda c: c.data == "admin:settings_menu")
+@require_admin_callback
+async def callback_settings_menu(callback: CallbackQuery) -> None:
+    """Меню настроек."""
+    text = (
+        "⚙️ <b>Настройки</b>\n\n"
+        "Выберите действие:"
+    )
+    await callback.message.edit_text(text, reply_markup=get_settings_menu_keyboard())
+    await callback.answer()
+
+
+@router.callback_query(lambda c: c.data == "admin:polls_menu")
+@require_admin_callback
+async def callback_polls_menu(callback: CallbackQuery) -> None:
+    """Меню управления опросами."""
+    text = (
+        "📊 <b>Управление опросами</b>\n\n"
+        "Выберите действие:"
+    )
+    await callback.message.edit_text(text, reply_markup=get_polls_menu_keyboard())
+    await callback.answer()
+
+
+@router.callback_query(lambda c: c.data == "admin:monitoring_menu")
+@require_admin_callback
+async def callback_monitoring_menu(callback: CallbackQuery) -> None:
+    """Меню мониторинга."""
+    text = (
+        "📈 <b>Мониторинг</b>\n\n"
+        "Выберите действие:"
+    )
+    await callback.message.edit_text(text, reply_markup=get_monitoring_menu_keyboard())
+    await callback.answer()
+
+
+@router.callback_query(lambda c: c.data == "admin:list_groups")
+@require_admin_callback
+async def callback_list_groups(
+    callback: CallbackQuery,
+    group_service: GroupService,
+) -> None:
+    """Показать список групп через админ-панель."""
+    groups = await group_service.get_all_groups()
     
-    # Если не найден, создаем новый (не инициализирован - будет использован fallback)
-    logger.warning("Screenshot service not found in data, using fallback")
-    return ScreenshotService()  # Не инициализирован, будет использован fallback
+    if not groups:
+        text = "📭 Нет зарегистрированных групп"
+    else:
+        text = "📋 <b>Список групп:</b>\n\n"
+        for group in groups:
+            status = "✅" if group.is_active else "❌"
+            night = "🌙" if group.is_night else "☀️"
+            slots = len(group.get_slots_config())
+            display_name = clean_group_name_for_display(group.name)
+            topic_info = f" | Topic: {group.telegram_topic_id}" if getattr(group, "telegram_topic_id", None) else ""
+            
+            text += (
+                f"{status} {night} <b>{display_name}</b>\n"
+                f"   ID: {group.id} | Chat: {group.telegram_chat_id}{topic_info}\n"
+                f"   Слотов: {slots} | Закрытие: {group.poll_close_time}\n\n"
+            )
+    
+    keyboard = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="◀️ Назад", callback_data="admin:groups_menu")],
+    ])
+    await callback.message.edit_text(text, reply_markup=keyboard)
+    await callback.answer()
 
 
-def get_admin_panel_keyboard() -> InlineKeyboardMarkup:
-    """Создать клавиатуру админ-панели."""
-    keyboard = [
-        [InlineKeyboardButton(text="➕ Создать группу для ЗИЗ", callback_data="admin:create_group")],
-        [InlineKeyboardButton(text="⚙️ Настройки слотов", callback_data="admin:setup_slots")],
-        [InlineKeyboardButton(text="⏰ Настройка расписания", callback_data="admin:setup_schedule")],
-        [InlineKeyboardButton(text="📌 Установить тему", callback_data="admin:set_topic_menu")],
-        [InlineKeyboardButton(text="📝 Создать опросы вручную", callback_data="admin:create_polls")],
-        [InlineKeyboardButton(text="🔄 Пересоздать опросы", callback_data="admin:force_create_polls")],
-        [InlineKeyboardButton(text="📊 Вывести результат", callback_data="admin:show_results")],
-        [InlineKeyboardButton(text="⏹️ Остановить опрос", callback_data="admin:stop_poll")],
-        [InlineKeyboardButton(text="🔒 Досрочно закрыть опрос", callback_data="admin:close_poll_early")],
-        [InlineKeyboardButton(text="🔒 Закрыть все опросы", callback_data="admin:close_all_polls")],
-        [InlineKeyboardButton(text="🔎 Найти и открыть опросы на завтра", callback_data="admin:find_tomorrow_polls")],
-        [InlineKeyboardButton(text="📸 Ручная отправка скриншотов выхода", callback_data="admin:manual_screenshots")],
-        [InlineKeyboardButton(text="📢 Рассылка по группам", callback_data="admin:broadcast")],
-    ]
-    return InlineKeyboardMarkup(inline_keyboard=keyboard)
+@router.callback_query(lambda c: c.data == "admin:stats")
+@require_admin_callback
+async def callback_stats(
+    callback: CallbackQuery,
+    group_service: GroupService,
+) -> None:
+    """Показать статистику через админ-панель."""
+    stats = await group_service.get_system_stats()
+    
+    text = (
+        "📊 <b>Статистика системы</b>\n\n"
+        f"👥 Групп всего: {stats['total_groups']}\n"
+        f"✅ Активных: {stats['active_groups']}\n"
+        f"☀️ Дневных: {stats['day_groups']}\n"
+        f"🌙 Ночных: {stats['night_groups']}\n\n"
+        f"📅 Активных опросов: {stats['active_polls']}\n"
+        f"🗳️ Всего голосов сегодня: {stats['today_votes']}"
+    )
+    
+    keyboard = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="◀️ Назад", callback_data="admin:monitoring_menu")],
+    ])
+    await callback.message.edit_text(text, reply_markup=keyboard)
+    await callback.answer()
 
 
-def get_topic_setup_keyboard() -> InlineKeyboardMarkup:
-    """Создать клавиатуру для настройки тем."""
-    keyboard = [
-        [InlineKeyboardButton(text="📋 Отметки на слот", callback_data="admin:set_topic:poll")],
-        [InlineKeyboardButton(text="📥 Приход/уход", callback_data="admin:set_topic:arrival")],
-        [InlineKeyboardButton(text="💬 Общий чат", callback_data="admin:set_topic:general")],
-        [InlineKeyboardButton(text="📢 Важная информация", callback_data="admin:set_topic:important")],
-        [InlineKeyboardButton(text="◀️ Назад", callback_data="admin:back_to_main")],
-    ]
-    return InlineKeyboardMarkup(inline_keyboard=keyboard)
+@router.callback_query(lambda c: c.data == "admin:status")
+@require_admin_callback
+async def callback_status(
+    callback: CallbackQuery,
+) -> None:
+    """Показать статус системы через админ-панель."""
+    import psutil
+    
+    memory = psutil.virtual_memory()
+    cpu_percent = psutil.cpu_percent(interval=1)
+    disk = psutil.disk_usage("/")
+
+    status_text = (
+        "📊 <b>Статус системы</b>\n\n"
+        f"💾 Память: {memory.percent}% использовано\n"
+        f"⚡ CPU: {cpu_percent}% загружен\n"
+        f"💿 Диск: {disk.percent}% заполнен\n"
+        f"🔄 Процессов: {len(psutil.pids())}"
+    )
+    
+    keyboard = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="◀️ Назад", callback_data="admin:monitoring_menu")],
+    ])
+    await callback.message.edit_text(status_text, reply_markup=keyboard)
+    await callback.answer()
+
+
+@router.callback_query(lambda c: c.data == "admin:logs")
+@require_admin_callback
+async def callback_logs(
+    callback: CallbackQuery,
+) -> None:
+    """Показать логи через админ-панель."""
+    from config.settings import settings
+    
+    try:
+        with open(settings.LOG_FILE, "r", encoding="utf-8") as f:
+            lines = f.readlines()[-20:]
+
+        logs_text = "📝 <b>Последние логи:</b>\n\n<code>" + "".join(lines) + "</code>"
+
+        keyboard = InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text="◀️ Назад", callback_data="admin:monitoring_menu")],
+        ])
+        
+        if len(logs_text) > 4000:
+            # Если логи слишком длинные, отправляем частями
+            for i in range(0, len(logs_text), 4000):
+                if i == 0:
+                    await callback.message.edit_text(logs_text[i : i + 4000], reply_markup=keyboard, parse_mode="HTML")
+                else:
+                    await callback.message.answer(logs_text[i : i + 4000], parse_mode="HTML")
+        else:
+            await callback.message.edit_text(logs_text, reply_markup=keyboard, parse_mode="HTML")
+    except Exception as e:  # noqa: BLE001
+        keyboard = InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text="◀️ Назад", callback_data="admin:monitoring_menu")],
+        ])
+        await callback.message.edit_text(f"❌ Ошибка при чтении логов: {e}", reply_markup=keyboard)
+    
+    await callback.answer()
 
 
 @router.message(Command("admin"))
@@ -91,7 +214,12 @@ async def cmd_admin_panel(
     
     text = (
         "👑 <b>Админ-панель</b>\n\n"
-        "Выберите действие:"
+        "Выберите раздел для управления ботом:\n\n"
+        "📋 <b>Управление группами</b> — создание, настройка, темы\n"
+        "⚙️ <b>Настройки</b> — расписание, параметры\n"
+        "📊 <b>Опросы</b> — создание, управление, результаты\n"
+        "📢 <b>Рассылка</b> — отправка сообщений в группы\n"
+        "📈 <b>Мониторинг</b> — статистика, логи, статус"
     )
     await message.answer(text, reply_markup=get_admin_panel_keyboard())
 
@@ -104,7 +232,12 @@ async def callback_back_to_main(callback: CallbackQuery) -> None:
     await safe_edit_message(
         callback.message,
         "👑 <b>Админ-панель</b>\n\n"
-        "Выберите действие:",
+        "Выберите раздел для управления ботом:\n\n"
+        "📋 <b>Управление группами</b> — создание, настройка, темы\n"
+        "⚙️ <b>Настройки</b> — расписание, параметры\n"
+        "📊 <b>Опросы</b> — создание, управление, результаты\n"
+        "📢 <b>Рассылка</b> — отправка сообщений в группы\n"
+        "📈 <b>Мониторинг</b> — статистика, логи, статус",
         reply_markup=get_admin_panel_keyboard(),
     )
     await safe_answer_callback(callback)
@@ -122,7 +255,7 @@ async def callback_create_group(
         "Введите название группы (например, <code>ЗИЗ-1</code>):"
     )
     keyboard = InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="◀️ Назад", callback_data="admin:back_to_main")],
+        [InlineKeyboardButton(text="◀️ Назад", callback_data="admin:groups_menu")],
     ])
     await callback.message.edit_text(text, reply_markup=keyboard)
     await state.set_state(SetupStates.waiting_for_group_name_for_create)
@@ -224,7 +357,7 @@ async def process_chat_id_for_create(
             f"1. 📋 <b>Отметки на слот</b> — тема, где создаются опросы\n"
             f"   Команда: <code>/set_topic {group_name} [topic_id]</code>\n"
             f"   Или через админ-панель: /admin → Установить тему → Отметки на слот\n\n"
-            f"2. 📥 <b>Приход/уход</b> — тема, куда отправляются результаты\n"
+            f"2. 📥 <b>Приход/уход</b> — тема для других целей (например, мониторинг скриншотов)\n"
             f"   Команда: <code>/set_arrival_topic {group_name} [topic_id]</code>\n"
             f"   Или через админ-панель: /admin → Установить тему → Приход/уход\n\n"
             f"3. 💬 <b>Общий чат</b> — тема для напоминаний\n"
@@ -251,29 +384,722 @@ async def process_chat_id_for_create(
 async def callback_setup_slots(
     callback: CallbackQuery,
     state: FSMContext,
+    group_service: GroupService,
 ) -> None:
-    """Настройка слотов через админ-панель."""
-    text = (
+    """Выбор группы для настройки слотов."""
+    groups = await group_service.get_all_groups()
+    if not groups:
+        await callback.answer("❌ Нет зарегистрированных групп", show_alert=True)
+        return
+    
+    # Формируем кнопки по 3 в ряд
+    keyboard_buttons = []
+    for i in range(0, len(groups), 3):
+        row = []
+        for j in range(3):
+            if i + j < len(groups):
+                group = groups[i + j]
+                display_name = clean_group_name_for_display(group.name)
+                row.append(
+                    InlineKeyboardButton(
+                        text=display_name,
+                        callback_data=f"admin:select_group_slots_{group.id}",
+                    )
+                )
+        if row:
+            keyboard_buttons.append(row)
+    
+    keyboard_buttons.append([
+        InlineKeyboardButton(text="◀️ Назад", callback_data="admin:settings_menu"),
+    ])
+    
+    await callback.message.edit_text(
         "⚙️ <b>Настройка слотов</b>\n\n"
         "💡 <b>Важно:</b> У каждой группы ЗИЗ могут быть <b>разные настройки</b>\n"
         "времени слотов и количества людей на них.\n\n"
-        "Введите название группы для настройки слотов.\n\n"
-        "<b>Формат ввода слотов:</b>\n"
-        "<code>время_начала-время_конца:лимит</code>\n\n"
-        "<b>Примеры:</b>\n"
-        "• <code>07:30-19:30:3</code> - с 07:30 до 19:30, лимит 3 человека\n"
-        "• <code>08:00-20:00:2</code> - с 08:00 до 20:00, лимит 2 человека\n"
-        "• <code>10:00-22:00:1</code> - с 10:00 до 22:00, лимит 1 человек\n\n"
-        "Можно вводить несколько слотов сразу (каждый с новой строки).\n"
-        "Для завершения отправьте <b>готово</b>.\n\n"
-        "Введите название группы:"
+        "Выберите группу для просмотра и редактирования слотов:",
+        reply_markup=InlineKeyboardMarkup(inline_keyboard=keyboard_buttons),
     )
-    keyboard = InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="◀️ Назад", callback_data="admin:back_to_main")],
-    ])
-    await callback.message.edit_text(text, reply_markup=keyboard)
-    await state.set_state(SetupStates.waiting_for_group_name)
     await callback.answer()
+
+
+@router.callback_query(lambda c: c.data.startswith("admin:select_group_slots_"))
+@require_admin_callback
+async def callback_select_group_for_slots(
+    callback: CallbackQuery,
+    group_repo: GroupRepository,
+    data: dict | None = None,  # type: ignore
+) -> None:
+    """Показать текущие настройки слотов для выбранной группы."""
+    group_id = int(callback.data.split("_")[-1])
+    
+    try:
+        group = await group_repo.get_by_id(group_id)
+        if not group:
+            await callback.answer("❌ Группа не найдена", show_alert=True)
+            return
+        
+        display_name = clean_group_name_for_display(group.name)
+        slots = group.get_slots_config()
+        
+        # Формируем текст с текущими настройками
+        if slots:
+            slots_text = "\n".join(
+                f"• {slot['start']}-{slot['end']} (лимит: {slot['limit']} чел.)"
+                for slot in slots
+            )
+            text = (
+                f"⚙️ <b>Настройки слотов: {display_name}</b>\n\n"
+                f"📋 <b>Текущие слоты:</b>\n{slots_text}\n\n"
+                f"⏰ Время закрытия опроса: {group.poll_close_time.strftime('%H:%M')}"
+            )
+        else:
+            text = (
+                f"⚙️ <b>Настройки слотов: {display_name}</b>\n\n"
+                f"⚠️ <b>Слоты еще не настроены для этой группы.</b>\n\n"
+                f"⏰ Время закрытия опроса: {group.poll_close_time.strftime('%H:%M')}"
+            )
+        
+        keyboard = InlineKeyboardMarkup(inline_keyboard=[
+            [
+                InlineKeyboardButton(
+                    text="✏️ Редактировать",
+                    callback_data=f"admin:edit_slots_{group.id}",
+                ),
+            ],
+            [
+                InlineKeyboardButton(
+                    text="◀️ Назад",
+                    callback_data="admin:setup_slots",
+                ),
+            ],
+        ])
+        
+        await callback.message.edit_text(text, reply_markup=keyboard)
+        await callback.answer()
+        
+    except Exception as e:
+        logger.error("Error showing slots for group: %s", e, exc_info=True)
+        await callback.answer("❌ Ошибка при получении информации о группе", show_alert=True)
+
+
+@router.callback_query(lambda c: c.data.startswith("admin:edit_slots_"))
+@require_admin_callback
+async def callback_edit_slots(
+    callback: CallbackQuery,
+    state: FSMContext,
+    group_repo: GroupRepository,
+    data: dict | None = None,  # type: ignore
+) -> None:
+    """Начать редактирование слотов для группы - выбор количества слотов."""
+    group_id = int(callback.data.split("_")[-1])
+    
+    try:
+        group = await group_repo.get_by_id(group_id)
+        if not group:
+            await callback.answer("❌ Группа не найдена", show_alert=True)
+            return
+        
+        display_name = clean_group_name_for_display(group.name)
+        
+        # Сохраняем ID группы в состояние и инициализируем список слотов
+        await state.update_data(
+            group_id=group.id,
+            group_name=group.name,
+            slots=[],
+            current_slot_index=0,
+        )
+        
+        # Создаем кнопки для выбора количества слотов (1-5)
+        keyboard_buttons = []
+        for i in range(1, 6):
+            keyboard_buttons.append([
+                InlineKeyboardButton(
+                    text=f"{i} слот{'а' if 2 <= i <= 4 else 'ов' if i == 1 else ''}",
+                    callback_data=f"admin:slots_count_{i}",
+                ),
+            ])
+        
+        keyboard_buttons.append([
+            InlineKeyboardButton(text="❌ Отмена", callback_data=f"admin:select_group_slots_{group.id}"),
+        ])
+        
+        text = (
+            f"⚙️ <b>Настройка слотов: {display_name}</b>\n\n"
+            "Выберите количество слотов (максимум 5):"
+        )
+        
+        await callback.message.edit_text(text, reply_markup=InlineKeyboardMarkup(inline_keyboard=keyboard_buttons))
+        await state.set_state(AdminPanelStates.waiting_for_slots_count)
+        await callback.answer()
+        
+    except Exception as e:
+        logger.error("Error starting slots edit: %s", e, exc_info=True)
+        await callback.answer("❌ Ошибка при начале редактирования", show_alert=True)
+
+
+@router.callback_query(lambda c: c.data.startswith("admin:slots_count_"))
+@require_admin_callback
+async def callback_select_slots_count(
+    callback: CallbackQuery,
+    state: FSMContext,
+) -> None:
+    """Обработка выбора количества слотов."""
+    slots_count = int(callback.data.split("_")[-1])
+    
+    await state.update_data(
+        total_slots=slots_count,
+        current_slot_index=0,
+        slots=[],
+    )
+    
+    # Переходим к настройке первого слота
+    await show_slot_configuration(callback, state, 0)
+
+
+async def show_slot_configuration(callback: CallbackQuery, state: FSMContext, slot_index: int) -> None:
+    """Показать окно настройки слота."""
+    data = await state.get_data()
+    slots = data.get("slots", [])
+    total_slots = data.get("total_slots", 1)
+    
+    # Получаем данные текущего слота, если они есть
+    current_slot = slots[slot_index] if slot_index < len(slots) else {}
+    
+    slot_number = slot_index + 1
+    start_time = current_slot.get("start", "не задано")
+    end_time = current_slot.get("end", "не задано")
+    couriers = current_slot.get("limit", "не задано")
+    
+    text = (
+        f"⚙️ <b>Слот {slot_number} из {total_slots}</b>\n\n"
+        f"🕐 Начало слота: <b>{start_time}</b>\n"
+        f"🕐 Конец слота: <b>{end_time}</b>\n"
+        f"👥 Количество курьеров: <b>{couriers}</b>\n\n"
+        "Выберите параметр для настройки:"
+    )
+    
+    keyboard_buttons = [
+        [InlineKeyboardButton(text="🕐 Начало слота", callback_data=f"admin:slot_{slot_index}_start")],
+        [InlineKeyboardButton(text="🕐 Конец слота", callback_data=f"admin:slot_{slot_index}_end")],
+        [InlineKeyboardButton(text="👥 Количество курьеров", callback_data=f"admin:slot_{slot_index}_couriers")],
+    ]
+    
+    # Кнопка "Готово" только если все параметры заданы
+    if start_time != "не задано" and end_time != "не задано" and couriers != "не задано":
+        keyboard_buttons.append([
+            InlineKeyboardButton(text="✅ Готово", callback_data=f"admin:slot_{slot_index}_done"),
+        ])
+    
+    keyboard_buttons.append([
+        InlineKeyboardButton(text="◀️ Назад", callback_data=f"admin:slot_{slot_index}_back"),
+    ])
+    
+    await callback.message.edit_text(
+        text,
+        reply_markup=InlineKeyboardMarkup(inline_keyboard=keyboard_buttons),
+    )
+    await state.set_state(AdminPanelStates.configuring_slot)
+    await callback.answer()
+
+
+@router.callback_query(lambda c: c.data.startswith("admin:slot_") and c.data.endswith("_start"))
+@require_admin_callback
+async def callback_slot_start_time(
+    callback: CallbackQuery,
+    state: FSMContext,
+) -> None:
+    """Выбор времени начала слота через inline-клавиатуру (часы 00-11)."""
+    slot_index = int(callback.data.split("_")[1])
+    await state.update_data(editing_slot_index=slot_index, editing_field="start")
+
+    text = "🕐 <b>Выберите время начала слота:</b>"
+
+    keyboard = create_time_selection_keyboard(
+        prefix=f"admin:slot_{slot_index}_start_time",
+        current_time=None,
+    )
+
+    # Отправляем отдельное сообщение с клавиатурой часов
+    await callback.message.answer(text, reply_markup=keyboard)
+    await callback.answer()
+
+
+@router.callback_query(lambda c: c.data.startswith("admin:slot_") and c.data.endswith("_end"))
+@require_admin_callback
+async def callback_slot_end_time(
+    callback: CallbackQuery,
+    state: FSMContext,
+) -> None:
+    """Выбор времени конца слота через inline-клавиатуру (часы 00-11)."""
+    slot_index = int(callback.data.split("_")[1])
+    await state.update_data(editing_slot_index=slot_index, editing_field="end")
+
+    text = "🕐 <b>Выберите время конца слота:</b>"
+
+    keyboard = create_time_selection_keyboard(
+        prefix=f"admin:slot_{slot_index}_end_time",
+        current_time=None,
+    )
+
+    await callback.message.answer(text, reply_markup=keyboard)
+    await callback.answer()
+
+
+@router.callback_query(lambda c: c.data.startswith("admin:slot_") and c.data.endswith("_couriers"))
+@require_admin_callback
+async def callback_slot_couriers(
+    callback: CallbackQuery,
+    state: FSMContext,
+) -> None:
+    """Ввод количества курьеров для слота."""
+    slot_index = int(callback.data.split("_")[1])
+    
+    await state.update_data(editing_slot_index=slot_index)
+    
+    text = (
+        "👥 <b>Введите количество курьеров:</b>\n\n"
+        "Введите число от 1 до 20."
+    )
+    
+    keyboard = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="❌ Отмена", callback_data=f"admin:slot_{slot_index}_config")],
+    ])
+    
+    await callback.message.edit_text(text, reply_markup=keyboard)
+    await state.set_state(AdminPanelStates.waiting_for_slot_couriers_count)
+    await callback.answer()
+
+
+@router.callback_query(lambda c: c.data.startswith("admin:slot_") and "_time_hour_" in c.data)
+@require_admin_callback
+async def callback_select_hour(
+    callback: CallbackQuery,
+    state: FSMContext,
+) -> None:
+    """Обработка выбора часа."""
+    # Формат: admin:slot_{slot_index}_{start|end}_time_hour_{hour}
+    parts = callback.data.split("_")
+    slot_index = int(parts[1])
+    time_type = parts[2]  # start или end
+    hour = parts[-1]
+    
+    await state.update_data(selected_hour=hour, editing_slot_index=slot_index, editing_field=time_type)
+    
+    text = f"🕐 <b>Выбран час: {hour}</b>\n\nТеперь выберите минуты:"
+    
+    keyboard = create_time_selection_keyboard(f"admin:slot_{slot_index}_{time_type}_time", f"{hour}:00")
+    
+    await callback.message.edit_text(text, reply_markup=keyboard)
+    await callback.answer()
+
+
+@router.callback_query(lambda c: c.data.startswith("admin:slot_") and "_time_minute_" in c.data)
+@require_admin_callback
+async def callback_select_minute(
+    callback: CallbackQuery,
+    state: FSMContext,
+) -> None:
+    """Обработка выбора минут."""
+    # Формат: admin:slot_{slot_index}_{start|end}_time_minute_{minute}
+    parts = callback.data.split("_")
+    slot_index = int(parts[1])
+    time_type = parts[2]  # start или end
+    minute = parts[-1]
+    
+    data = await state.get_data()
+    hour = data.get("selected_hour", "00")
+    time_str = f"{hour}:{minute}"
+    
+    # Обновляем слот
+    slots = data.get("slots", [])
+    total_slots = data.get("total_slots", 1)
+    
+    # Убеждаемся, что список слотов достаточно длинный
+    while len(slots) <= slot_index:
+        slots.append({"start": "не задано", "end": "не задано", "limit": "не задано"})
+    
+    slots[slot_index][time_type] = time_str
+    await state.update_data(slots=slots, selected_hour=None)
+    
+    # Возвращаемся к настройке слота
+    await show_slot_configuration(callback, state, slot_index)
+    await callback.answer(f"✅ Время {time_type}: {time_str}")
+
+
+@router.callback_query(lambda c: c.data.startswith("admin:slot_") and "_time_back" in c.data)
+@require_admin_callback
+async def callback_back_to_hour_selection(
+    callback: CallbackQuery,
+    state: FSMContext,
+) -> None:
+    """Возврат с выбора минут к выбору часа."""
+    parts = callback.data.split("_")
+    slot_index = int(parts[1])
+    time_type = parts[2]  # start или end
+
+    keyboard = create_time_selection_keyboard(
+        prefix=f"admin:slot_{slot_index}_{time_type}_time",
+        current_time=None,
+    )
+    await callback.message.edit_text("🕐 <b>Выберите час:</b>", reply_markup=keyboard)
+    await callback.answer()
+
+
+@router.callback_query(lambda c: c.data.startswith("admin:slot_") and "_time_cancel" in c.data)
+@require_admin_callback
+async def callback_cancel_time_selection(
+    callback: CallbackQuery,
+    state: FSMContext,
+) -> None:
+    """Отмена выбора времени."""
+    # Формат: admin:slot_{slot_index}_{start|end}_time_cancel
+    parts = callback.data.split("_")
+    slot_index = int(parts[1])
+    
+    await show_slot_configuration(callback, state, slot_index)
+    await callback.answer()
+
+
+@router.message(StateFilter(AdminPanelStates.waiting_for_slot_couriers_count))
+async def process_slot_couriers_count(
+    message: Message,
+    state: FSMContext,
+) -> None:
+    """Обработка ввода количества курьеров."""
+    try:
+        count = int(message.text.strip())
+        
+        if not (1 <= count <= 20):
+            await message.answer("❌ Количество курьеров должно быть от 1 до 20. Введите снова:")
+            return
+        
+        data = await state.get_data()
+        slot_index = data.get("editing_slot_index", 0)
+        slots = data.get("slots", [])
+        total_slots = data.get("total_slots", 1)
+        
+        # Убеждаемся, что список слотов достаточно длинный
+        while len(slots) <= slot_index:
+            slots.append({"start": "не задано", "end": "не задано", "limit": "не задано"})
+        
+        slots[slot_index]["limit"] = count
+        await state.update_data(slots=slots)
+        
+        # Возвращаемся к настройке слота через новое сообщение
+        await show_slot_configuration_after_input(message, state, slot_index)
+        
+    except ValueError:
+        await message.answer("❌ Введите число от 1 до 20:")
+    except Exception as e:
+        logger.error("Error processing couriers count: %s", e, exc_info=True)
+        await message.answer("❌ Ошибка при обработке количества курьеров")
+
+
+async def show_slot_configuration_after_input(message: Message, state: FSMContext, slot_index: int) -> None:
+    """Показать окно настройки слота после ввода данных."""
+    data = await state.get_data()
+    slots = data.get("slots", [])
+    total_slots = data.get("total_slots", 1)
+    
+    current_slot = slots[slot_index] if slot_index < len(slots) else {}
+    
+    slot_number = slot_index + 1
+    start_time = current_slot.get("start", "не задано")
+    end_time = current_slot.get("end", "не задано")
+    couriers = current_slot.get("limit", "не задано")
+    
+    text = (
+        f"⚙️ <b>Слот {slot_number} из {total_slots}</b>\n\n"
+        f"🕐 Начало слота: <b>{start_time}</b>\n"
+        f"🕐 Конец слота: <b>{end_time}</b>\n"
+        f"👥 Количество курьеров: <b>{couriers}</b>\n\n"
+        "Выберите параметр для настройки:"
+    )
+    
+    keyboard_buttons = [
+        [InlineKeyboardButton(text="🕐 Начало слота", callback_data=f"admin:slot_{slot_index}_start")],
+        [InlineKeyboardButton(text="🕐 Конец слота", callback_data=f"admin:slot_{slot_index}_end")],
+        [InlineKeyboardButton(text="👥 Количество курьеров", callback_data=f"admin:slot_{slot_index}_couriers")],
+    ]
+    
+    if start_time != "не задано" and end_time != "не задано" and couriers != "не задано":
+        keyboard_buttons.append([
+            InlineKeyboardButton(text="✅ Готово", callback_data=f"admin:slot_{slot_index}_done"),
+        ])
+    
+    keyboard_buttons.append([
+        InlineKeyboardButton(text="◀️ Назад", callback_data=f"admin:slot_{slot_index}_back"),
+    ])
+    
+    await message.answer(text, reply_markup=InlineKeyboardMarkup(inline_keyboard=keyboard_buttons))
+    await state.set_state(AdminPanelStates.configuring_slot)
+
+
+@router.callback_query(lambda c: c.data.startswith("admin:slot_") and c.data.endswith("_done"))
+@require_admin_callback
+async def callback_slot_done(
+    callback: CallbackQuery,
+    state: FSMContext,
+) -> None:
+    """Обработка завершения настройки слота."""
+    slot_index = int(callback.data.split("_")[1])
+    
+    data = await state.get_data()
+    slots = data.get("slots", [])
+    total_slots = data.get("total_slots", 1)
+    
+    # Проверяем, что все параметры заданы
+    if slot_index >= len(slots):
+        await callback.answer("❌ Ошибка: данные слота не найдены", show_alert=True)
+        return
+    
+    current_slot = slots[slot_index]
+    if (current_slot.get("start") == "не задано" or 
+        current_slot.get("end") == "не задано" or 
+        current_slot.get("limit") == "не задано"):
+        await callback.answer("❌ Заполните все параметры слота", show_alert=True)
+        return
+    
+    # Переходим к следующему слоту или показываем сводку
+    next_slot_index = slot_index + 1
+    
+    if next_slot_index < total_slots:
+        # Переходим к следующему слоту
+        await state.update_data(current_slot_index=next_slot_index)
+        await show_slot_configuration(callback, state, next_slot_index)
+        await callback.answer(f"✅ Слот {slot_index + 1} настроен")
+    else:
+        # Все слоты настроены, показываем сводку
+        await show_slots_summary(callback, state)
+        await callback.answer("✅ Все слоты настроены")
+
+
+@router.callback_query(lambda c: c.data.startswith("admin:slot_") and c.data.endswith("_back"))
+@require_admin_callback
+async def callback_slot_back(
+    callback: CallbackQuery,
+    state: FSMContext,
+    group_repo: GroupRepository,
+) -> None:
+    """Обработка кнопки 'Назад' при настройке слота."""
+    slot_index = int(callback.data.split("_")[1])
+    
+    data = await state.get_data()
+    
+    if slot_index == 0:
+        # Возвращаемся к просмотру настроек группы
+        group_id = data.get("group_id")
+        if group_id:
+            # Вызываем обработчик просмотра настроек группы напрямую
+            try:
+                group = await group_repo.get_by_id(group_id)
+                if not group:
+                    await callback.answer("❌ Группа не найдена", show_alert=True)
+                    return
+                
+                display_name = clean_group_name_for_display(group.name)
+                slots = group.get_slots_config()
+                
+                if slots:
+                    slots_text = "\n".join(
+                        f"• {slot['start']}-{slot['end']} (лимит: {slot['limit']} чел.)"
+                        for slot in slots
+                    )
+                    text = (
+                        f"⚙️ <b>Настройки слотов: {display_name}</b>\n\n"
+                        f"📋 <b>Текущие слоты:</b>\n{slots_text}\n\n"
+                        f"⏰ Время закрытия опроса: {group.poll_close_time.strftime('%H:%M')}"
+                    )
+                else:
+                    text = (
+                        f"⚙️ <b>Настройки слотов: {display_name}</b>\n\n"
+                        f"⚠️ <b>Слоты еще не настроены для этой группы.</b>\n\n"
+                        f"⏰ Время закрытия опроса: {group.poll_close_time.strftime('%H:%M')}"
+                    )
+                
+                keyboard = InlineKeyboardMarkup(inline_keyboard=[
+                    [
+                        InlineKeyboardButton(
+                            text="✏️ Редактировать",
+                            callback_data=f"admin:edit_slots_{group.id}",
+                        ),
+                    ],
+                    [
+                        InlineKeyboardButton(
+                            text="◀️ Назад",
+                            callback_data="admin:setup_slots",
+                        ),
+                    ],
+                ])
+                
+                await callback.message.edit_text(text, reply_markup=keyboard)
+                await state.clear()
+                await callback.answer()
+            except Exception as e:
+                logger.error("Error returning to group slots view: %s", e, exc_info=True)
+                await callback.answer("❌ Ошибка при возврате", show_alert=True)
+        else:
+            await callback.answer("❌ Ошибка: группа не найдена", show_alert=True)
+    else:
+        # Возвращаемся к предыдущему слоту
+        await state.update_data(current_slot_index=slot_index - 1)
+        await show_slot_configuration(callback, state, slot_index - 1)
+        await callback.answer()
+
+
+@router.callback_query(lambda c: c.data.startswith("admin:slot_") and c.data.endswith("_config"))
+@require_admin_callback
+async def callback_slot_config(
+    callback: CallbackQuery,
+    state: FSMContext,
+    bot: Bot,
+) -> None:
+    """Возврат к настройке слота (отмена выбора времени)."""
+    slot_index = int(callback.data.split("_")[1])
+    
+    # Убираем состояние выбора времени
+    await state.set_state(AdminPanelStates.configuring_slot)
+    
+    # Показываем конфигурацию слота
+    await show_slot_configuration(callback, state, slot_index)
+    await callback.answer("❌ Выбор времени отменен")
+
+
+async def show_slots_summary(callback: CallbackQuery, state: FSMContext) -> None:
+    """Показать сводку настроек слотов."""
+    data = await state.get_data()
+    slots = data.get("slots", [])
+    group_name = data.get("group_name", "")
+    display_name = clean_group_name_for_display(group_name)
+    
+    text = f"📋 <b>Сводка настроек слотов: {display_name}</b>\n\n"
+    
+    for i, slot in enumerate(slots, 1):
+        text += f"Слот {i}: {slot['start']}-{slot['end']} - {slot['limit']} курьер{'ов' if slot['limit'] > 1 else ''}\n"
+    
+    text += "\nПодтвердите настройки:"
+    
+    keyboard = InlineKeyboardMarkup(inline_keyboard=[
+        [
+            InlineKeyboardButton(text="✅ Подтвердить", callback_data="admin:slots_confirm"),
+            InlineKeyboardButton(text="❌ Отмена", callback_data="admin:slots_cancel"),
+        ],
+    ])
+    
+    await callback.message.edit_text(text, reply_markup=keyboard)
+
+
+@router.callback_query(lambda c: c.data == "admin:slots_confirm")
+@require_admin_callback
+async def callback_slots_confirm(
+    callback: CallbackQuery,
+    state: FSMContext,
+    group_service: GroupService,
+) -> None:
+    """Подтверждение и сохранение настроек слотов."""
+    data = await state.get_data()
+    slots = data.get("slots", [])
+    group_id = data.get("group_id")
+    group_name = data.get("group_name", "")
+    display_name = clean_group_name_for_display(group_name)
+    
+    if not group_id or not slots:
+        await callback.answer("❌ Ошибка: данные не найдены", show_alert=True)
+        return
+    
+    # Преобразуем слоты в нужный формат
+    formatted_slots = []
+    for slot in slots:
+        formatted_slots.append({
+            "start": slot["start"],
+            "end": slot["end"],
+            "limit": slot["limit"],
+        })
+    
+    # Сохраняем настройки
+    success = await group_service.update_group_slots(group_id, formatted_slots)
+    
+    if success:
+        keyboard = InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text="◀️ Назад", callback_data=f"admin:select_group_slots_{group_id}")],
+        ])
+        
+        await callback.message.edit_text(
+            f"✅ <b>Настройки слотов сохранены!</b>\n\n"
+            f"Настройки будут применены к следующим опросам для группы <b>{display_name}</b>.",
+            reply_markup=keyboard,
+        )
+        logger.info("Slots updated for group %s (id=%s)", display_name, group_id)
+    else:
+        await callback.answer("❌ Ошибка при сохранении настроек", show_alert=True)
+    
+    await state.clear()
+
+
+@router.callback_query(lambda c: c.data == "admin:slots_cancel")
+@require_admin_callback
+async def callback_slots_cancel(
+    callback: CallbackQuery,
+    state: FSMContext,
+    group_repo: GroupRepository,
+) -> None:
+    """Отмена настройки слотов."""
+    data = await state.get_data()
+    group_id = data.get("group_id")
+    
+    await state.clear()
+    
+    if group_id:
+        # Возвращаемся к просмотру настроек группы
+        try:
+            group = await group_repo.get_by_id(group_id)
+            if not group:
+                await callback.answer("❌ Группа не найдена", show_alert=True)
+                return
+            
+            display_name = clean_group_name_for_display(group.name)
+            slots = group.get_slots_config()
+            
+            if slots:
+                slots_text = "\n".join(
+                    f"• {slot['start']}-{slot['end']} (лимит: {slot['limit']} чел.)"
+                    for slot in slots
+                )
+                text = (
+                    f"⚙️ <b>Настройки слотов: {display_name}</b>\n\n"
+                    f"📋 <b>Текущие слоты:</b>\n{slots_text}\n\n"
+                    f"⏰ Время закрытия опроса: {group.poll_close_time.strftime('%H:%M')}"
+                )
+            else:
+                text = (
+                    f"⚙️ <b>Настройки слотов: {display_name}</b>\n\n"
+                    f"⚠️ <b>Слоты еще не настроены для этой группы.</b>\n\n"
+                    f"⏰ Время закрытия опроса: {group.poll_close_time.strftime('%H:%M')}"
+                )
+            
+            keyboard = InlineKeyboardMarkup(inline_keyboard=[
+                [
+                    InlineKeyboardButton(
+                        text="✏️ Редактировать",
+                        callback_data=f"admin:edit_slots_{group.id}",
+                    ),
+                ],
+                [
+                    InlineKeyboardButton(
+                        text="◀️ Назад",
+                        callback_data="admin:setup_slots",
+                    ),
+                ],
+            ])
+            
+            await callback.message.edit_text(text, reply_markup=keyboard)
+            await callback.answer()
+        except Exception as e:
+            logger.error("Error canceling slots configuration: %s", e, exc_info=True)
+            await callback.answer("❌ Ошибка при отмене", show_alert=True)
+    else:
+        await callback.answer("❌ Ошибка: группа не найдена", show_alert=True)
 
 
 @router.callback_query(lambda c: c.data == "admin:setup_schedule")
@@ -293,7 +1119,7 @@ async def callback_setup_schedule(callback: CallbackQuery) -> None:
     
     keyboard = InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text="✏️ Редактировать", callback_data="admin:edit_schedule")],
-        [InlineKeyboardButton(text="◀️ Назад", callback_data="admin:back_to_main")],
+        [InlineKeyboardButton(text="◀️ Назад", callback_data="admin:settings_menu")],
     ])
     
     await callback.message.edit_text(text, reply_markup=keyboard)
@@ -583,7 +1409,7 @@ async def callback_set_topic_menu(
         "📌 <b>Установить тему</b>\n\n"
         "Выберите тип темы для настройки:\n\n"
         "• <b>Отметки на слот</b> - тема, где создаются опросы\n"
-        "• <b>Приход/уход</b> - тема, куда отправляются результаты\n"
+        "• <b>Приход/уход</b> - тема для других целей\n"
         "• <b>Общий чат</b> - тема для напоминаний\n"
         "• <b>Важная информация</b> - тема для важных сообщений\n\n"
         "💡 <b>Важно:</b> Выполните выбор темы в нужной теме форум-группы,\n"
@@ -1006,6 +1832,267 @@ async def callback_select_group_for_topic(
             pass  # Игнорируем ошибки при отправке сообщения об ошибке
 
 
+@router.callback_query(lambda c: c.data == "admin:delete_group")
+@require_admin_callback
+async def callback_delete_group(
+    callback: CallbackQuery,
+    state: FSMContext,
+    group_service: GroupService,
+) -> None:
+    """Выбор группы для удаления."""
+    groups = await group_service.get_all_groups()
+    if not groups:
+        await callback.answer("❌ Нет зарегистрированных групп", show_alert=True)
+        return
+    
+    keyboard_buttons = []
+    for group in groups:
+        display_name = clean_group_name_for_display(group.name)
+        keyboard_buttons.append([
+            InlineKeyboardButton(
+                text=display_name,
+                callback_data=f"admin:confirm_delete_group_{group.id}",
+            ),
+        ])
+    keyboard_buttons.append([
+        InlineKeyboardButton(text="◀️ Назад", callback_data="admin:groups_menu"),
+    ])
+    
+    await callback.message.edit_text(
+        "🗑️ <b>Удаление группы</b>\n\n"
+        "⚠️ <b>Внимание:</b> Это действие нельзя отменить!\n"
+        "Все данные группы будут удалены из базы данных.\n\n"
+        "Выберите группу для удаления:",
+        reply_markup=InlineKeyboardMarkup(inline_keyboard=keyboard_buttons),
+    )
+    await state.set_state(AdminPanelStates.waiting_for_group_selection_for_delete)
+    await callback.answer()
+
+
+@router.callback_query(lambda c: c.data.startswith("admin:confirm_delete_group_"))
+@require_admin_callback
+async def callback_confirm_delete_group(
+    callback: CallbackQuery,
+    group_repo: GroupRepository,
+    data: dict | None = None,  # type: ignore
+) -> None:
+    """Подтверждение удаления группы."""
+    group_id = int(callback.data.split("_")[-1])
+    
+    try:
+        group = await group_repo.get_by_id(group_id)
+        if not group:
+            await callback.answer("❌ Группа не найдена", show_alert=True)
+            return
+        
+        display_name = clean_group_name_for_display(group.name)
+        
+        # Показываем подтверждение
+        keyboard = InlineKeyboardMarkup(inline_keyboard=[
+            [
+                InlineKeyboardButton(
+                    text="✅ Да, удалить",
+                    callback_data=f"admin:execute_delete_group_{group.id}",
+                ),
+                InlineKeyboardButton(
+                    text="❌ Отмена",
+                    callback_data="admin:groups_menu",
+                ),
+            ],
+        ])
+        
+        await callback.message.edit_text(
+            f"🗑️ <b>Подтверждение удаления</b>\n\n"
+            f"Вы уверены, что хотите удалить группу <b>{display_name}</b>?\n\n"
+            f"<b>Информация о группе:</b>\n"
+            f"• ID: {group.id}\n"
+            f"• Chat ID: {group.telegram_chat_id}\n"
+            f"• Активна: {'Да' if group.is_active else 'Нет'}\n\n"
+            f"⚠️ <b>Это действие нельзя отменить!</b>",
+            reply_markup=keyboard,
+        )
+        await callback.answer()
+        
+    except Exception as e:
+        logger.error("Error confirming delete group: %s", e, exc_info=True)
+        await callback.answer("❌ Ошибка при получении информации о группе", show_alert=True)
+
+
+@router.callback_query(lambda c: c.data.startswith("admin:execute_delete_group_"))
+@require_admin_callback
+async def callback_execute_delete_group(
+    callback: CallbackQuery,
+    group_repo: GroupRepository,
+    data: dict | None = None,  # type: ignore
+) -> None:
+    """Выполнение удаления группы."""
+    group_id = int(callback.data.split("_")[-1])
+    
+    try:
+        group = await group_repo.get_by_id(group_id)
+        if not group:
+            await callback.answer("❌ Группа не найдена", show_alert=True)
+            return
+        
+        display_name = clean_group_name_for_display(group.name)
+        
+        # Удаляем группу
+        success = await group_repo.delete(group_id)
+        
+        if success:
+            keyboard = InlineKeyboardMarkup(inline_keyboard=[
+                [InlineKeyboardButton(text="◀️ Назад", callback_data="admin:groups_menu")],
+            ])
+            
+            await callback.message.edit_text(
+                f"✅ <b>Группа удалена</b>\n\n"
+                f"Группа <b>{display_name}</b> успешно удалена из базы данных.",
+                reply_markup=keyboard,
+            )
+            logger.info("Group %s (id=%s) deleted by admin", display_name, group_id)
+        else:
+            await callback.answer("❌ Ошибка при удалении группы", show_alert=True)
+            
+    except Exception as e:
+        logger.error("Error deleting group: %s", e, exc_info=True)
+        await callback.answer("❌ Ошибка при удалении группы", show_alert=True)
+
+
+@router.callback_query(lambda c: c.data == "admin:rename_group")
+@require_admin_callback
+async def callback_rename_group(
+    callback: CallbackQuery,
+    state: FSMContext,
+    group_service: GroupService,
+) -> None:
+    """Выбор группы для переименования."""
+    groups = await group_service.get_all_groups()
+    if not groups:
+        await callback.answer("❌ Нет зарегистрированных групп", show_alert=True)
+        return
+    
+    keyboard_buttons = []
+    for group in groups:
+        display_name = clean_group_name_for_display(group.name)
+        keyboard_buttons.append([
+            InlineKeyboardButton(
+                text=display_name,
+                callback_data=f"admin:select_group_rename_{group.id}",
+            ),
+        ])
+    keyboard_buttons.append([
+        InlineKeyboardButton(text="◀️ Назад", callback_data="admin:groups_menu"),
+    ])
+    
+    await callback.message.edit_text(
+        "✏️ <b>Переименование группы</b>\n\n"
+        "Выберите группу для переименования:",
+        reply_markup=InlineKeyboardMarkup(inline_keyboard=keyboard_buttons),
+    )
+    await state.set_state(AdminPanelStates.waiting_for_group_selection_for_rename)
+    await callback.answer()
+
+
+@router.callback_query(lambda c: c.data.startswith("admin:select_group_rename_"))
+@require_admin_callback
+async def callback_select_group_for_rename(
+    callback: CallbackQuery,
+    state: FSMContext,
+    group_repo: GroupRepository,
+    data: dict | None = None,  # type: ignore
+) -> None:
+    """Обработка выбора группы для переименования."""
+    group_id = int(callback.data.split("_")[-1])
+    
+    try:
+        group = await group_repo.get_by_id(group_id)
+        if not group:
+            await callback.answer("❌ Группа не найдена", show_alert=True)
+            return
+        
+        display_name = clean_group_name_for_display(group.name)
+        
+        # Сохраняем ID группы в состояние
+        await state.update_data(group_id=group_id, old_name=group.name)
+        
+        keyboard = InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text="❌ Отмена", callback_data="admin:groups_menu")],
+        ])
+        
+        await callback.message.edit_text(
+            f"✏️ <b>Переименование группы</b>\n\n"
+            f"Текущее название: <b>{display_name}</b>\n\n"
+            f"Введите новое название группы:",
+            reply_markup=keyboard,
+        )
+        await state.set_state(AdminPanelStates.waiting_for_new_group_name)
+        await callback.answer()
+        
+    except Exception as e:
+        logger.error("Error selecting group for rename: %s", e, exc_info=True)
+        await callback.answer("❌ Ошибка при получении информации о группе", show_alert=True)
+
+
+@router.message(StateFilter(AdminPanelStates.waiting_for_new_group_name))
+async def process_new_group_name(
+    message: Message,
+    state: FSMContext,
+    group_repo: GroupRepository,
+    group_service: GroupService,
+) -> None:
+    """Обработка ввода нового названия группы."""
+    new_name = message.text.strip()
+    
+    if not new_name:
+        await message.answer("❌ Название не может быть пустым. Введите новое название:")
+        return
+    
+    try:
+        data = await state.get_data()
+        group_id = data.get("group_id")
+        old_name = data.get("old_name")
+        
+        if not group_id:
+            await message.answer("❌ Ошибка: группа не выбрана")
+            await state.clear()
+            return
+        
+        # Проверяем, существует ли группа с таким именем
+        existing = await group_service.get_group_by_name(new_name)
+        if existing and existing.id != group_id:
+            await message.answer(
+                f"❌ Группа с именем <b>{new_name}</b> уже существует\n\n"
+                f"Введите другое название:"
+            )
+            return
+        
+        # Обновляем название группы
+        success = await group_repo.update(group_id, name=new_name)
+        
+        if success:
+            old_display = clean_group_name_for_display(old_name or "")
+            new_display = clean_group_name_for_display(new_name)
+            
+            keyboard = InlineKeyboardMarkup(inline_keyboard=[
+                [InlineKeyboardButton(text="◀️ Назад", callback_data="admin:groups_menu")],
+            ])
+            
+            await message.answer(
+                f"✅ <b>Группа переименована</b>\n\n"
+                f"Старое название: <b>{old_display}</b>\n"
+                f"Новое название: <b>{new_display}</b>",
+                reply_markup=keyboard,
+            )
+            logger.info("Group renamed from %s to %s (id=%s)", old_name, new_name, group_id)
+            await state.clear()
+        else:
+            await message.answer("❌ Ошибка при обновлении названия группы")
+            
+    except Exception as e:
+        logger.error("Error renaming group: %s", e, exc_info=True)
+        await message.answer(f"❌ Ошибка при переименовании группы: {str(e)[:200]}")
+
+
 async def _send_existing_polls_to_admin(
     bot: Bot,
     poll_repo: PollRepository,
@@ -1109,12 +2196,11 @@ async def callback_create_polls(
     await callback.answer("⏳ Создание опросов...")
     
     try:
-        screenshot_service = get_screenshot_service(data)
         poll_service = PollService(
             bot=bot,
             poll_repo=poll_repo,
             group_repo=group_repo,
-            screenshot_service=screenshot_service,
+            screenshot_service=None,
         )
         
         # Проверяем существующие опросы и отправляем их первыми
@@ -1147,7 +2233,7 @@ async def callback_create_polls(
                 text += f"\n... и ещё {len(errors) - 5}"
         
         keyboard = InlineKeyboardMarkup(inline_keyboard=[
-            [InlineKeyboardButton(text="◀️ Назад", callback_data="admin:back_to_main")],
+            [InlineKeyboardButton(text="◀️ Назад", callback_data="admin:polls_menu")],
         ])
         
         await callback.message.edit_text(text, reply_markup=keyboard)
@@ -1159,7 +2245,7 @@ async def callback_create_polls(
         await callback.message.edit_text(
             f"❌ Ошибка при создании опросов: {str(e)[:200]}",
             reply_markup=InlineKeyboardMarkup(inline_keyboard=[
-                [InlineKeyboardButton(text="◀️ Назад", callback_data="admin:back_to_main")],
+                [InlineKeyboardButton(text="◀️ Назад", callback_data="admin:polls_menu")],
             ]),
         )
 
@@ -1184,7 +2270,7 @@ async def callback_force_create_polls_confirm(
     keyboard = InlineKeyboardMarkup(inline_keyboard=[
         [
             InlineKeyboardButton(text="✅ Да, пересоздать", callback_data="admin:force_create_polls:confirm"),
-            InlineKeyboardButton(text="❌ Отмена", callback_data="admin:back_to_main"),
+            InlineKeyboardButton(text="❌ Отмена", callback_data="admin:polls_menu"),
         ],
     ])
     
@@ -1207,13 +2293,11 @@ async def callback_force_create_polls(
     await callback.answer("⏳ Пересоздание опросов...")
     
     try:
-        screenshot_service = get_screenshot_service(data)
-        
         poll_service = PollService(
             bot=bot,
             poll_repo=poll_repo,
             group_repo=group_repo,
-            screenshot_service=screenshot_service,
+            screenshot_service=None,
         )
         
         # Создаем опросы с принудительным режимом
@@ -1235,7 +2319,7 @@ async def callback_force_create_polls(
                 text += f"\n... и ещё {len(errors) - 5}"
         
         keyboard = InlineKeyboardMarkup(inline_keyboard=[
-            [InlineKeyboardButton(text="◀️ Назад", callback_data="admin:back_to_main")],
+            [InlineKeyboardButton(text="◀️ Назад", callback_data="admin:polls_menu")],
         ])
         
         await callback.message.edit_text(text, reply_markup=keyboard)
@@ -1247,7 +2331,7 @@ async def callback_force_create_polls(
         await callback.message.edit_text(
             f"❌ Ошибка при пересоздании опросов: {str(e)[:200]}",
             reply_markup=InlineKeyboardMarkup(inline_keyboard=[
-                [InlineKeyboardButton(text="◀️ Назад", callback_data="admin:back_to_main")],
+                [InlineKeyboardButton(text="◀️ Назад", callback_data="admin:polls_menu")],
             ]),
         )
 
@@ -1278,7 +2362,7 @@ async def callback_show_results(
             ),
         ])
     keyboard_buttons.append([
-        InlineKeyboardButton(text="◀️ Назад", callback_data="admin:back_to_main"),
+        InlineKeyboardButton(text="◀️ Назад", callback_data="admin:polls_menu"),
     ])
     
     await callback.message.edit_text(
@@ -1305,21 +2389,14 @@ async def callback_find_tomorrow_polls(
     
     try:
         from datetime import date, timedelta
-        from aiogram.types import FSInputFile
         
         tomorrow = date.today() + timedelta(days=1)
-        # Получаем screenshot_service из bot.data (добавлен в setup_bot)
-        screenshot_service = None
-        if hasattr(bot, "data") and bot.data and "screenshot_service" in bot.data:
-            screenshot_service = bot.data["screenshot_service"]
-        if not screenshot_service:
-            screenshot_service = get_screenshot_service(None)
         
         poll_service = PollService(
             bot=bot,
             poll_repo=poll_repo,
             group_repo=group_repo,
-            screenshot_service=screenshot_service,
+            screenshot_service=None,
         )
         
         # Получаем все активные группы
@@ -1363,95 +2440,8 @@ async def callback_find_tomorrow_polls(
                         # Получаем текстовый отчет (используем UUID объект напрямую)
                         text_report = await poll_service.get_poll_results_text(str(existing_poll.id))
                         
-                        # Создаем скриншот
-                        screenshot_path = None
-                        if screenshot_service and existing_poll.telegram_message_id:
-                            try:
-                                # Используем UUID объект напрямую, не строку
-                                poll_with_data = await poll_repo.get_poll_with_votes_and_users(existing_poll.id)
-                                poll_slots_data = []
-                                if poll_with_data and hasattr(poll_with_data, 'poll_slots'):
-                                    for slot in poll_with_data.poll_slots:
-                                        poll_slots_data.append({'slot': slot})
-                                
-                                screenshot_path = await screenshot_service.create_poll_screenshot(
-                                    bot=bot,
-                                    chat_id=group.telegram_chat_id,
-                                    message_id=existing_poll.telegram_message_id,
-                                    group_name=group.name,
-                                    poll_date=tomorrow,
-                                    poll_results_text=text_report,
-                                    poll_slots_data=poll_slots_data,
-                                )
-                            except Exception as screenshot_error:
-                                logger.warning("Не удалось создать скриншот для %s: %s", group.name, screenshot_error)
-                        
-                        # Пытаемся отправить скриншот, если он есть
-                        if screenshot_path and screenshot_path.exists():
-                            # Проверяем расширение файла - если это .txt, это текстовый отчет
-                            if screenshot_path.suffix.lower() == '.txt':
-                                logger.info("Text report file detected for %s, reading content", group.name)
-                                try:
-                                    # Читаем содержимое текстового файла
-                                    with open(screenshot_path, 'r', encoding='utf-8') as f:
-                                        file_content = f.read()
-                                    
-                                    # Отправляем текстовый отчет
-                                    report_text = (
-                                        f"📊 <b>Результаты опроса на {date_str}</b>\n"
-                                        f"Группа: <b>{group.name}</b>\n\n"
-                                        f"{file_content}"
-                                    )
-                                    await bot.send_message(
-                                        chat_id=admin_id,
-                                        text=report_text,
-                                        parse_mode="HTML",
-                                    )
-                                    report_sent = True
-                                    logger.info("Successfully sent text report from file for %s", group.name)
-                                except Exception as txt_error:
-                                    logger.error("Failed to read/send text report from file for %s: %s", group.name, txt_error, exc_info=True)
-                            else:
-                                # Это изображение - пытаемся отправить как фото
-                                try:
-                                    # Проверяем размер файла (Telegram ограничивает до 10MB для фото)
-                                    file_size = screenshot_path.stat().st_size
-                                    if file_size > 10 * 1024 * 1024:  # Больше 10MB
-                                        logger.warning("Screenshot file too large (%d bytes) for %s, sending text report", file_size, group.name)
-                                    elif file_size == 0:
-                                        logger.warning("Screenshot file is empty for %s, sending text report", group.name)
-                                    else:
-                                        # Проверяем, что файл является валидным изображением
-                                        try:
-                                            from PIL import Image
-                                            with Image.open(screenshot_path) as img:
-                                                img.verify()  # Проверяем валидность изображения
-                                            # Переоткрываем после verify (verify закрывает файл)
-                                            with Image.open(screenshot_path) as img:
-                                                img.load()  # Загружаем данные
-                                        except Exception as img_error:
-                                            logger.error("Invalid image file for %s: %s, sending text report", group.name, img_error)
-                                        else:
-                                            # Отправляем скриншот
-                                            photo = FSInputFile(str(screenshot_path))
-                                            caption = (
-                                                f"📊 <b>Результаты опроса на {date_str}</b>\n"
-                                                f"Группа: <b>{group.name}</b>\n\n"
-                                                f"{text_report}"
-                                            )
-                                            await bot.send_photo(
-                                                chat_id=admin_id,
-                                                photo=photo,
-                                                caption=caption,
-                                                parse_mode="HTML",
-                                            )
-                                            report_sent = True
-                                            logger.info("Successfully sent screenshot for %s", group.name)
-                                except Exception as photo_error:
-                                    logger.error("Failed to send photo for %s: %s", group.name, photo_error, exc_info=True)
-                        
-                        # Всегда отправляем текстовый отчет, даже если скриншот был отправлен
-                        # Это гарантирует, что данные всегда будут доступны
+                        # Отправляем текстовый отчет
+                        report_sent = False
                         try:
                             report_text = (
                                 f"📊 <b>Результаты опроса на {date_str}</b>\n"
@@ -1467,7 +2457,7 @@ async def callback_find_tomorrow_polls(
                             logger.info("Sent text report for %s", group.name)
                         except Exception as send_error:
                             logger.error("Failed to send text report for %s: %s", group.name, send_error, exc_info=True)
-                            if not report_sent:  # Если и скриншот не был отправлен
+                            if not report_sent:
                                 errors.append(f"{group.name} - ошибка отправки текстового отчета: {str(send_error)[:50]}")
                         
                         if report_sent:
@@ -1536,7 +2526,7 @@ async def callback_find_tomorrow_polls(
                 result_text += f"\n... и ещё {len(errors) - 5}"
         
         keyboard = InlineKeyboardMarkup(inline_keyboard=[
-            [InlineKeyboardButton(text="◀️ Назад", callback_data="admin:back_to_main")],
+            [InlineKeyboardButton(text="◀️ Назад", callback_data="admin:polls_menu")],
         ])
         
         await callback.message.edit_text(result_text, reply_markup=keyboard)
@@ -1940,63 +2930,29 @@ async def callback_show_results_for_group(
             await callback.message.edit_text(
                 f"❌ Опрос для группы <b>{clean_group_name_for_display(group.name)}</b> за {today.strftime('%d.%m.%Y')} не найден",
                 reply_markup=InlineKeyboardMarkup(inline_keyboard=[
-                    [InlineKeyboardButton(text="◀️ Назад", callback_data="admin:back_to_main")],
+                    [InlineKeyboardButton(text="◀️ Назад", callback_data="admin:polls_menu")],
                 ]),
             )
             return
         
-        # Пытаемся создать скриншот
-        screenshot_service = get_screenshot_service(data)
-        screenshot_path = None
-        
-        try:
-            # Получаем данные слотов с пользователями для добавления имен на скриншот
-            poll_with_data = await poll_repo.get_poll_with_votes_and_users(str(poll.id))
-            poll_slots_data = []
-            if poll_with_data and hasattr(poll_with_data, 'poll_slots'):
-                for slot in poll_with_data.poll_slots:
-                    poll_slots_data.append({'slot': slot})
-            
-            screenshot_path = await screenshot_service.create_poll_screenshot(
-                bot=bot,
-                chat_id=group.telegram_chat_id,
-                message_id=poll.telegram_message_id,
-                group_name=group.name,
-                poll_date=today,
-                poll_slots_data=poll_slots_data,
-            )
-        except Exception as e:
-            logger.warning("Failed to create screenshot: %s", e)
-        
-        # Отправляем результат
-        if screenshot_path:
-            from aiogram.types import FSInputFile
-            photo = FSInputFile(str(screenshot_path))
-            await bot.send_photo(
-                chat_id=callback.message.chat.id,
-                photo=photo,
-                caption=f"📊 Результаты опроса для {clean_group_name_for_display(group.name)} за {today.strftime('%d.%m.%Y')}",
-            )
-            text = "✅ Скриншот отправлен"
-        else:
-            # Получаем текстовый формат результатов
-            from src.services.poll_service import PollService
-            poll_service = PollService(
-                bot=bot,
-                poll_repo=poll_repo,
-                group_repo=group_repo,
-                screenshot_service=screenshot_service,
-            )
-            results_text = await poll_service.get_poll_results_text(str(poll.id))
-            text = (
-                f"📊 <b>Результаты опроса</b>\n\n"
-                f"Группа: <b>{clean_group_name_for_display(group.name)}</b>\n"
-                f"Дата: {today.strftime('%d.%m.%Y')}\n\n"
-                f"{results_text}"
-            )
+        # Получаем текстовый формат результатов
+        from src.services.poll_service import PollService
+        poll_service = PollService(
+            bot=bot,
+            poll_repo=poll_repo,
+            group_repo=group_repo,
+            screenshot_service=None,
+        )
+        results_text = await poll_service.get_poll_results_text(str(poll.id))
+        text = (
+            f"📊 <b>Результаты опроса</b>\n\n"
+            f"Группа: <b>{clean_group_name_for_display(group.name)}</b>\n"
+            f"Дата: {today.strftime('%d.%m.%Y')}\n\n"
+            f"{results_text}"
+        )
         
         keyboard = InlineKeyboardMarkup(inline_keyboard=[
-            [InlineKeyboardButton(text="◀️ Назад", callback_data="admin:back_to_main")],
+            [InlineKeyboardButton(text="◀️ Назад", callback_data="admin:polls_menu")],
         ])
         
         await callback.message.edit_text(text, reply_markup=keyboard)
@@ -2006,7 +2962,7 @@ async def callback_show_results_for_group(
         await callback.message.edit_text(
             f"❌ Ошибка: {e}",
             reply_markup=InlineKeyboardMarkup(inline_keyboard=[
-                [InlineKeyboardButton(text="◀️ Назад", callback_data="admin:back_to_main")],
+                [InlineKeyboardButton(text="◀️ Назад", callback_data="admin:polls_menu")],
             ]),
         )
 
@@ -2123,25 +3079,31 @@ async def callback_close_all_polls(
     bot: Bot,
     poll_repo: PollRepository,
     group_repo: GroupRepository,
-    screenshot_service: ScreenshotService,
     data: dict | None = None,  # type: ignore
 ) -> None:
-    """Закрыть все активные опросы для всех групп."""
+    """
+    Закрыть все активные опросы для всех групп.
+    
+    После закрытия опросы не принимают новые голоса:
+    - Вызывается bot.stop_poll() для закрытия опроса в Telegram API
+    - Статус опроса обновляется на "closed" в БД
+    - Обработчик голосов проверяет статус и игнорирует голоса для закрытых опросов
+    """
     await callback.answer("⏳ Закрытие всех опросов...")
     
     try:
-        from datetime import date, datetime
+        from datetime import datetime
         
         from src.services.poll_service import PollService
         
-        today = date.today()
-        groups = await group_repo.get_active_groups()
+        # Получаем все активные опросы (не только на сегодня)
+        active_polls = await poll_repo.get_all_active_polls()
         
-        if not groups:
+        if not active_polls:
             await callback.message.edit_text(
-                "❌ Нет активных групп",
+                "✅ <b>Нет активных опросов для закрытия</b>",
                 reply_markup=InlineKeyboardMarkup(inline_keyboard=[
-                    [InlineKeyboardButton(text="◀️ Назад", callback_data="admin:back_to_main")],
+                    [InlineKeyboardButton(text="◀️ Назад", callback_data="admin:polls_menu")],
                 ]),
             )
             return
@@ -2150,45 +3112,44 @@ async def callback_close_all_polls(
             bot=bot,
             poll_repo=poll_repo,
             group_repo=group_repo,
-            screenshot_service=screenshot_service,
+            screenshot_service=None,
         )
         
         closed_count = 0
         errors = []
         
-        for group in groups:
+        # Закрываем каждый активный опрос
+        for poll in active_polls:
             try:
-                poll = await poll_repo.get_active_by_group_and_date(group.id, today)
-                if poll:
-                    # Закрываем опрос напрямую
-                    try:
-                        await bot.stop_poll(
-                            chat_id=group.telegram_chat_id,
-                            message_id=poll.telegram_message_id,
-                        )
-                        await poll_repo.update(poll.id, status="closed", closed_at=datetime.now())
-                        closed_count += 1
-                        logger.info("Closed poll for group %s", group.name)
-                    except Exception as poll_error:  # noqa: BLE001
-                        # Если опрос уже закрыт или сообщение не найдено, просто обновляем статус в БД
-                        if "not found" in str(poll_error).lower() or "already closed" in str(poll_error).lower():
-                            await poll_repo.update(poll.id, status="closed", closed_at=datetime.now())
-                            closed_count += 1
-                            logger.info("Poll already closed for group %s, updated status in DB", group.name)
-                        else:
-                            raise
+                # Получаем группу для опроса
+                group = await group_repo.get_by_id(poll.group_id)
+                if not group:
+                    errors.append(f"Опрос {poll.id}: группа не найдена")
+                    continue
+                
+                # Используем надежный метод закрытия из PollService
+                await poll_service._close_single_poll(
+                    group=group,
+                    poll=poll,
+                    poll_date=poll.poll_date,
+                    close_time=datetime.now(),
+                )
+                closed_count += 1
+                logger.info("Closed poll %s for group %s", poll.id, group.name)
+                
             except Exception as e:  # noqa: BLE001
-                error_msg = f"{group.name}: {str(e)}"
+                error_msg = f"{group.name if 'group' in locals() else 'Unknown'}: {str(e)}"
                 errors.append(error_msg)
-                logger.error("Error closing poll for %s: %s", group.name, e, exc_info=True)
+                logger.error("Error closing poll %s: %s", poll.id, e, exc_info=True)
         
         # Формируем сообщение с результатами
         text = f"✅ <b>Закрытие опросов завершено</b>\n\n"
-        text += f"Закрыто опросов: <b>{closed_count}</b>\n"
-        text += f"Всего групп: <b>{len(groups)}</b>\n"
+        text += f"Закрыто опросов: <b>{closed_count}</b> из <b>{len(active_polls)}</b>\n\n"
+        text += "🔒 <b>Все закрытые опросы больше не принимают голоса</b>\n"
+        text += "(Пользователи не смогут проголосовать в закрытых опросах)"
         
         if errors:
-            text += f"\n⚠️ Ошибки: <b>{len(errors)}</b>\n"
+            text += f"\n\n⚠️ <b>Ошибки: {len(errors)}</b>\n"
             if len(errors) <= 5:
                 text += "\n".join([f"• {e}" for e in errors])
             else:
@@ -2196,11 +3157,11 @@ async def callback_close_all_polls(
                 text += f"\n... и еще {len(errors) - 5} ошибок"
         
         keyboard = InlineKeyboardMarkup(inline_keyboard=[
-            [InlineKeyboardButton(text="◀️ Назад", callback_data="admin:back_to_main")],
+            [InlineKeyboardButton(text="◀️ Назад", callback_data="admin:polls_menu")],
         ])
         
         await callback.message.edit_text(text, reply_markup=keyboard)
-        logger.info("Closed %d polls for all groups", closed_count)
+        logger.info("Closed %d polls out of %d active polls", closed_count, len(active_polls))
         
     except Exception as e:  # noqa: BLE001
         logger.error("Error closing all polls: %s", e, exc_info=True)
@@ -2234,7 +3195,7 @@ async def callback_close_poll_early(
             ),
         ])
     keyboard_buttons.append([
-        InlineKeyboardButton(text="◀️ Назад", callback_data="admin:back_to_main"),
+        InlineKeyboardButton(text="◀️ Назад", callback_data="admin:polls_menu"),
     ])
     
     await callback.message.edit_text(
@@ -2296,56 +3257,11 @@ async def callback_close_poll_for_group(
         now = datetime.now()
         await poll_repo.update(poll.id, status="closed", closed_at=now)
         
-        # Создаем скриншот и отправляем
-        screenshot_service = get_screenshot_service(data)
-        screenshot_path = None
-        
-        try:
-            # Получаем данные слотов с пользователями для добавления имен на скриншот
-            poll_with_data = await poll_repo.get_poll_with_votes_and_users(str(poll.id))
-            poll_slots_data = []
-            if poll_with_data and hasattr(poll_with_data, 'poll_slots'):
-                for slot in poll_with_data.poll_slots:
-                    poll_slots_data.append({'slot': slot})
-            
-            screenshot_path = await screenshot_service.create_poll_screenshot(
-                bot=bot,
-                chat_id=group.telegram_chat_id,
-                message_id=poll.telegram_message_id,
-                group_name=group.name,
-                poll_date=today,
-                poll_slots_data=poll_slots_data,
-            )
-            if screenshot_path:
-                await poll_repo.update(poll.id, screenshot_path=str(screenshot_path))
-        except Exception as e:
-            logger.warning("Failed to create screenshot: %s", e)
-        
-        # Отправляем скриншот в тему "приход/уход"
-        arrival_departure_topic_id = getattr(group, "arrival_departure_topic_id", None)
-        if screenshot_path and arrival_departure_topic_id:
-            try:
-                from aiogram.types import FSInputFile
-                photo = FSInputFile(str(screenshot_path))
-                await bot.send_photo(
-                    chat_id=group.telegram_chat_id,
-                    photo=photo,
-                    caption=f"📊 Результаты опроса за {today.strftime('%d.%m.%Y')}",
-                    message_thread_id=arrival_departure_topic_id,
-                )
-            except Exception as e:
-                logger.error("Failed to send screenshot: %s", e)
-        
         text = (
             f"✅ <b>Опрос закрыт досрочно</b>\n\n"
             f"Группа: <b>{clean_group_name_for_display(group.name)}</b>\n"
             f"Дата: {today.strftime('%d.%m.%Y')}\n"
         )
-        
-        if screenshot_path:
-            text += "✅ Скриншот создан и отправлен"
-        else:
-            text += "⚠️ Скриншот не создан"
         
         keyboard = InlineKeyboardMarkup(inline_keyboard=[
             [InlineKeyboardButton(text="◀️ Назад", callback_data="admin:back_to_main")],
@@ -2358,7 +3274,7 @@ async def callback_close_poll_for_group(
         await callback.message.edit_text(
             f"❌ Ошибка: {e}",
             reply_markup=InlineKeyboardMarkup(inline_keyboard=[
-                [InlineKeyboardButton(text="◀️ Назад", callback_data="admin:back_to_main")],
+                [InlineKeyboardButton(text="◀️ Назад", callback_data="admin:polls_menu")],
             ]),
         )
 
@@ -2373,7 +3289,7 @@ async def callback_broadcast_menu(
         "📢 <b>Рассылка по группам</b>\n\n"
         "Выберите тему, в которую отправить сообщение:\n\n"
         "• <b>Отметки на слот</b> - тема, где создаются опросы\n"
-        "• <b>Приход/уход</b> - тема, куда отправляются результаты\n"
+        "• <b>Приход/уход</b> - тема для других целей\n"
         "• <b>Общий чат</b> - тема для напоминаний\n"
         "• <b>Важная информация</b> - тема для важных сообщений"
     )

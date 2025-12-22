@@ -13,8 +13,6 @@ from src.middlewares.database_middleware import DatabaseMiddleware
 from src.middlewares.verification_middleware import VerificationMiddleware
 from src.middlewares.message_cleanup_middleware import MessageCleanupMiddleware
 
-from src.services.screenshot_service import ScreenshotService
-
 from src.handlers import (
     admin_handlers,
     setup_handlers,
@@ -67,21 +65,6 @@ async def setup_bot(bot: Bot, dp: Dispatcher, redis: Redis) -> None:
     # dp.include_router(screenshot_handlers.router)  # Обработка скриншотов в теме 'приход/уход'
     dp.include_router(user_handlers.router)
 
-    # Инициализация сервисов
-    screenshot_service = ScreenshotService()
-    try:
-        await screenshot_service.initialize()
-        logger.info("Сервис скриншотов инициализирован (браузер будет создан при необходимости)")
-    except Exception as e:
-        logger.warning("Не удалось инициализировать сервис скриншотов: %s. Бот продолжит работу, скриншоты будут создаваться через текстовые отчеты.", e)
-
-    # Сохраняем сервисы в data для доступа из хэндлеров
-    dp["screenshot_service"] = screenshot_service  # type: ignore[index]
-    # Также сохраняем в bot.data для доступа из middleware
-    if not hasattr(bot, "data") or bot.data is None:
-        bot.data = {}  # type: ignore[assignment]
-    bot.data["screenshot_service"] = screenshot_service  # type: ignore[index]
-
     # Устанавливаем команды бота для автодополнения
     await set_bot_commands(bot)
 
@@ -95,9 +78,6 @@ async def setup_bot(bot: Bot, dp: Dispatcher, redis: Redis) -> None:
         logger.info("Завершение работы...")
 
         try:
-            if "screenshot_service" in dp.workflow_data:
-                await dp.workflow_data["screenshot_service"].close()  # type: ignore[index]
-
             if "scheduler_service" in dp.workflow_data:
                 await dp.workflow_data["scheduler_service"].stop()  # type: ignore[index]
 
@@ -119,25 +99,11 @@ async def set_bot_commands(bot: Bot) -> None:
     user_commands = [
         BotCommand(command="start", description="🚀 Начать работу с ботом"),
         BotCommand(command="help", description="❓ Справка по командам"),
-        BotCommand(command="my_votes", description="📊 Мои голоса"),
-        BotCommand(command="schedule", description="📅 Расписание"),
     ]
     
-    # Команды для админов
+    # Команды для админов (только основные, остальное через админ-панель)
     admin_commands = [
         BotCommand(command="admin", description="👑 Админ-панель"),
-        BotCommand(command="add_group", description="➕ Добавить группу"),
-        BotCommand(command="setup_ziz", description="⚙️ Настроить группу"),
-        BotCommand(command="set_topic", description="📌 Установить тему 'отметки на слот'"),
-        BotCommand(command="set_arrival_topic", description="📥 Установить тему 'приход/уход'"),
-        BotCommand(command="set_general_topic", description="💬 Установить тему 'общий чат'"),
-        BotCommand(command="get_topic_id", description="📌 Показать topic_id"),
-        BotCommand(command="list_groups", description="📋 Список групп"),
-        BotCommand(command="stats", description="📊 Статистика"),
-        BotCommand(command="create_polls", description="📝 Создать опросы"),
-        BotCommand(command="get_report", description="📄 Получить отчет"),
-        BotCommand(command="status", description="🔍 Статус системы"),
-        BotCommand(command="logs", description="📜 Логи системы"),
     ]
     
     try:
@@ -203,9 +169,6 @@ async def init_scheduler(bot: Bot, dp: Dispatcher) -> None:
             poll_service=None,  # Будет создаваться в задачах
             notification_service=notification_service,
         )
-        
-        # Сохраняем screenshot_service для использования в планировщике
-        scheduler_service.screenshot_service = dp.get("screenshot_service")
         
         # Запускаем планировщик
         await scheduler_service.start()

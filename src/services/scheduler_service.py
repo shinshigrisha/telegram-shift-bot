@@ -25,7 +25,6 @@ class SchedulerService:
         self.bot = bot
         self.poll_service = poll_service
         self.notification_service = notification_service
-        self.screenshot_service: Optional[Any] = None
 
     async def start(self) -> None:
         """Запуск планировщика."""
@@ -113,7 +112,7 @@ class SchedulerService:
                     bot=self.bot,
                     poll_repo=poll_repo,
                     group_repo=group_repo,
-                    screenshot_service=self.screenshot_service,
+                    screenshot_service=None,
                 )
                 
                 created, errors = await poll_service.create_daily_polls(retry_failed=True)
@@ -155,7 +154,7 @@ class SchedulerService:
                     bot=self.bot,
                     poll_repo=poll_repo,
                     group_repo=group_repo,
-                    screenshot_service=self.screenshot_service,
+                    screenshot_service=None,
                 )
                 
                 closed = await poll_service.close_expired_polls()
@@ -381,7 +380,7 @@ class SchedulerService:
                         bot=self.bot,
                         poll_repo=poll_repo,
                         group_repo=group_repo,
-                        screenshot_service=self.screenshot_service,
+                        screenshot_service=None,
                     )
                     
                     closed = await poll_service.close_expired_polls()

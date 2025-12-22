@@ -8,6 +8,9 @@ class AdminPanelStates(StatesGroup):
     waiting_for_group_selection_for_results = State()  # Для выбора группы при выводе результатов
     waiting_for_group_selection_for_close = State()  # Для выбора группы при закрытии опроса
     waiting_for_group_selection_for_topic = State()  # Для выбора группы при установке темы
+    waiting_for_group_selection_for_delete = State()  # Для выбора группы при удалении
+    waiting_for_group_selection_for_rename = State()  # Для выбора группы при переименовании
+    waiting_for_new_group_name = State()  # Для ввода нового названия группы
     waiting_for_topic_id_input = State()  # Для ввода topic_id вручную
     waiting_for_broadcast_message = State()  # Для ввода сообщения для рассылки
     waiting_for_poll_creation_time = State()  # Для ввода времени создания опросов
@@ -15,4 +18,10 @@ class AdminPanelStates(StatesGroup):
     waiting_for_reminder_hours = State()  # Для ввода часов напоминаний
     waiting_for_manual_screenshots = State()  # Для загрузки скриншотов вручную (ЗИЗ-1 до ЗИЗ-14)
     waiting_for_target_group_for_screenshots = State()  # Для выбора целевой группы для рассылки скриншотов
+    # Состояния для настройки слотов через интерфейс
+    waiting_for_slots_count = State()  # Для выбора количества слотов
+    configuring_slot = State()  # Для настройки текущего слота
+    waiting_for_slot_start_time = State()  # Для выбора времени начала слота
+    waiting_for_slot_end_time = State()  # Для выбора времени конца слота
+    waiting_for_slot_couriers_count = State()  # Для ввода количества курьеров
 

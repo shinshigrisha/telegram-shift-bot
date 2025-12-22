@@ -2,7 +2,6 @@ aiogram==3.1.1
 asyncpg==0.29.0
 redis==5.0.1
 apscheduler==3.10.4
-playwright==1.40.0
 Pillow==10.1.0
 python-dateutil==2.8.2
 pytz==2023.3.post1

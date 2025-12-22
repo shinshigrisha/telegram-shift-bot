@@ -30,20 +30,11 @@ class DatabaseMiddleware(BaseMiddleware):
             group_service = GroupService(session)
             user_service = UserService(session)
             
-            # Получаем bot и screenshot_service для создания PollService
+            # Получаем bot для создания PollService
             bot: Optional[Bot] = data.get("bot")
             # Fallback: пытаемся получить bot через Bot.get_current()
             if not bot:
                 bot = Bot.get_current(no_error=True)
-            
-            screenshot_service = None
-            if bot and hasattr(bot, "data"):
-                try:
-                    if "screenshot_service" in bot.data:
-                        screenshot_service = bot.data["screenshot_service"]
-                        data["screenshot_service"] = screenshot_service
-                except Exception:
-                    pass
             
             # Создаем PollService только если bot доступен
             # Если bot не доступен, poll_service будет None (для некоторых событий это нормально)
@@ -54,7 +45,7 @@ class DatabaseMiddleware(BaseMiddleware):
                         bot=bot,
                         poll_repo=poll_repo,
                         group_repo=group_repo,
-                        screenshot_service=screenshot_service,
+                        screenshot_service=None,
                     )
                 except Exception:
                     # Если не удалось создать PollService, продолжаем без него

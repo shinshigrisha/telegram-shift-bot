@@ -146,6 +146,13 @@ class PollRepository:
         )
         return result.scalar_one_or_none()
 
+    async def get_all_active_polls(self) -> List[DailyPoll]:
+        """Получить все активные опросы."""
+        result = await self.session.execute(
+            select(DailyPoll).where(DailyPoll.status == "active")
+        )
+        return list(result.scalars().all())
+
     async def get_poll_with_votes_and_users(self, poll_id: Any) -> Optional[DailyPoll]:
         """Получить опрос со всеми голосами и данными пользователей."""
         poll = await self.get_by_id(poll_id)
