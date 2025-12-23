@@ -25,4 +25,6 @@ class AdminPanelStates(StatesGroup):
     waiting_for_slot_end_time = State()  # Для выбора времени конца слота
     waiting_for_slot_couriers_count = State()  # Для ввода количества курьеров
     waiting_for_verification_name = State()  # Для ввода имени и фамилии при верификации пользователя
+    waiting_for_restore_vote_slot = State()  # Для выбора слота при восстановлении голоса
+    waiting_for_user_name_edit = State()  # Для ввода имени и фамилии при редактировании пользователя
 

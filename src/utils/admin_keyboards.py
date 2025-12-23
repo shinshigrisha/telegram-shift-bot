@@ -70,7 +70,9 @@ def get_verification_menu_keyboard() -> InlineKeyboardMarkup:
     """Меню управления верификацией."""
     keyboard = [
         [InlineKeyboardButton(text="📋 Список неверифицированных", callback_data="admin:list_unverified")],
+        [InlineKeyboardButton(text="✅ Список верифицированных", callback_data="admin:list_verified")],
         [InlineKeyboardButton(text="✅ Верифицировать всех", callback_data="admin:verify_all")],
+        [InlineKeyboardButton(text="🔄 Восстановить голоса", callback_data="admin:restore_votes_menu")],
         [InlineKeyboardButton(text="◀️ Назад", callback_data="admin:monitoring_menu")],
     ]
     return InlineKeyboardMarkup(inline_keyboard=keyboard)
@@ -178,5 +180,130 @@ def create_time_selection_keyboard(prefix: str, current_time: str | None = None)
             InlineKeyboardButton(text="❌ Отмена", callback_data=f"{prefix}_cancel"),
         ])
 
+    return InlineKeyboardMarkup(inline_keyboard=keyboard_buttons)
+
+
+def create_restore_votes_keyboard(attempts: list, page: int = 0, per_page: int = 10) -> InlineKeyboardMarkup:
+    """Создать клавиатуру для восстановления голосов."""
+    keyboard_buttons: list[list[InlineKeyboardButton]] = []
+    
+    start_index = page * per_page
+    end_index = start_index + per_page
+    current_page_attempts = attempts[start_index:end_index]
+    
+    for attempt in current_page_attempts:
+        # Формируем текст кнопки: пользователь - группа - дата
+        user_info = f"User {attempt['user_id']}"
+        if attempt.get('user_name'):
+            user_info = attempt['user_name']
+        
+        group_info = attempt.get('group_name', 'Unknown')
+        poll_date = attempt.get('poll_date', 'Unknown')
+        poll_status = attempt.get('poll_status', 'Unknown')
+        
+        status_icon = "🟢" if poll_status == "active" else "🔴"
+        button_text = f"{status_icon} {user_info[:15]} - {group_info} ({poll_date})"
+        if len(button_text) > 40:
+            button_text = button_text[:37] + "..."
+        
+        keyboard_buttons.append([
+            InlineKeyboardButton(
+                text=button_text,
+                callback_data=f"admin:restore_vote_{attempt['user_id']}_{attempt['poll_id']}"
+            )
+        ])
+    
+    # Кнопки пагинации
+    nav_buttons = []
+    if page > 0:
+        nav_buttons.append(InlineKeyboardButton(text="⬅️ Назад", callback_data=f"admin:restore_votes_page_{page - 1}"))
+    if end_index < len(attempts):
+        nav_buttons.append(InlineKeyboardButton(text="➡️ Вперед", callback_data=f"admin:restore_votes_page_{page + 1}"))
+    
+    if nav_buttons:
+        keyboard_buttons.append(nav_buttons)
+    
+    # Кнопка "Назад"
+    keyboard_buttons.append([
+        InlineKeyboardButton(text="◀️ Назад", callback_data="admin:verification_menu")
+    ])
+    
+    return InlineKeyboardMarkup(inline_keyboard=keyboard_buttons)
+
+
+def create_verified_users_keyboard(users: list, page: int = 0, per_page: int = 10) -> InlineKeyboardMarkup:
+    """Создать клавиатуру для списка верифицированных пользователей."""
+    keyboard_buttons: list[list[InlineKeyboardButton]] = []
+    
+    start_index = page * per_page
+    end_index = start_index + per_page
+    current_page_users = users[start_index:end_index]
+    
+    for user in current_page_users:
+        full_name = user.get_full_name() or user.username or f"User {user.id}"
+        # Ограничиваем длину текста кнопки
+        button_text = full_name[:30] + "..." if len(full_name) > 30 else full_name
+        keyboard_buttons.append([
+            InlineKeyboardButton(
+                text=f"✏️ {button_text}",
+                callback_data=f"admin:edit_user_{user.id}"
+            )
+        ])
+    
+    # Кнопки пагинации
+    nav_buttons = []
+    total_pages = (len(users) + per_page - 1) // per_page if users else 1
+    
+    if page > 0:
+        nav_buttons.append(InlineKeyboardButton(text="⬅️ Назад", callback_data=f"admin:verified_page_{page - 1}"))
+    if page < total_pages - 1:
+        nav_buttons.append(InlineKeyboardButton(text="➡️ Вперед", callback_data=f"admin:verified_page_{page + 1}"))
+    
+    if nav_buttons:
+        keyboard_buttons.append(nav_buttons)
+    
+    # Кнопка "Назад"
+    keyboard_buttons.append([
+        InlineKeyboardButton(text="◀️ Назад", callback_data="admin:verification_menu")
+    ])
+    
+    return InlineKeyboardMarkup(inline_keyboard=keyboard_buttons)
+
+
+def create_user_edit_keyboard(user_id: int) -> InlineKeyboardMarkup:
+    """Создать клавиатуру для редактирования пользователя."""
+    keyboard = [
+        [InlineKeyboardButton(text="✏️ Изменить имя и фамилию", callback_data=f"admin:edit_user_name_{user_id}")],
+        [InlineKeyboardButton(text="◀️ Назад к списку", callback_data="admin:list_verified")],
+    ]
+    return InlineKeyboardMarkup(inline_keyboard=keyboard)
+
+
+def create_slot_selection_keyboard(slots: list, poll_id: str, user_id: int, include_day_off: bool = True) -> InlineKeyboardMarkup:
+    """Создать клавиатуру для выбора слота при восстановлении голоса."""
+    keyboard_buttons: list[list[InlineKeyboardButton]] = []
+    
+    for slot in slots:
+        slot_time = f"{slot.start_time.strftime('%H:%M')}-{slot.end_time.strftime('%H:%M')}"
+        button_text = f"Слот {slot.slot_number}: {slot_time}"
+        keyboard_buttons.append([
+            InlineKeyboardButton(
+                text=button_text,
+                callback_data=f"admin:restore_vote_slot_{poll_id}_{user_id}_{slot.id}"
+            )
+        ])
+    
+    if include_day_off:
+        keyboard_buttons.append([
+            InlineKeyboardButton(
+                text="🚫 Выходной",
+                callback_data=f"admin:restore_vote_dayoff_{poll_id}_{user_id}"
+            )
+        ])
+    
+    keyboard_buttons.append([
+        InlineKeyboardButton(text="❌ Отмена", callback_data="admin:restore_votes_menu")
+    ])
+    
     return InlineKeyboardMarkup(inline_keyboard=keyboard_buttons)
 
