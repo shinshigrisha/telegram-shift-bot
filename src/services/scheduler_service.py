@@ -9,6 +9,7 @@ from aiogram import Bot
 from config.settings import settings
 from src.services.poll_service import PollService
 from src.services.notification_service import NotificationService
+from src.utils.group_formatters import clean_group_name_for_display
 
 
 logger = logging.getLogger(__name__)
@@ -203,9 +204,10 @@ class SchedulerService:
                             continue
                         
                         # Простое сообщение без статистики по слотам
+                        group_display_name = clean_group_name_for_display(group.name)
                         message_text = (
                             "⏰ <b>Остался один час до конца опроса!</b>\n\n"
-                            f"<b>{group.name}</b>\n\n"
+                            f"<b>{group_display_name}</b>\n\n"
                             "Пожалуйста, отметьтесь в опросе до 19:00."
                         )
                         
