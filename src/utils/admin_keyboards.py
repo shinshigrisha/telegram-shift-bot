@@ -60,8 +60,63 @@ def get_monitoring_menu_keyboard() -> InlineKeyboardMarkup:
         [InlineKeyboardButton(text="📊 Статистика", callback_data="admin:stats")],
         [InlineKeyboardButton(text="🔍 Статус системы", callback_data="admin:status")],
         [InlineKeyboardButton(text="📜 Логи", callback_data="admin:logs")],
+        [InlineKeyboardButton(text="👤 Верификация пользователей", callback_data="admin:verification_menu")],
         [InlineKeyboardButton(text="◀️ Назад", callback_data="admin:back_to_main")],
     ]
+    return InlineKeyboardMarkup(inline_keyboard=keyboard)
+
+
+def get_verification_menu_keyboard() -> InlineKeyboardMarkup:
+    """Меню управления верификацией."""
+    keyboard = [
+        [InlineKeyboardButton(text="📋 Список неверифицированных", callback_data="admin:list_unverified")],
+        [InlineKeyboardButton(text="✅ Верифицировать всех", callback_data="admin:verify_all")],
+        [InlineKeyboardButton(text="◀️ Назад", callback_data="admin:monitoring_menu")],
+    ]
+    return InlineKeyboardMarkup(inline_keyboard=keyboard)
+
+
+def create_unverified_users_keyboard(users: list, page: int = 0, per_page: int = 10) -> InlineKeyboardMarkup:
+    """Создать клавиатуру для списка неверифицированных пользователей."""
+    keyboard = []
+    
+    start_idx = page * per_page
+    end_idx = start_idx + per_page
+    page_users = users[start_idx:end_idx]
+    
+    for user in page_users:
+        full_name = user.get_full_name() or (user.username or f"User {user.id}")
+        # Ограничиваем длину текста кнопки
+        button_text = full_name[:30] + "..." if len(full_name) > 30 else full_name
+        keyboard.append([
+            InlineKeyboardButton(
+                text=f"✅ {button_text}",
+                callback_data=f"admin:verify_user_{user.id}"
+            )
+        ])
+    
+    # Навигация по страницам
+    nav_buttons = []
+    total_pages = (len(users) + per_page - 1) // per_page if users else 1
+    
+    if page > 0:
+        nav_buttons.append(InlineKeyboardButton(text="◀️ Назад", callback_data=f"admin:unverified_page_{page-1}"))
+    
+    if page < total_pages - 1:
+        nav_buttons.append(InlineKeyboardButton(text="Вперед ▶️", callback_data=f"admin:unverified_page_{page+1}"))
+    
+    if nav_buttons:
+        keyboard.append(nav_buttons)
+    
+    # Кнопки управления
+    keyboard.append([
+        InlineKeyboardButton(text="✅ Верифицировать всех на странице", callback_data=f"admin:verify_page_{page}"),
+    ])
+    keyboard.append([
+        InlineKeyboardButton(text="✅ Верифицировать всех", callback_data="admin:verify_all_confirm"),
+        InlineKeyboardButton(text="◀️ Назад", callback_data="admin:verification_menu"),
+    ])
+    
     return InlineKeyboardMarkup(inline_keyboard=keyboard)
 
 

@@ -63,7 +63,7 @@ async def test_get_or_create_user_new():
         last_name="Иванов",
         username="ivanov"
     )
-    mock_session.commit.assert_called_once()
+    # commit вызывается middleware, не в сервисе
 
 
 @pytest.mark.asyncio
@@ -89,7 +89,7 @@ async def test_verify_user():
     assert result == mock_user
     assert result.is_verified is True
     mock_user_repo.verify_user.assert_called_once_with(123456, "Иван", "Иванов")
-    mock_session.commit.assert_called_once()
+    # commit вызывается middleware, не в сервисе
 
 
 @pytest.mark.asyncio

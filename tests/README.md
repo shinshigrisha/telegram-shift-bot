@@ -4,12 +4,27 @@
 
 ## Структура тестов
 
+### Сервисы
 - `test_poll_service.py` - тесты для `PollService` (создание опросов, закрытие, проверка существования)
 - `test_user_service.py` - тесты для `UserService` (верификация пользователей, проверка статуса)
 - `test_group_service.py` - тесты для `GroupService` (работа с группами, статистика)
+
+### Handlers
+- `test_admin_handlers.py` - тесты для admin handlers (`/start`, `/stats`, `/create_polls`)
+- `test_admin_panel.py` - тесты для админ-панели (интерактивные меню, настройки)
+- `test_verification_handlers.py` - тесты для verification handlers (верификация пользователей)
+- `test_poll_handlers.py` - тесты для poll handlers (обработка ответов на опросы)
+- `test_user_handlers.py` - тесты для user handlers (`/help`, `/my_votes`, `/schedule`)
+- `test_monitoring_handlers.py` - тесты для monitoring handlers (`/status`, `/logs`)
+- `test_report_handlers.py` - тесты для report handlers (`/get_report`, `/generate_all_reports`)
+- `test_slot_validation.py` - тесты для валидации формата слотов времени
+
+### Утилиты
 - `test_auth.py` - тесты для утилит аутентификации (декораторы `require_admin`, `require_admin_callback`)
 - `test_basic.py` - базовые тесты
-- `conftest.py` - общие фикстуры для всех тестов
+
+### Конфигурация
+- `conftest.py` - общие фикстуры для всех тестов (моки, настройки)
 
 ## Запуск тестов
 
@@ -74,6 +89,23 @@ pytest tests/ --cov=src --cov-report=html
 - Все тесты используют моки (mocks) для изоляции компонентов
 - Тесты не требуют реальной базы данных или Telegram API
 - Тесты запускаются асинхронно с помощью `pytest-asyncio`
+- Playwright мокируется автоматически в `conftest.py` (не требуется установка)
+- Database engine мокируется для избежания реальных подключений к БД
+
+## Статус тестов
+
+**Текущий статус:** 71 тест проходит, 27 требует доработки
+
+### Основные области покрытия:
+- ✅ Сервисы (PollService, UserService, GroupService)
+- ✅ Handlers (admin, admin_panel, verification, poll, user, monitoring, report)
+- ✅ Валидация слотов
+- ✅ Аутентификация и авторизация
+
+### Области для улучшения:
+- ⚠️ Некоторые тесты требуют обновления под актуальную реализацию
+- ⚠️ Необходимо добавить тесты для репозиториев
+- ⚠️ Необходимо добавить тесты для новых сервисов (NotificationService, SchedulerService)
 
 ## Добавление новых тестов
 

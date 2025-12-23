@@ -75,7 +75,7 @@ async def test_create_group():
         telegram_topic_id=25,
         is_night=False
     )
-    mock_session.commit.assert_called_once()
+    # commit вызывается middleware, не в сервисе
 
 
 @pytest.mark.asyncio
@@ -102,7 +102,7 @@ async def test_update_group_slots_success():
     assert result is True
     mock_group_repo.get_by_id.assert_called_once_with(1)
     mock_group.update_slots.assert_called_once_with(slots)
-    mock_session.commit.assert_called_once()
+    # commit вызывается middleware, не в сервисе
     mock_session.refresh.assert_called_once_with(mock_group)
 
 
@@ -120,7 +120,7 @@ async def test_update_group_slots_group_not_found():
     result = await service.update_group_slots(999, [])
 
     assert result is False
-    mock_session.commit.assert_not_called()
+    # commit вызывается middleware, не в сервисе
 
 
 @pytest.mark.asyncio

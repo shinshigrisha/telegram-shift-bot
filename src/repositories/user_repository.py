@@ -61,6 +61,13 @@ class UserRepository:
         )
         return list(result.scalars().all())
     
+    async def get_unverified_users(self) -> List[User]:
+        """Получить всех неверифицированных пользователей."""
+        result = await self.session.execute(
+            select(User).where(User.is_verified == False).order_by(User.id)  # noqa: E712
+        )
+        return list(result.scalars().all())
+    
     async def get_by_ids(self, user_ids: List[int]) -> List[User]:
         """Получить пользователей по списку ID (оптимизация для батчей)."""
         if not user_ids:
@@ -69,4 +76,36 @@ class UserRepository:
             select(User).where(User.id.in_(user_ids))
         )
         return list(result.scalars().all())
+    
+    async def verify_users_batch(self, user_ids: List[int]) -> int:
+        """Массовая верификация пользователей."""
+        if not user_ids:
+            return 0
+        
+        result = await self.session.execute(
+            select(User).where(
+                User.id.in_(user_ids),
+                User.is_verified == False  # noqa: E712
+            )
+        )
+        users = result.scalars().all()
+        
+        verified_count = 0
+        for user in users:
+            # Если у пользователя нет имени или фамилии, используем доступные данные
+            if not user.first_name and not user.last_name:
+                # Используем username или ID как имя
+                display_name = user.username or f"User {user.id}"
+                user.first_name = display_name
+                user.last_name = ""
+            elif not user.first_name:
+                user.first_name = user.last_name or (user.username or f"User {user.id}")
+            elif not user.last_name:
+                user.last_name = user.first_name
+            
+            user.is_verified = True
+            verified_count += 1
+        
+        await self.session.flush()
+        return verified_count
 
