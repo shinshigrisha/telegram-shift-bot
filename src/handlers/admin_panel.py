@@ -718,7 +718,7 @@ async def callback_restore_vote(
             text = (
                 f"🔄 <b>Восстановление голоса</b>\n\n"
                 f"Пользователь: <b>{user.get_full_name()}</b>\n"
-                f"Группа: <b>{group.name if group else 'Unknown'}</b>\n"
+                f"Группа: <b>{clean_group_name_for_display(group.name) if group else 'Unknown'}</b>\n"
                 f"Дата опроса: <b>{poll.poll_date}</b>\n\n"
                 f"⚠️ Опрос еще <b>активен</b>.\n\n"
                 f"Рекомендуется попросить пользователя проголосовать заново в Telegram.\n\n"
@@ -741,7 +741,7 @@ async def callback_restore_vote(
             text = (
                 f"🔄 <b>Восстановление голоса</b>\n\n"
                 f"Пользователь: <b>{user.get_full_name()}</b>\n"
-                f"Группа: <b>{group.name if group else 'Unknown'}</b>\n"
+                f"Группа: <b>{clean_group_name_for_display(group.name) if group else 'Unknown'}</b>\n"
                 f"Дата опроса: <b>{poll.poll_date}</b>\n"
                 f"Статус: <b>Закрыт</b>\n\n"
                 f"⚠️ Опрос уже закрыт. Выберите слот для восстановления голоса:"
@@ -833,7 +833,7 @@ async def callback_restore_vote_slot(
             text = (
                 f"✅ <b>Голос восстановлен!</b>\n\n"
                 f"Пользователь: <b>{user.get_full_name()}</b>\n"
-                f"Группа: <b>{group.name if group else 'Unknown'}</b>\n"
+                f"Группа: <b>{clean_group_name_for_display(group.name) if group else 'Unknown'}</b>\n"
                 f"Дата опроса: <b>{poll.poll_date}</b>\n"
                 f"Выбор: <b>{slot_info}</b>\n\n"
                 f"Голос успешно добавлен в базу данных."
@@ -3549,7 +3549,7 @@ async def callback_find_tomorrow_polls(
                         try:
                             report_text = (
                                 f"📊 <b>Результаты опроса на {date_str}</b>\n"
-                                f"Группа: <b>{group.name}</b>\n\n"
+                                f"Группа: <b>{clean_group_name_for_display(group.name)}</b>\n\n"
                                 f"{text_report}"
                             )
                             await bot.send_message(
@@ -3997,7 +3997,7 @@ async def callback_send_screenshots_to_group(
     # Формируем итоговое сообщение
     result_text = (
         f"✅ <b>Рассылка скриншотов завершена</b>\n\n"
-        f"Группа: <b>{group.name}</b>\n"
+        f"Группа: <b>{clean_group_name_for_display(group.name)}</b>\n"
         f"Тема: Отметка на слот\n\n"
         f"Отправлено: {sent_count} из {len(screenshots)}"
     )

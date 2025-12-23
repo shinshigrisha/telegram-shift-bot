@@ -538,7 +538,8 @@ class PollService:
         if hasattr(poll, 'group_id') and poll.group_id:
             group = await self.group_repo.get_by_id(poll.group_id)
             if group:
-                group_name = group.name
+                from src.utils.group_formatters import clean_group_name_for_display
+                group_name = clean_group_name_for_display(group.name)
         
         result_lines = []
         

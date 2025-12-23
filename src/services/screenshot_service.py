@@ -247,7 +247,9 @@ class ScreenshotService:
             y_position += title_bbox[3] - title_bbox[1] + 30
             
             # Название группы
-            group_text = group_name
+            from src.utils.group_formatters import clean_group_name_for_display
+            display_group_name = clean_group_name_for_display(group_name)
+            group_text = display_group_name
             group_bbox = draw.textbbox((0, 0), group_text, font=header_font)
             group_width = group_bbox[2] - group_bbox[0]
             group_x = (width - group_width) // 2
@@ -358,12 +360,17 @@ class ScreenshotService:
     ) -> Image.Image:
         """Добавить подпись к скриншоту."""
         try:
+            from src.utils.group_formatters import clean_group_name_for_display
+            
+            # Очищаем название группы для отображения
+            display_group_name = clean_group_name_for_display(group_name)
+            
             # Создаем копию изображения для рисования
             img_with_caption = image.copy()
             draw = ImageDraw.Draw(img_with_caption)
             
             # Формируем текст подписи
-            caption_text = f"Выход на {poll_date.strftime('%d.%m.%Y')} | {group_name}"
+            caption_text = f"Выход на {poll_date.strftime('%d.%m.%Y')} | {display_group_name}"
             
             # Пытаемся использовать системный шрифт
             try:
@@ -498,6 +505,11 @@ class ScreenshotService:
     ) -> Optional[Path]:
         """Создать текстовый отчет как альтернативу скриншоту."""
         try:
+            from src.utils.group_formatters import clean_group_name_for_display
+            
+            # Очищаем название группы для отображения
+            display_group_name = clean_group_name_for_display(group_name)
+            
             reports_dir = settings.REPORTS_DIR / group_name
             reports_dir.mkdir(parents=True, exist_ok=True)
 
@@ -506,7 +518,7 @@ class ScreenshotService:
 
             content = (
                 f"📊 Результаты опроса\n"
-                f"Группа: {group_name}\n"
+                f"Группа: {display_group_name}\n"
                 f"Дата: {poll_date.strftime('%d.%m.%Y')}\n"
                 f"Время создания: {datetime.now().strftime('%H:%M:%S')}\n\n"
             )
