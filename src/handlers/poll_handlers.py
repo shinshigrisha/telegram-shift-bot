@@ -1,4 +1,5 @@
 import logging
+from typing import Optional
 
 from aiogram import Router
 from aiogram.types import PollAnswer
@@ -15,8 +16,8 @@ router = Router()
 @router.poll_answer()
 async def handle_poll_answer(
     poll_answer: PollAnswer,
-    user_service: UserService | None = None,
-    poll_repo: PollRepository | None = None,
+    user_service: Optional[UserService] = None,
+    poll_repo: Optional[PollRepository] = None,
 ) -> None:
     """Обработка ответа на опрос."""
     

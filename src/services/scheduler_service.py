@@ -335,8 +335,7 @@ class SchedulerService:
                 if len(issues) > 20:
                     message += f"\n\n... и ещё {len(issues) - 20} проблем"
                 await self.notification_service.notify_admins(message)
-            else:
-                logger.debug("All polls are healthy")
+            # Все опросы в порядке, уведомления не требуются
                 
         except Exception as e:  # noqa: BLE001
             logger.error("Error in health check job: %s", e)

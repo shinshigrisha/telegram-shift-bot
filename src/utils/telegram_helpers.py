@@ -34,11 +34,9 @@ async def safe_edit_message(
         error_message = str(e).lower()
         if "message is not modified" in error_message:
             # Сообщение уже имеет такое же содержимое - это не ошибка
-            logger.debug("Message not modified (same content): %s", message.message_id)
             return True
         elif "message to edit not found" in error_message:
             # Сообщение было удалено - это нормально
-            logger.debug("Message to edit not found: %s", message.message_id)
             return False
         else:
             # Другая ошибка - логируем и возвращаем False
@@ -72,7 +70,6 @@ async def safe_answer_callback(
         error_message = str(e).lower()
         if "query is too old" in error_message or "query id is invalid" in error_message:
             # Callback query устарел - это нормально, не критично
-            logger.debug("Callback query is too old: %s", callback.id)
             return True  # Возвращаем True, т.к. это не критичная ошибка
         else:
             # Другая ошибка - логируем и возвращаем False

@@ -229,37 +229,34 @@ async def callback_list_unverified(
     state: FSMContext,
 ) -> None:
     """Показать список неверифицированных пользователей."""
-    from src.repositories.user_repository import UserRepository
-    from src.models.database import AsyncSessionLocal
-    
     # Очищаем состояние при возврате к списку
     await state.clear()
     
-    async with AsyncSessionLocal() as session:
-        user_repo = UserRepository(session)
-        users = await user_repo.get_unverified_users()
+    # Используем репозиторий из middleware через user_service
+    user_repo = user_service.user_repo
+    users = await user_repo.get_unverified_users()
+    
+    if not users:
+        text = "✅ <b>Все пользователи верифицированы!</b>"
+        keyboard = InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text="◀️ Назад", callback_data="admin:verification_menu")],
+        ])
+    else:
+        users_with_username = [u for u in users if u.username]
+        users_without_username = [u for u in users if not u.username]
         
-        if not users:
-            text = "✅ <b>Все пользователи верифицированы!</b>"
-            keyboard = InlineKeyboardMarkup(inline_keyboard=[
-                [InlineKeyboardButton(text="◀️ Назад", callback_data="admin:verification_menu")],
-            ])
-        else:
-            users_with_username = [u for u in users if u.username]
-            users_without_username = [u for u in users if not u.username]
-            
-            text = (
-                f"📋 <b>Неверифицированные пользователи</b>\n\n"
-                f"Всего: <b>{len(users)}</b>\n"
-                f"• С username: {len(users_with_username)}\n"
-                f"• Без username: {len(users_without_username)}\n\n"
-                f"Нажмите на пользователя для верификации или используйте массовую верификацию."
-            )
-            
-            keyboard = create_unverified_users_keyboard(users, page=0)
+        text = (
+            f"📋 <b>Неверифицированные пользователи</b>\n\n"
+            f"Всего: <b>{len(users)}</b>\n"
+            f"• С username: {len(users_with_username)}\n"
+            f"• Без username: {len(users_without_username)}\n\n"
+            f"Нажмите на пользователя для верификации или используйте массовую верификацию."
+        )
         
-        await callback.message.edit_text(text, reply_markup=keyboard)
-        await callback.answer()
+        keyboard = create_unverified_users_keyboard(users, page=0)
+    
+    await callback.message.edit_text(text, reply_markup=keyboard)
+    await callback.answer()
 
 
 @router.callback_query(lambda c: c.data and c.data.startswith("admin:unverified_page_"))
@@ -269,43 +266,40 @@ async def callback_unverified_page(
     user_service: UserService,
 ) -> None:
     """Навигация по страницам неверифицированных пользователей."""
-    from src.repositories.user_repository import UserRepository
-    from src.models.database import AsyncSessionLocal
-    
     try:
         page = int(callback.data.split("_")[-1])
     except (ValueError, IndexError):
         page = 0
     
-    async with AsyncSessionLocal() as session:
-        user_repo = UserRepository(session)
-        users = await user_repo.get_unverified_users()
+    # Используем репозиторий из middleware через user_service
+    user_repo = user_service.user_repo
+    users = await user_repo.get_unverified_users()
+    
+    if not users:
+        text = "✅ <b>Все пользователи верифицированы!</b>"
+        keyboard = InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text="◀️ Назад", callback_data="admin:verification_menu")],
+        ])
+    else:
+        users_with_username = [u for u in users if u.username]
+        users_without_username = [u for u in users if not u.username]
         
-        if not users:
-            text = "✅ <b>Все пользователи верифицированы!</b>"
-            keyboard = InlineKeyboardMarkup(inline_keyboard=[
-                [InlineKeyboardButton(text="◀️ Назад", callback_data="admin:verification_menu")],
-            ])
-        else:
-            users_with_username = [u for u in users if u.username]
-            users_without_username = [u for u in users if not u.username]
-            
-            per_page = 10
-            total_pages = (len(users) + per_page - 1) // per_page
-            page = max(0, min(page, total_pages - 1))
-            
-            text = (
-                f"📋 <b>Неверифицированные пользователи</b>\n\n"
-                f"Всего: <b>{len(users)}</b> | Страница {page + 1}/{total_pages}\n"
-                f"• С username: {len(users_with_username)}\n"
-                f"• Без username: {len(users_without_username)}\n\n"
-                f"Нажмите на пользователя для верификации."
-            )
-            
-            keyboard = create_unverified_users_keyboard(users, page=page)
+        per_page = 10
+        total_pages = (len(users) + per_page - 1) // per_page
+        page = max(0, min(page, total_pages - 1))
         
-        await callback.message.edit_text(text, reply_markup=keyboard)
-        await callback.answer()
+        text = (
+            f"📋 <b>Неверифицированные пользователи</b>\n\n"
+            f"Всего: <b>{len(users)}</b> | Страница {page + 1}/{total_pages}\n"
+            f"• С username: {len(users_with_username)}\n"
+            f"• Без username: {len(users_without_username)}\n\n"
+            f"Нажмите на пользователя для верификации."
+        )
+        
+        keyboard = create_unverified_users_keyboard(users, page=page)
+    
+    await callback.message.edit_text(text, reply_markup=keyboard)
+    await callback.answer()
 
 
 @router.callback_query(lambda c: c.data and c.data.startswith("admin:verify_user_"))
@@ -316,26 +310,23 @@ async def callback_verify_user(
     state: FSMContext,
 ) -> None:
     """Запросить ввод имени и фамилии для верификации пользователя."""
-    from src.repositories.user_repository import UserRepository
-    from src.models.database import AsyncSessionLocal
-    
     try:
         user_id = int(callback.data.split("_")[-1])
     except (ValueError, IndexError):
         await callback.answer("❌ Ошибка: неверный ID пользователя", show_alert=True)
         return
     
-    async with AsyncSessionLocal() as session:
-        user_repo = UserRepository(session)
-        user = await user_repo.get_by_id(user_id)
-        
-        if not user:
-            await callback.answer("❌ Пользователь не найден", show_alert=True)
-            return
-        
-        if user.is_verified:
-            await callback.answer("ℹ️ Пользователь уже верифицирован", show_alert=True)
-            return
+    # Используем репозиторий из middleware через user_service
+    user_repo = user_service.user_repo
+    user = await user_repo.get_by_id(user_id)
+    
+    if not user:
+        await callback.answer("❌ Пользователь не найден", show_alert=True)
+        return
+    
+    if user.is_verified:
+        await callback.answer("ℹ️ Пользователь уже верифицирован", show_alert=True)
+        return
         
         # Сохраняем user_id в состоянии
         await state.update_data(verification_user_id=user_id)
@@ -374,8 +365,7 @@ async def process_verification_name(
     user_service: UserService,
 ) -> None:
     """Обработать введенные имя и фамилию для верификации."""
-    from src.repositories.user_repository import UserRepository
-    from src.models.database import AsyncSessionLocal
+    from src.utils.name_validator import validate_full_name
     
     # Получаем user_id из состояния
     data = await state.get_data()
@@ -401,84 +391,60 @@ async def process_verification_name(
         )
         return
     
-    full_name = message.text.strip()
-    
-    # Разделяем на фамилию и имя
-    name_parts = full_name.split(maxsplit=1)
-    if len(name_parts) < 2:
-        await message.answer(
-            "❌ Неверный формат.\n\n"
-            "Пожалуйста, введите <b>Фамилию и Имя</b> через пробел:\n"
-            "Формат: <b>Фамилия Имя</b>\n"
-            "Пример: <code>Иванов Иван</code>"
-        )
+    # Валидируем имя
+    is_valid, last_name, first_name, error_message = validate_full_name(message.text)
+    if not is_valid:
+        await message.answer(f"❌ {error_message}")
         return
     
-    last_name = name_parts[0].strip()
-    first_name = name_parts[1].strip()
+    # Верифицируем пользователя через user_service
+    # DatabaseMiddleware автоматически сделает commit после успешного выполнения handler
+    verified_user = await user_service.verify_user(
+        user_id=user_id,
+        first_name=first_name,
+        last_name=last_name
+    )
     
-    # Валидация (только буквы, пробелы, дефисы)
-    import re
-    name_pattern = r'^[А-Яа-яA-Za-z\s\-]{2,50}$'
-    if not re.match(name_pattern, last_name) or not re.match(name_pattern, first_name):
+    if verified_user:
+        full_name_display = verified_user.get_full_name()
+        
+        # Отправляем подтверждение
         await message.answer(
-            "❌ Неверный формат.\n\n"
-            "Фамилия и Имя должны содержать только буквы (2-50 символов).\n"
-            "Пожалуйста, введите <b>Фамилию и Имя</b> через пробел:\n"
-            "Пример: <code>Иванов Иван</code>"
-        )
-        return
-    
-    # Верифицируем пользователя
-    async with AsyncSessionLocal() as session:
-        user_repo = UserRepository(session)
-        verified_user = await user_repo.verify_user(
-            user_id=user_id,
-            first_name=first_name,
-            last_name=last_name
+            f"✅ <b>Пользователь верифицирован!</b>\n\n"
+            f"Фамилия: <b>{last_name}</b>\n"
+            f"Имя: <b>{first_name}</b>\n\n"
+            f"Теперь пользователь может участвовать в опросах."
         )
         
-        if verified_user:
-            await session.commit()
-            full_name_display = verified_user.get_full_name()
-            
-            # Отправляем подтверждение
-            await message.answer(
-                f"✅ <b>Пользователь верифицирован!</b>\n\n"
-                f"Фамилия: <b>{last_name}</b>\n"
-                f"Имя: <b>{first_name}</b>\n\n"
-                f"Теперь пользователь может участвовать в опросах."
-            )
-            
-            # Обновляем список неверифицированных пользователей
-            users = await user_repo.get_unverified_users()
-            
-            # Отправляем обновленный список
-            if not users:
-                text = "✅ <b>Все пользователи верифицированы!</b>"
-                keyboard = InlineKeyboardMarkup(inline_keyboard=[
-                    [InlineKeyboardButton(text="◀️ Назад", callback_data="admin:verification_menu")],
-                ])
-            else:
-                users_with_username = [u for u in users if u.username]
-                users_without_username = [u for u in users if not u.username]
-                
-                text = (
-                    f"📋 <b>Неверифицированные пользователи</b>\n\n"
-                    f"Всего: <b>{len(users)}</b>\n"
-                    f"• С username: {len(users_with_username)}\n"
-                    f"• Без username: {len(users_without_username)}\n\n"
-                    f"Нажмите на пользователя для верификации или используйте массовую верификацию."
-                )
-                keyboard = create_unverified_users_keyboard(users, page=0)
-            
-            # Отправляем обновленный список
-            await message.answer(text, reply_markup=keyboard)
-            
-            await state.clear()
+        # Обновляем список неверифицированных пользователей
+        users = await user_service.user_repo.get_unverified_users()
+        
+        # Отправляем обновленный список
+        if not users:
+            text = "✅ <b>Все пользователи верифицированы!</b>"
+            keyboard = InlineKeyboardMarkup(inline_keyboard=[
+                [InlineKeyboardButton(text="◀️ Назад", callback_data="admin:verification_menu")],
+            ])
         else:
-            await message.answer("❌ Ошибка при верификации пользователя")
-            await state.clear()
+            users_with_username = [u for u in users if u.username]
+            users_without_username = [u for u in users if not u.username]
+            
+            text = (
+                f"📋 <b>Неверифицированные пользователи</b>\n\n"
+                f"Всего: <b>{len(users)}</b>\n"
+                f"• С username: {len(users_with_username)}\n"
+                f"• Без username: {len(users_without_username)}\n\n"
+                f"Нажмите на пользователя для верификации или используйте массовую верификацию."
+            )
+            keyboard = create_unverified_users_keyboard(users, page=0)
+        
+        # Отправляем обновленный список
+        await message.answer(text, reply_markup=keyboard)
+        
+        await state.clear()
+    else:
+        await message.answer("❌ Ошибка при верификации пользователя")
+        await state.clear()
 
 
 @router.callback_query(lambda c: c.data and c.data.startswith("admin:verify_page_"))
@@ -488,60 +454,57 @@ async def callback_verify_page(
     user_service: UserService,
 ) -> None:
     """Верифицировать всех пользователей на текущей странице."""
-    from src.repositories.user_repository import UserRepository
-    from src.models.database import AsyncSessionLocal
-    
     try:
         page = int(callback.data.split("_")[-1])
     except (ValueError, IndexError):
         page = 0
     
-    async with AsyncSessionLocal() as session:
-        user_repo = UserRepository(session)
+    # Используем user_repo из user_service
+    user_repo = user_service.user_repo
+    users = await user_repo.get_unverified_users()
+    
+    if not users:
+        await callback.answer("✅ Все пользователи уже верифицированы!", show_alert=True)
+        return
+    
+    per_page = 10
+    start_idx = page * per_page
+    end_idx = start_idx + per_page
+    page_users = users[start_idx:end_idx]
+    
+    user_ids = [u.id for u in page_users]
+    verified_count = await user_repo.verify_users_batch(user_ids)
+    
+    if verified_count > 0:
+        # DatabaseMiddleware автоматически сделает commit после успешного выполнения handler
+        await callback.answer(f"✅ Верифицировано {verified_count} пользователей", show_alert=True)
+        
+        # Обновляем список
         users = await user_repo.get_unverified_users()
-        
         if not users:
-            await callback.answer("✅ Все пользователи уже верифицированы!", show_alert=True)
-            return
-        
-        per_page = 10
-        start_idx = page * per_page
-        end_idx = start_idx + per_page
-        page_users = users[start_idx:end_idx]
-        
-        user_ids = [u.id for u in page_users]
-        verified_count = await user_repo.verify_users_batch(user_ids)
-        
-        if verified_count > 0:
-            await session.commit()
-            await callback.answer(f"✅ Верифицировано {verified_count} пользователей", show_alert=True)
-            
-            # Обновляем список
-            users = await user_repo.get_unverified_users()
-            if not users:
-                text = "✅ <b>Все пользователи верифицированы!</b>"
-                keyboard = InlineKeyboardMarkup(inline_keyboard=[
-                    [InlineKeyboardButton(text="◀️ Назад", callback_data="admin:verification_menu")],
-                ])
-            else:
-                users_with_username = [u for u in users if u.username]
-                users_without_username = [u for u in users if not u.username]
-                
-                total_pages = (len(users) + per_page - 1) // per_page
-                current_page = min(page, total_pages - 1) if total_pages > 0 else 0
-                
-                text = (
-                    f"📋 <b>Неверифицированные пользователи</b>\n\n"
-                    f"Всего: <b>{len(users)}</b> | Страница {current_page + 1}/{total_pages}\n"
-                    f"• С username: {len(users_with_username)}\n"
-                    f"• Без username: {len(users_without_username)}\n\n"
-                    f"Нажмите на пользователя для верификации."
-                )
-                keyboard = create_unverified_users_keyboard(users, page=current_page)
-            
-            await callback.message.edit_text(text, reply_markup=keyboard)
+            text = "✅ <b>Все пользователи верифицированы!</b>"
+            keyboard = InlineKeyboardMarkup(inline_keyboard=[
+                [InlineKeyboardButton(text="◀️ Назад", callback_data="admin:verification_menu")],
+            ])
         else:
-            await callback.answer("ℹ️ На этой странице нет пользователей для верификации", show_alert=True)
+            users_with_username = [u for u in users if u.username]
+            users_without_username = [u for u in users if not u.username]
+            
+            total_pages = (len(users) + per_page - 1) // per_page
+            current_page = min(page, total_pages - 1) if total_pages > 0 else 0
+            
+            text = (
+                f"📋 <b>Неверифицированные пользователи</b>\n\n"
+                f"Всего: <b>{len(users)}</b> | Страница {current_page + 1}/{total_pages}\n"
+                f"• С username: {len(users_with_username)}\n"
+                f"• Без username: {len(users_without_username)}\n\n"
+                f"Нажмите на пользователя для верификации."
+            )
+            keyboard = create_unverified_users_keyboard(users, page=current_page)
+        
+        await callback.message.edit_text(text, reply_markup=keyboard)
+    else:
+        await callback.answer("ℹ️ На этой странице нет пользователей для верификации", show_alert=True)
 
 
 @router.callback_query(lambda c: c.data == "admin:verify_all_confirm")
@@ -568,40 +531,37 @@ async def callback_verify_all(
     user_service: UserService,
 ) -> None:
     """Верифицировать всех неверифицированных пользователей."""
-    from src.repositories.user_repository import UserRepository
-    from src.models.database import AsyncSessionLocal
+    # Используем user_repo из user_service
+    user_repo = user_service.user_repo
+    users = await user_repo.get_unverified_users()
     
-    async with AsyncSessionLocal() as session:
-        user_repo = UserRepository(session)
-        users = await user_repo.get_unverified_users()
+    if not users:
+        await callback.answer("✅ Все пользователи уже верифицированы!", show_alert=True)
+        text = "✅ <b>Все пользователи верифицированы!</b>"
+        keyboard = InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text="◀️ Назад", callback_data="admin:verification_menu")],
+        ])
+        await callback.message.edit_text(text, reply_markup=keyboard)
+        return
+    
+    user_ids = [u.id for u in users]
+    verified_count = await user_repo.verify_users_batch(user_ids)
+    
+    if verified_count > 0:
+        # DatabaseMiddleware автоматически сделает commit после успешного выполнения handler
+        await callback.answer(f"✅ Верифицировано {verified_count} пользователей", show_alert=True)
         
-        if not users:
-            await callback.answer("✅ Все пользователи уже верифицированы!", show_alert=True)
-            text = "✅ <b>Все пользователи верифицированы!</b>"
-            keyboard = InlineKeyboardMarkup(inline_keyboard=[
-                [InlineKeyboardButton(text="◀️ Назад", callback_data="admin:verification_menu")],
-            ])
-            await callback.message.edit_text(text, reply_markup=keyboard)
-            return
-        
-        user_ids = [u.id for u in users]
-        verified_count = await user_repo.verify_users_batch(user_ids)
-        
-        if verified_count > 0:
-            await session.commit()
-            await callback.answer(f"✅ Верифицировано {verified_count} пользователей", show_alert=True)
-            
-            text = (
-                f"✅ <b>Массовая верификация завершена!</b>\n\n"
-                f"Верифицировано пользователей: <b>{verified_count}</b>\n\n"
-                f"Теперь все пользователи могут участвовать в опросах."
-            )
-            keyboard = InlineKeyboardMarkup(inline_keyboard=[
-                [InlineKeyboardButton(text="◀️ Назад", callback_data="admin:verification_menu")],
-            ])
-            await callback.message.edit_text(text, reply_markup=keyboard)
-        else:
-            await callback.answer("❌ Ошибка при верификации", show_alert=True)
+        text = (
+            f"✅ <b>Массовая верификация завершена!</b>\n\n"
+            f"Верифицировано пользователей: <b>{verified_count}</b>\n\n"
+            f"Теперь все пользователи могут участвовать в опросах."
+        )
+        keyboard = InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text="◀️ Назад", callback_data="admin:verification_menu")],
+        ])
+        await callback.message.edit_text(text, reply_markup=keyboard)
+    else:
+        await callback.answer("❌ Ошибка при верификации", show_alert=True)
 
 
 @router.callback_query(lambda c: c.data == "admin:restore_votes_menu")
@@ -699,7 +659,6 @@ async def callback_restore_vote(
             await callback.answer("❌ Ошибка: неверный формат данных (пустой poll_id)", show_alert=True)
             return
         
-        logger.debug("Парсинг restore_vote: user_id=%s, poll_id=%s", user_id, poll_id)
     except (ValueError, IndexError, AttributeError) as e:
         logger.error("Ошибка парсинга callback_data для restore_vote: %s, callback_data: %s", e, callback.data)
         await callback.answer("❌ Ошибка: неверный ID пользователя или опроса", show_alert=True)
@@ -904,37 +863,35 @@ async def callback_list_verified(
     state: FSMContext,
 ) -> None:
     """Показать список верифицированных пользователей."""
-    from src.models.database import AsyncSessionLocal
-    
     # Очищаем состояние при возврате к списку
     await state.clear()
     
-    async with AsyncSessionLocal() as session:
-        user_repo = UserRepository(session)
-        users = await user_repo.get_verified_users()
+    # Используем репозиторий из middleware через user_service
+    user_repo = user_service.user_repo
+    users = await user_repo.get_verified_users()
+    
+    # Сортируем по фамилии и имени
+    users.sort(key=lambda u: (u.last_name or "", u.first_name or "", u.id))
+    
+    if not users:
+        text = "❌ <b>Нет верифицированных пользователей</b>"
+        keyboard = InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text="◀️ Назад", callback_data="admin:verification_menu")],
+        ])
+    else:
+        per_page = 10
+        total_pages = (len(users) + per_page - 1) // per_page
         
-        # Сортируем по фамилии и имени
-        users.sort(key=lambda u: (u.last_name or "", u.first_name or "", u.id))
+        text = (
+            f"✅ <b>Верифицированные пользователи</b>\n\n"
+            f"Всего: <b>{len(users)}</b> | Страница 1/{total_pages}\n\n"
+            f"Нажмите на пользователя для редактирования имени или фамилии."
+        )
         
-        if not users:
-            text = "❌ <b>Нет верифицированных пользователей</b>"
-            keyboard = InlineKeyboardMarkup(inline_keyboard=[
-                [InlineKeyboardButton(text="◀️ Назад", callback_data="admin:verification_menu")],
-            ])
-        else:
-            per_page = 10
-            total_pages = (len(users) + per_page - 1) // per_page
-            
-            text = (
-                f"✅ <b>Верифицированные пользователи</b>\n\n"
-                f"Всего: <b>{len(users)}</b> | Страница 1/{total_pages}\n\n"
-                f"Нажмите на пользователя для редактирования имени или фамилии."
-            )
-            
-            keyboard = create_verified_users_keyboard(users, page=0)
-        
-        await callback.message.edit_text(text, reply_markup=keyboard)
-        await callback.answer()
+        keyboard = create_verified_users_keyboard(users, page=0)
+    
+    await callback.message.edit_text(text, reply_markup=keyboard)
+    await callback.answer()
 
 
 @router.callback_query(lambda c: c.data and c.data.startswith("admin:verified_page_"))
@@ -944,26 +901,24 @@ async def callback_verified_page(
     user_service: UserService,
 ) -> None:
     """Навигация по страницам верифицированных пользователей."""
-    from src.models.database import AsyncSessionLocal
-    
     try:
         page = int(callback.data.split("_")[-1])
     except (ValueError, IndexError):
         page = 0
     
-    async with AsyncSessionLocal() as session:
-        user_repo = UserRepository(session)
-        users = await user_repo.get_verified_users()
-        
-        # Сортируем по фамилии и имени
-        users.sort(key=lambda u: (u.last_name or "", u.first_name or "", u.id))
-        
-        if not users:
-            text = "❌ <b>Нет верифицированных пользователей</b>"
-            keyboard = InlineKeyboardMarkup(inline_keyboard=[
-                [InlineKeyboardButton(text="◀️ Назад", callback_data="admin:verification_menu")],
-            ])
-        else:
+    # Используем репозиторий из middleware через user_service
+    user_repo = user_service.user_repo
+    users = await user_repo.get_verified_users()
+    
+    # Сортируем по фамилии и имени
+    users.sort(key=lambda u: (u.last_name or "", u.first_name or "", u.id))
+    
+    if not users:
+        text = "❌ <b>Нет верифицированных пользователей</b>"
+        keyboard = InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text="◀️ Назад", callback_data="admin:verification_menu")],
+        ])
+    else:
             per_page = 10
             total_pages = (len(users) + per_page - 1) // per_page
             page = max(0, min(page, total_pages - 1))
@@ -975,9 +930,9 @@ async def callback_verified_page(
             )
             
             keyboard = create_verified_users_keyboard(users, page=page)
-        
-        await callback.message.edit_text(text, reply_markup=keyboard)
-        await callback.answer()
+    
+    await callback.message.edit_text(text, reply_markup=keyboard)
+    await callback.answer()
 
 
 @router.callback_query(lambda c: c.data and c.data.startswith("admin:edit_user_") and not c.data.startswith("admin:edit_user_lastname_") and not c.data.startswith("admin:edit_user_firstname_") and not c.data.startswith("admin:edit_user_name_"))
@@ -987,46 +942,44 @@ async def callback_edit_user(
     user_service: UserService,
 ) -> None:
     """Показать меню редактирования пользователя."""
-    from src.models.database import AsyncSessionLocal
-    
     try:
         user_id = int(callback.data.split("_")[-1])
     except (ValueError, IndexError):
         await callback.answer("❌ Ошибка: неверный ID пользователя", show_alert=True)
         return
     
-    async with AsyncSessionLocal() as session:
-        user_repo = UserRepository(session)
-        user = await user_repo.get_by_id(user_id)
-        
-        if not user:
-            await callback.answer("❌ Пользователь не найден", show_alert=True)
-            return
-        
-        if not user.is_verified:
-            await callback.answer("❌ Пользователь не верифицирован", show_alert=True)
-            return
-        
-        full_name = user.get_full_name() or user.username or f"User {user.id}"
-        current_firstname = user.first_name or "не указано"
-        current_lastname = user.last_name or "не указано"
-        
-        text = (
-            f"✏️ <b>Редактирование пользователя</b>\n\n"
-            f"ID: <code>{user_id}</code>\n"
-            f"Полное имя: <b>{full_name}</b>\n\n"
-            f"Текущие данные:\n"
-            f"• Фамилия: <b>{current_lastname}</b>\n"
-            f"• Имя: <b>{current_firstname}</b>\n"
-            f"{f'• Username: @{user.username}' if user.username else ''}\n\n"
-            f"Выберите, что хотите изменить:"
-        )
-        
-        keyboard = create_user_edit_keyboard(user_id)
-        
-        from src.utils.telegram_helpers import safe_edit_message, safe_answer_callback
-        await safe_edit_message(callback.message, text, reply_markup=keyboard)
-        await safe_answer_callback(callback)
+    # Используем репозиторий из middleware через user_service
+    user_repo = user_service.user_repo
+    user = await user_repo.get_by_id(user_id)
+    
+    if not user:
+        await callback.answer("❌ Пользователь не найден", show_alert=True)
+        return
+    
+    if not user.is_verified:
+        await callback.answer("❌ Пользователь не верифицирован", show_alert=True)
+        return
+    
+    full_name = user.get_full_name() or user.username or f"User {user.id}"
+    current_firstname = user.first_name or "не указано"
+    current_lastname = user.last_name or "не указано"
+    
+    text = (
+        f"✏️ <b>Редактирование пользователя</b>\n\n"
+        f"ID: <code>{user_id}</code>\n"
+        f"Полное имя: <b>{full_name}</b>\n\n"
+        f"Текущие данные:\n"
+        f"• Фамилия: <b>{current_lastname}</b>\n"
+        f"• Имя: <b>{current_firstname}</b>\n"
+        f"{f'• Username: @{user.username}' if user.username else ''}\n\n"
+        f"Выберите, что хотите изменить:"
+    )
+    
+    keyboard = create_user_edit_keyboard(user_id)
+    
+    from src.utils.telegram_helpers import safe_edit_message, safe_answer_callback
+    await safe_edit_message(callback.message, text, reply_markup=keyboard)
+    await safe_answer_callback(callback)
 
 
 @router.callback_query(lambda c: c.data and c.data.startswith("admin:edit_user_name_"))
@@ -1034,50 +987,49 @@ async def callback_edit_user(
 async def callback_edit_user_name(
     callback: CallbackQuery,
     state: FSMContext,
+    user_service: UserService,
 ) -> None:
     """Запросить ввод имени и фамилии пользователя."""
-    from src.models.database import AsyncSessionLocal
-    
     try:
         user_id = int(callback.data.split("_")[-1])
     except (ValueError, IndexError):
         await callback.answer("❌ Ошибка: неверный ID пользователя", show_alert=True)
         return
     
-    async with AsyncSessionLocal() as session:
-        user_repo = UserRepository(session)
-        user = await user_repo.get_by_id(user_id)
-        
-        if not user:
-            await callback.answer("❌ Пользователь не найден", show_alert=True)
-            return
-        
-        await state.update_data(edit_user_id=user_id)
-        
-        current_full_name = user.get_full_name() or user.username or f"User {user_id}"
-        current_firstname = user.first_name or "не указано"
-        current_lastname = user.last_name or "не указано"
-        
-        text = (
-            f"✏️ <b>Изменение имени и фамилии</b>\n\n"
-            f"Пользователь: <b>{current_full_name}</b>\n\n"
-            f"Текущие данные:\n"
-            f"• Фамилия: <b>{current_lastname}</b>\n"
-            f"• Имя: <b>{current_firstname}</b>\n\n"
-            f"Введите <b>Фамилию и Имя</b> через пробел:\n"
-            f"Формат: <b>Фамилия Имя</b>\n"
-            f"Пример: <code>Иванов Иван</code>\n\n"
-            f"Для отмены введите: <code>отмена</code>"
-        )
-        
-        keyboard = InlineKeyboardMarkup(inline_keyboard=[
-            [InlineKeyboardButton(text="❌ Отмена", callback_data=f"admin:edit_user_{user_id}")],
-            [InlineKeyboardButton(text="◀️ Назад к списку", callback_data="admin:list_verified")],
-        ])
-        
-        await callback.message.edit_text(text, reply_markup=keyboard)
-        await state.set_state(AdminPanelStates.waiting_for_user_name_edit)
-        await callback.answer()
+    # Используем репозиторий из middleware через user_service
+    user_repo = user_service.user_repo
+    user = await user_repo.get_by_id(user_id)
+    
+    if not user:
+        await callback.answer("❌ Пользователь не найден", show_alert=True)
+        return
+    
+    await state.update_data(edit_user_id=user_id)
+    
+    current_full_name = user.get_full_name() or user.username or f"User {user_id}"
+    current_firstname = user.first_name or "не указано"
+    current_lastname = user.last_name or "не указано"
+    
+    text = (
+        f"✏️ <b>Изменение имени и фамилии</b>\n\n"
+        f"Пользователь: <b>{current_full_name}</b>\n\n"
+        f"Текущие данные:\n"
+        f"• Фамилия: <b>{current_lastname}</b>\n"
+        f"• Имя: <b>{current_firstname}</b>\n\n"
+        f"Введите <b>Фамилию и Имя</b> через пробел:\n"
+        f"Формат: <b>Фамилия Имя</b>\n"
+        f"Пример: <code>Иванов Иван</code>\n\n"
+        f"Для отмены введите: <code>отмена</code>"
+    )
+    
+    keyboard = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="❌ Отмена", callback_data=f"admin:edit_user_{user_id}")],
+        [InlineKeyboardButton(text="◀️ Назад к списку", callback_data="admin:list_verified")],
+    ])
+    
+    await callback.message.edit_text(text, reply_markup=keyboard)
+    await state.set_state(AdminPanelStates.waiting_for_user_name_edit)
+    await callback.answer()
 
 
 @router.message(StateFilter(AdminPanelStates.waiting_for_user_name_edit))
@@ -1085,9 +1037,10 @@ async def callback_edit_user_name(
 async def process_user_name_edit(
     message: Message,
     state: FSMContext,
+    user_service: UserService,
 ) -> None:
     """Обработать введенные имя и фамилию пользователя."""
-    from src.models.database import AsyncSessionLocal
+    from src.utils.name_validator import validate_full_name
     
     data = await state.get_data()
     user_id = data.get("edit_user_id")
@@ -1112,59 +1065,35 @@ async def process_user_name_edit(
         )
         return
     
-    full_name = message.text.strip()
-    
-    # Разделяем на фамилию и имя
-    name_parts = full_name.split(maxsplit=1)
-    if len(name_parts) < 2:
-        await message.answer(
-            "❌ Неверный формат.\n\n"
-            "Пожалуйста, введите <b>Фамилию и Имя</b> через пробел:\n"
-            "Формат: <b>Фамилия Имя</b>\n"
-            "Пример: <code>Иванов Иван</code>"
-        )
+    # Валидируем имя
+    is_valid, last_name, first_name, error_message = validate_full_name(message.text)
+    if not is_valid:
+        await message.answer(f"❌ {error_message}")
         return
     
-    last_name = name_parts[0].strip()
-    first_name = name_parts[1].strip()
+    # Обновляем имя и фамилию через user_service
+    # DatabaseMiddleware автоматически сделает commit после успешного выполнения handler
+    updated_user = await user_service.user_repo.update(user_id, first_name=first_name, last_name=last_name)
     
-    # Валидация (только буквы, пробелы, дефисы)
-    import re
-    name_pattern = r'^[А-Яа-яA-Za-z\s\-]{2,50}$'
-    if not re.match(name_pattern, last_name) or not re.match(name_pattern, first_name):
-        await message.answer(
-            "❌ Неверный формат.\n\n"
-            "Фамилия и Имя должны содержать только буквы (2-50 символов).\n"
-            "Пожалуйста, введите <b>Фамилию и Имя</b> через пробел:\n"
-            "Пример: <code>Иванов Иван</code>"
-        )
-        return
-    
-    # Обновляем имя и фамилию
-    async with AsyncSessionLocal() as session:
-        user_repo = UserRepository(session)
-        updated_user = await user_repo.update(user_id, first_name=first_name, last_name=last_name)
+    if updated_user:
+        full_name_display = updated_user.get_full_name()
         
-        if updated_user:
-            await session.commit()
-            full_name_display = updated_user.get_full_name()
-            
-            await message.answer(
-                f"✅ <b>Имя и фамилия изменены!</b>\n\n"
-                f"Фамилия: <b>{last_name}</b>\n"
-                f"Имя: <b>{first_name}</b>\n"
-                f"Полное имя: <b>{full_name_display}</b>"
-            )
-            
-            await state.clear()
-        else:
-            await message.answer("❌ Ошибка при изменении имени и фамилии. Попробуйте еще раз.")
+        await message.answer(
+            f"✅ <b>Имя и фамилия изменены!</b>\n\n"
+            f"Фамилия: <b>{last_name}</b>\n"
+            f"Имя: <b>{first_name}</b>\n"
+            f"Полное имя: <b>{full_name_display}</b>"
+        )
+        
+        await state.clear()
+    else:
+        await message.answer("❌ Ошибка при изменении имени и фамилии. Попробуйте еще раз.")
 
 
 @router.message(Command("admin"))
 async def cmd_admin_panel(
     message: Message,
-    state: FSMContext | None = None,
+    state: Optional[FSMContext] = None,
 ) -> None:
     """Открыть админ-панель (только для админов)."""
     user_id = message.from_user.id
@@ -1417,7 +1346,7 @@ async def callback_setup_slots(
 async def callback_select_group_for_slots(
     callback: CallbackQuery,
     group_repo: GroupRepository,
-    data: dict | None = None,  # type: ignore
+    data: Optional[dict] = None,  # type: ignore
 ) -> None:
     """Показать текущие настройки слотов для выбранной группы."""
     group_id = int(callback.data.split("_")[-1])
@@ -1478,7 +1407,7 @@ async def callback_edit_slots(
     callback: CallbackQuery,
     state: FSMContext,
     group_repo: GroupRepository,
-    data: dict | None = None,  # type: ignore
+    data: Optional[dict] = None,  # type: ignore
 ) -> None:
     """Начать редактирование слотов для группы - выбор количества слотов."""
     group_id = int(callback.data.split("_")[-1])
@@ -2936,7 +2865,7 @@ async def callback_delete_group(
 async def callback_confirm_delete_group(
     callback: CallbackQuery,
     group_repo: GroupRepository,
-    data: dict | None = None,  # type: ignore
+    data: Optional[dict] = None,  # type: ignore
 ) -> None:
     """Подтверждение удаления группы."""
     group_id = int(callback.data.split("_")[-1])
@@ -2985,7 +2914,7 @@ async def callback_confirm_delete_group(
 async def callback_execute_delete_group(
     callback: CallbackQuery,
     group_repo: GroupRepository,
-    data: dict | None = None,  # type: ignore
+    data: Optional[dict] = None,  # type: ignore
 ) -> None:
     """Выполнение удаления группы."""
     group_id = int(callback.data.split("_")[-1])
@@ -3061,7 +2990,7 @@ async def callback_select_group_for_rename(
     callback: CallbackQuery,
     state: FSMContext,
     group_repo: GroupRepository,
-    data: dict | None = None,  # type: ignore
+    data: Optional[dict] = None,  # type: ignore
 ) -> None:
     """Обработка выбора группы для переименования."""
     group_id = int(callback.data.split("_")[-1])
@@ -3994,7 +3923,7 @@ async def callback_show_results_for_group(
     bot: Bot,
     poll_repo: PollRepository,
     group_repo: GroupRepository,
-    data: dict | None = None,  # type: ignore
+    data: Optional[dict] = None,  # type: ignore
 ) -> None:
     """Вывести результаты опроса для выбранной группы."""
     group_id = int(callback.data.split("_")[-1])
@@ -4091,7 +4020,7 @@ async def callback_stop_poll_for_group(
     bot: Bot,
     poll_repo: PollRepository,
     group_repo: GroupRepository,
-    data: dict | None = None,  # type: ignore
+    data: Optional[dict] = None,  # type: ignore
 ) -> None:
     """Остановить опрос для выбранной группы (без создания скриншота)."""
     group_id = int(callback.data.split("_")[-1])
@@ -4164,7 +4093,7 @@ async def callback_close_all_polls(
     bot: Bot,
     poll_repo: PollRepository,
     group_repo: GroupRepository,
-    data: dict | None = None,  # type: ignore
+    data: Optional[dict] = None,  # type: ignore
 ) -> None:
     """
     Закрыть все активные опросы для всех групп.
@@ -4299,7 +4228,7 @@ async def callback_close_poll_for_group(
     bot: Bot,
     poll_repo: PollRepository,
     group_repo: GroupRepository,
-    data: dict | None = None,  # type: ignore
+    data: Optional[dict] = None,  # type: ignore
 ) -> None:
     """Досрочно закрыть опрос для выбранной группы."""
     group_id = int(callback.data.split("_")[-1])

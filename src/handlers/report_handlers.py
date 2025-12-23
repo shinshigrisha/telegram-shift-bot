@@ -1,6 +1,7 @@
 from datetime import datetime, date
 from pathlib import Path
 import logging
+from typing import Optional
 
 from aiogram import Router
 from aiogram.filters import Command, CommandObject
@@ -21,7 +22,7 @@ router = Router()
 async def cmd_get_report(
     message: Message,
     command: CommandObject,
-    state: FSMContext | None = None,
+    state: Optional[FSMContext] = None,
 ) -> None:
     """Получить отчет по группе за дату."""
     try:
@@ -68,14 +69,5 @@ async def cmd_get_report(
         await message.answer("❌ Произошла ошибка при получении отчета")
 
 
-@router.message(Command("generate_all_reports"))
-@require_admin
-async def cmd_generate_all_reports(
-    message: Message,
-    state: FSMContext | None = None,
-) -> None:
-    """Сгенерировать отчеты для всех групп (пока заглушка)."""
-    await message.answer("⏳ Генерация отчетов...")
-    await message.answer("✅ Отчеты сгенерированы")
 
 

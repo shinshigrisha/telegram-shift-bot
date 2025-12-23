@@ -2,7 +2,7 @@
 Middleware для автоматического сохранения данных пользователя при отправке сообщений.
 """
 import logging
-from typing import Callable, Dict, Any, Awaitable
+from typing import Callable, Dict, Any, Awaitable, Optional
 
 from aiogram import BaseMiddleware
 from aiogram.types import TelegramObject, Message
@@ -29,7 +29,7 @@ class UserDataMiddleware(BaseMiddleware):
     ) -> Any:
         # Сохраняем данные пользователя только для сообщений (Message)
         if isinstance(event, Message) and event.from_user:
-            user_service: UserService | None = data.get("user_service")
+            user_service: Optional[UserService] = data.get("user_service")
             
             if user_service:
                 try:
@@ -39,12 +39,6 @@ class UserDataMiddleware(BaseMiddleware):
                         first_name=event.from_user.first_name,
                         last_name=event.from_user.last_name,
                         username=event.from_user.username,
-                    )
-                    logger.debug(
-                        "User data saved/updated for user %s (%s %s)",
-                        event.from_user.id,
-                        event.from_user.first_name,
-                        event.from_user.last_name,
                     )
                 except Exception as e:
                     # Логируем ошибку, но не прерываем обработку сообщения

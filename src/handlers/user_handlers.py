@@ -1,3 +1,5 @@
+from typing import Optional
+
 from aiogram import Router
 from aiogram.filters import Command
 from aiogram.types import Message
@@ -20,8 +22,6 @@ def get_user_commands() -> str:
 
 🚀 <b>/start</b> - Начать работу с ботом
 ❓ <b>/help</b> - Справка по боту
-📊 <b>/my_votes</b> - Просмотр моих голосов в опросах
-📅 <b>/schedule</b> - Просмотр расписания смен
 
 💡 <b>Как это работает:</b>
 • Ежедневно в 09:00 бот создает опросы на следующий день
@@ -76,65 +76,5 @@ async def cmd_help(message: Message) -> None:
     await message.answer(help_text)
 
 
-@router.message(Command("my_votes"))
-async def cmd_my_votes(
-    message: Message,
-    user_service: UserService | None = None,
-) -> None:
-    """Просмотр моих голосов."""
-    if not user_service:
-        await message.answer("❌ Ошибка: сервис недоступен")
-        return
-    
-    user_id = message.from_user.id
-    user = message.from_user
-    
-    # Проверяем, является ли пользователь куратором
-    user_is_curator = is_curator(user)
-    
-    # Проверяем верификацию только если она включена и пользователь не куратор
-    if settings.ENABLE_VERIFICATION and not user_is_curator:
-        is_verified = await user_service.is_verified(user_id)
-        
-        if not is_verified:
-            await message.answer(
-                "❌ Для просмотра ваших голосов необходимо пройти верификацию.\n\n"
-                "Пожалуйста, используйте команду /start для начала работы."
-            )
-            return
-    
-    # TODO: Реализовать получение голосов пользователя
-    await message.answer("🗳️ Функция /my_votes будет добавлена позже.")
-
-
-@router.message(Command("schedule"))
-async def cmd_schedule(
-    message: Message,
-    user_service: UserService | None = None,
-) -> None:
-    """Просмотр расписания."""
-    if not user_service:
-        await message.answer("❌ Ошибка: сервис недоступен")
-        return
-    
-    user_id = message.from_user.id
-    user = message.from_user
-    
-    # Проверяем, является ли пользователь куратором
-    user_is_curator = is_curator(user)
-    
-    # Проверяем верификацию только если она включена и пользователь не куратор
-    if settings.ENABLE_VERIFICATION and not user_is_curator:
-        is_verified = await user_service.is_verified(user_id)
-        
-        if not is_verified:
-            await message.answer(
-                "❌ Для просмотра расписания необходимо пройти верификацию.\n\n"
-                "Пожалуйста, используйте команду /start для начала работы."
-            )
-            return
-    
-    # TODO: Реализовать получение расписания
-    await message.answer("📅 Функция /schedule будет добавлена позже.")
 
 

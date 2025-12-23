@@ -1,6 +1,7 @@
 """
 Утилиты для создания клавиатур админ-панели.
 """
+from typing import Optional
 from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
 from math import ceil
 
@@ -134,7 +135,7 @@ def get_topic_setup_keyboard() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(inline_keyboard=keyboard)
 
 
-def create_time_selection_keyboard(prefix: str, current_time: str | None = None) -> InlineKeyboardMarkup:
+def create_time_selection_keyboard(prefix: str, current_time: Optional[str] = None) -> InlineKeyboardMarkup:
     """
     Создать inline-клавиатуру для выбора времени.
 

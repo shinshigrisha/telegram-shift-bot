@@ -1,4 +1,5 @@
 import logging
+from typing import Optional
 
 import psutil
 from aiogram import Router
@@ -17,7 +18,7 @@ logger = logging.getLogger(__name__)
 @require_admin
 async def cmd_status(
     message: Message,
-    state: FSMContext | None = None,
+    state: Optional[FSMContext] = None,
 ) -> None:
     """Статус системы."""
     memory = psutil.virtual_memory()
@@ -39,7 +40,7 @@ async def cmd_status(
 @require_admin
 async def cmd_logs(
     message: Message,
-    state: FSMContext | None = None,
+    state: Optional[FSMContext] = None,
 ) -> None:
     """Последние логи."""
     from config.settings import settings

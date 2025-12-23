@@ -1,5 +1,5 @@
 from functools import wraps
-from typing import Callable, Any, Union
+from typing import Callable, Any, Union, Optional
 
 from aiogram.types import Message, CallbackQuery, User as TelegramUser
 from aiogram.fsm.context import FSMContext
@@ -62,7 +62,7 @@ def require_admin(func: Callable) -> Callable:
     async def wrapper(
         message: Message,
         *args: Any,
-        state: FSMContext | None = None,
+        state: Optional[FSMContext] = None,
         **kwargs: Any,
     ) -> Any:
         user_id = message.from_user.id

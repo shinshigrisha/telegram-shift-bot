@@ -26,8 +26,9 @@ async def delete_message_safe(bot: Bot, chat_id: int, message_id: int) -> None:
     except TelegramBadRequest:
         # Сообщение уже удалено или недоступно - это нормально
         pass
-    except Exception as e:
-        logger.debug("Error deleting message %d in chat %d: %s", message_id, chat_id, e)
+    except Exception:
+        # Сообщение уже удалено или недоступно - это нормально
+        pass
 
 
 async def delete_message_after_delay(bot: Bot, chat_id: int, message_id: int, delay: int = 5) -> None:

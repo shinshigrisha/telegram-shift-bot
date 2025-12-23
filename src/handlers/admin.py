@@ -26,8 +26,8 @@ router = Router()
 @router.message(Command("start"))
 async def cmd_start(
     message: Message,
-    state: FSMContext | None = None,
-    user_service: UserService | None = None,
+    state: Optional[FSMContext] = None,
+    user_service: Optional[UserService] = None,
 ) -> None:
     """Команда /start - проверка верификации и запрос данных."""
     from src.handlers.user_handlers import get_user_commands  # type: ignore
@@ -225,7 +225,7 @@ async def cmd_add_group(
     message: Message,
     command: CommandObject,
     group_service: GroupService,
-    state: FSMContext | None = None,
+    state: Optional[FSMContext] = None,
 ) -> None:
     """Добавление новой группы."""
     if not command.args:
@@ -313,7 +313,7 @@ async def cmd_add_group(
 async def cmd_stats(
     message: Message,
     group_service: GroupService,
-    state: FSMContext | None = None,
+    state: Optional[FSMContext] = None,
 ) -> None:
     """Статистика системы."""
     stats = await group_service.get_system_stats()
@@ -338,7 +338,7 @@ async def cmd_create_polls(
     bot: Bot,
     poll_repo: PollRepository,
     group_repo: GroupRepository,
-    state: FSMContext | None = None,
+    state: Optional[FSMContext] = None,
 ) -> None:
     """Создать опросы вручную."""
     try:
@@ -378,7 +378,7 @@ async def cmd_set_topic(
     message: Message,
     command: CommandObject,
     group_service: GroupService,
-    state: FSMContext | None = None,
+    state: Optional[FSMContext] = None,
 ) -> None:
     """Установить topic_id для группы."""
     # Если команда выполнена в теме форум-группы, можно автоматически определить topic_id
@@ -468,7 +468,7 @@ async def cmd_set_arrival_topic(
     message: Message,
     command: CommandObject,
     group_service: GroupService,
-    state: FSMContext | None = None,
+    state: Optional[FSMContext] = None,
 ) -> None:
     """Установить topic_id для темы 'приход/уход'."""
     await _set_topic_for_field(
@@ -482,7 +482,7 @@ async def cmd_set_general_topic(
     message: Message,
     command: CommandObject,
     group_service: GroupService,
-    state: FSMContext | None = None,
+    state: Optional[FSMContext] = None,
 ) -> None:
     """Установить topic_id для темы 'общий чат'."""
     await _set_topic_for_field(
@@ -496,7 +496,7 @@ async def cmd_set_important_topic(
     message: Message,
     command: CommandObject,
     group_service: GroupService,
-    state: FSMContext | None = None,
+    state: Optional[FSMContext] = None,
 ) -> None:
     """Установить topic_id для темы 'важная информация'."""
     await _set_topic_for_field(
@@ -584,7 +584,7 @@ async def _set_topic_for_field(
 @require_admin
 async def cmd_get_topic_id(
     message: Message,
-    state: FSMContext | None = None,
+    state: Optional[FSMContext] = None,
 ) -> None:
     """Показать текущий topic_id из контекста сообщения."""
     topic_id = message.message_thread_id if message.is_topic_message else None

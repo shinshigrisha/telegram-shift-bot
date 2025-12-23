@@ -22,7 +22,7 @@ class PollService:
         bot: Bot,
         poll_repo: PollRepository,
         group_repo: GroupRepository,
-        screenshot_service: ScreenshotService | None = None,
+        screenshot_service: Optional[ScreenshotService] = None,
     ) -> None:
         self.bot = bot
         self.poll_repo = poll_repo
@@ -369,7 +369,6 @@ class PollService:
         options: List[str] = []
         slots = group.get_slots_config()
         
-        logger.debug("Group %s has %d slots configured", group.name, len(slots))
 
         # Используем set для отслеживания уникальных слотов
         seen_slots = set()
@@ -400,7 +399,6 @@ class PollService:
             options.append(option_text)
 
         options.append("Выходной")
-        logger.debug("Created %d poll options for group %s", len(options), group.name)
         return question, options
 
     def _get_night_poll_data(self, poll_date: date) -> tuple[str, List[str]]:
@@ -471,7 +469,7 @@ class PollService:
         group,
         poll: DailyPoll,
         poll_date: date,
-        close_time: datetime | None = None,
+        close_time: Optional[datetime] = None,
     ) -> None:
         """
         Закрыть один опрос для группы.
@@ -700,7 +698,7 @@ class PollService:
                 
                 # Оптимизация: проверяем участников батчами для избежания rate limits
                 # но все равно параллельно для ускорения
-                async def check_user_membership(user_id: int) -> int | None:
+                async def check_user_membership(user_id: int) -> Optional[int]:
                     """Проверить, является ли пользователь участником группы."""
                     try:
                         chat_member = await self.bot.get_chat_member(chat_id, user_id)
@@ -854,7 +852,7 @@ class PollService:
                 users_data = {user.id: user for user in users_list}
                 
                 # Получаем данные из Telegram API параллельно
-                async def get_user_telegram_data(user_id: int) -> dict | None:
+                async def get_user_telegram_data(user_id: int) -> Optional[dict]:
                     """Получить данные пользователя из Telegram API."""
                     try:
                         chat_member = await self.bot.get_chat_member(group_chat_id, user_id)
@@ -956,7 +954,7 @@ class PollService:
         group,
         poll_date: date,
         message_id: int,
-        topic_id: int | None = None,
+        topic_id: Optional[int] = None,
     ) -> Optional[DailyPoll]:
         """
         Синхронизировать опрос из Telegram по message_id.

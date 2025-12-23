@@ -1,5 +1,5 @@
 import logging
-from typing import Any, Awaitable, Callable, Dict
+from typing import Any, Awaitable, Callable, Dict, Optional
 
 from aiogram import BaseMiddleware
 from aiogram.types import Message, TelegramObject
@@ -31,7 +31,6 @@ class VerificationMiddleware(BaseMiddleware):
         
         # Пропускаем кураторов без верификации
         if event.from_user and is_curator(event.from_user):
-            logger.debug("Curator %s (%s) skipped verification", event.from_user.id, event.from_user.username)
             return await handler(event, data)
 
         # Пропускаем команду /start без проверки (для верификации)
@@ -41,7 +40,7 @@ class VerificationMiddleware(BaseMiddleware):
         # Для команды /help проверяем верификацию
         if event.text and event.text.startswith("/help"):
             # Проверяем верификацию, но не блокируем
-            user_service: UserService | None = data.get("user_service")
+            user_service: Optional[UserService] = data.get("user_service")
             if user_service:
                 user_id = event.from_user.id
                 is_verified = await user_service.is_verified(user_id)

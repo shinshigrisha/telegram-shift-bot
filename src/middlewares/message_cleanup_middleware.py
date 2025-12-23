@@ -30,7 +30,7 @@ class MessageCleanupMiddleware(BaseMiddleware):
                     from aiogram import Bot
                     bot = Bot.get_current(no_error=False)
                 except Exception:
-                    logger.debug("Bot not available in message cleanup middleware")
+                    # Bot недоступен, пропускаем очистку сообщений
                     return await handler(event, data)
             
             state: FSMContext = data.get("state")
@@ -59,8 +59,9 @@ class MessageCleanupMiddleware(BaseMiddleware):
                             previous_message_id=previous_message_id,
                             message_thread_id=event.message_thread_id,
                         )
-                    except Exception as e:
-                        logger.debug("Error deleting previous message: %s", e)
+                    except Exception:
+                        # Ошибка удаления предыдущего сообщения - не критично
+                        pass
                 
                 # Сохраняем ID текущего сообщения для следующего раза (если это ответ бота)
                 # Проверяем, что сообщение отправлено ботом

@@ -1,5 +1,5 @@
 from datetime import date, datetime
-from typing import List, Dict
+from typing import List, Dict, Optional
 
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -17,13 +17,13 @@ class GroupService:
         self.session = session
         self.group_repo = GroupRepository(session)
 
-    async def get_group_by_name(self, name: str) -> Group | None:
+    async def get_group_by_name(self, name: str) -> Optional[Group]:
         return await self.group_repo.get_by_name(name)
 
-    async def get_group_by_chat_id(self, chat_id: int) -> Group | None:
+    async def get_group_by_chat_id(self, chat_id: int) -> Optional[Group]:
         return await self.group_repo.get_by_chat_id(chat_id)
 
-    async def get_group_by_id(self, group_id: int) -> Group | None:
+    async def get_group_by_id(self, group_id: int) -> Optional[Group]:
         return await self.group_repo.get_by_id(group_id)
 
     async def get_all_groups(self) -> List[Group]:
@@ -33,7 +33,7 @@ class GroupService:
         self,
         name: str,
         telegram_chat_id: int,
-        telegram_topic_id: int | None = None,
+        telegram_topic_id: Optional[int] = None,
         is_night: bool = False,
     ) -> Group:
         """Создать новую группу."""

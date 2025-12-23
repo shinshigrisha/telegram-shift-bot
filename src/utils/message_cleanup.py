@@ -35,21 +35,10 @@ async def delete_previous_bot_message(
                 message_id=previous_message_id,
                 message_thread_id=message_thread_id,
             )
-            logger.debug(
-                "Deleted previous bot message %d in chat %d",
-                previous_message_id,
-                chat_id,
-            )
-        except TelegramBadRequest as e:
+        except TelegramBadRequest:
             # Игнорируем ошибки удаления (сообщение может быть уже удалено,
             # или это опрос/результат, которые не нужно удалять)
-            if "message to delete not found" not in str(e).lower():
-                logger.debug(
-                    "Could not delete message %d in chat %d: %s",
-                    previous_message_id,
-                    chat_id,
-                    e,
-                )
+            pass
     except Exception as e:
         logger.warning(
             "Error deleting previous message %d in chat %d: %s",
