@@ -3,6 +3,7 @@ from datetime import date, timedelta
 import logging
 
 from aiogram import Router, Bot
+from aiogram.exceptions import TelegramNetworkError, TelegramAPIError
 from aiogram.filters import Command, CommandObject
 from aiogram.fsm.context import FSMContext
 from aiogram.types import Message
@@ -49,7 +50,33 @@ async def cmd_start(
             "📢 <b>Рассылка</b> — отправка сообщений в группы\n"
             "📈 <b>Мониторинг</b> — статистика, логи, статус"
         )
-        await message.answer(text, reply_markup=get_admin_panel_keyboard())
+        try:
+            await message.answer(text, reply_markup=get_admin_panel_keyboard())
+        except TelegramNetworkError as e:
+            # Обрабатываем сетевые ошибки - временные проблемы с подключением
+            logger.warning("Network error while sending admin panel to user %s: %s", user_id, e)
+            # Пытаемся отправить простое сообщение без клавиатуры
+            try:
+                await message.answer(
+                    "👑 <b>Админ-панель</b>\n\n"
+                    "⚠️ Произошла временная ошибка сети.\n"
+                    "Попробуйте команду /admin еще раз через несколько секунд."
+                )
+            except Exception:
+                logger.error("Failed to send error message to user %s", user_id)
+        except TelegramAPIError as e:
+            # Обрабатываем другие ошибки Telegram API
+            logger.error("Telegram API error while sending admin panel to user %s: %s", user_id, e, exc_info=True)
+            try:
+                await message.answer(
+                    "👑 <b>Админ-панель</b>\n\n"
+                    "❌ Произошла ошибка при отправке сообщения.\n"
+                    "Попробуйте команду /admin еще раз."
+                )
+            except Exception:
+                logger.error("Failed to send error message to user %s", user_id)
+        except Exception as e:  # noqa: BLE001
+            logger.error("Unexpected error sending admin panel to user %s: %s", user_id, e, exc_info=True)
         return
     
     # Проверяем, является ли пользователь куратором
@@ -126,7 +153,33 @@ async def cmd_start(
         "которые бот отправляет в ваши группы."
     )
     
-    await message.answer(welcome_text)
+    try:
+        await message.answer(welcome_text)
+    except TelegramNetworkError as e:
+        # Обрабатываем сетевые ошибки - временные проблемы с подключением
+        logger.warning("Network error while sending welcome message to user %s: %s", user_id, e)
+        # Пытаемся отправить простое сообщение
+        try:
+            await message.answer(
+                "👋 <b>Привет!</b>\n\n"
+                "⚠️ Произошла временная ошибка сети.\n"
+                "Попробуйте команду /start еще раз через несколько секунд."
+            )
+        except Exception:
+            logger.error("Failed to send error message to user %s", user_id)
+    except TelegramAPIError as e:
+        # Обрабатываем другие ошибки Telegram API
+        logger.error("Telegram API error while sending welcome message to user %s: %s", user_id, e, exc_info=True)
+        try:
+            await message.answer(
+                "👋 <b>Привет!</b>\n\n"
+                "❌ Произошла ошибка при отправке сообщения.\n"
+                "Попробуйте команду /start еще раз."
+            )
+        except Exception:
+            logger.error("Failed to send error message to user %s", user_id)
+    except Exception as e:  # noqa: BLE001
+        logger.error("Unexpected error sending welcome message to user %s: %s", user_id, e, exc_info=True)
 
 
 @router.message(Command("setup_ziz"))

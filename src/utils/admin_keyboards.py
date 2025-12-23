@@ -275,6 +275,7 @@ def create_user_edit_keyboard(user_id: int) -> InlineKeyboardMarkup:
     """Создать клавиатуру для редактирования пользователя."""
     keyboard = [
         [InlineKeyboardButton(text="✏️ Изменить имя и фамилию", callback_data=f"admin:edit_user_name_{user_id}")],
+        [InlineKeyboardButton(text="🗑️ Удалить пользователя", callback_data=f"admin:delete_user_{user_id}")],
         [InlineKeyboardButton(text="◀️ Назад к списку", callback_data="admin:list_verified")],
     ]
     return InlineKeyboardMarkup(inline_keyboard=keyboard)

@@ -1,9 +1,10 @@
 from typing import Optional, List
 
-from sqlalchemy import select
+from sqlalchemy import select, delete
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.models.user import User
+from src.models.user_vote import UserVote
 
 
 class UserRepository:
@@ -108,4 +109,22 @@ class UserRepository:
         
         await self.session.flush()
         return verified_count
+
+    async def delete(self, user_id: int) -> bool:
+        """Удалить пользователя и все его голоса."""
+        try:
+            # Сначала удаляем все голоса пользователя
+            await self.session.execute(
+                delete(UserVote).where(UserVote.user_id == user_id)
+            )
+            
+            # Затем удаляем самого пользователя
+            user = await self.get_by_id(user_id)
+            if user:
+                await self.session.delete(user)
+                await self.session.flush()
+                return True
+            return False
+        except Exception:
+            return False
 

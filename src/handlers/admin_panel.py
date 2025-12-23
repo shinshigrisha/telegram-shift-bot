@@ -935,7 +935,7 @@ async def callback_verified_page(
     await callback.answer()
 
 
-@router.callback_query(lambda c: c.data and c.data.startswith("admin:edit_user_") and not c.data.startswith("admin:edit_user_lastname_") and not c.data.startswith("admin:edit_user_firstname_") and not c.data.startswith("admin:edit_user_name_"))
+@router.callback_query(lambda c: c.data and c.data.startswith("admin:edit_user_") and not c.data.startswith("admin:edit_user_lastname_") and not c.data.startswith("admin:edit_user_firstname_") and not c.data.startswith("admin:edit_user_name_") and not c.data.startswith("admin:delete_user_"))
 @require_admin_callback
 async def callback_edit_user(
     callback: CallbackQuery,
@@ -1088,6 +1088,91 @@ async def process_user_name_edit(
         await state.clear()
     else:
         await message.answer("❌ Ошибка при изменении имени и фамилии. Попробуйте еще раз.")
+
+
+@router.callback_query(lambda c: c.data and c.data.startswith("admin:delete_user_"))
+@require_admin_callback
+async def callback_delete_user(
+    callback: CallbackQuery,
+    user_service: UserService,
+) -> None:
+    """Показать подтверждение удаления пользователя."""
+    try:
+        user_id = int(callback.data.split("_")[-1])
+    except (ValueError, IndexError):
+        await callback.answer("❌ Ошибка: неверный ID пользователя", show_alert=True)
+        return
+    
+    user_repo = user_service.user_repo
+    user = await user_repo.get_by_id(user_id)
+    
+    if not user:
+        await callback.answer("❌ Пользователь не найден", show_alert=True)
+        return
+    
+    full_name = user.get_full_name() or user.username or f"User {user_id}"
+    
+    text = (
+        f"⚠️ <b>Подтверждение удаления</b>\n\n"
+        f"Вы действительно хотите удалить пользователя?\n\n"
+        f"ID: <code>{user_id}</code>\n"
+        f"Имя: <b>{full_name}</b>\n\n"
+        f"⚠️ <b>Внимание!</b> При удалении будут также удалены:\n"
+        f"• Все голоса пользователя в опросах\n"
+        f"• Все данные пользователя\n\n"
+        f"Это действие <b>необратимо</b>!"
+    )
+    
+    keyboard = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="✅ Да, удалить", callback_data=f"admin:delete_user_confirm_{user_id}")],
+        [InlineKeyboardButton(text="❌ Отмена", callback_data=f"admin:edit_user_{user_id}")],
+    ])
+    
+    await callback.message.edit_text(text, reply_markup=keyboard)
+    await callback.answer()
+
+
+@router.callback_query(lambda c: c.data and c.data.startswith("admin:delete_user_confirm_"))
+@require_admin_callback
+async def callback_delete_user_confirm(
+    callback: CallbackQuery,
+    user_service: UserService,
+) -> None:
+    """Подтвердить и выполнить удаление пользователя."""
+    try:
+        user_id = int(callback.data.split("_")[-1])
+    except (ValueError, IndexError):
+        await callback.answer("❌ Ошибка: неверный ID пользователя", show_alert=True)
+        return
+    
+    user_repo = user_service.user_repo
+    user = await user_repo.get_by_id(user_id)
+    
+    if not user:
+        await callback.answer("❌ Пользователь не найден", show_alert=True)
+        return
+    
+    full_name = user.get_full_name() or user.username or f"User {user_id}"
+    
+    # Удаляем пользователя
+    deleted = await user_repo.delete(user_id)
+    
+    if deleted:
+        text = (
+            f"✅ <b>Пользователь удален</b>\n\n"
+            f"ID: <code>{user_id}</code>\n"
+            f"Имя: <b>{full_name}</b>\n\n"
+            f"Все данные пользователя и его голоса были удалены."
+        )
+        
+        keyboard = InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text="◀️ Назад к списку", callback_data="admin:list_verified")],
+        ])
+        
+        await callback.message.edit_text(text, reply_markup=keyboard)
+        await callback.answer("✅ Пользователь удален", show_alert=True)
+    else:
+        await callback.answer("❌ Ошибка при удалении пользователя", show_alert=True)
 
 
 @router.message(Command("admin"))
