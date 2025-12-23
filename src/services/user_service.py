@@ -29,17 +29,25 @@ class UserService:
             )
             # DatabaseMiddleware автоматически сделает commit после успешного выполнения handler
         else:
-            # Обновляем данные пользователя, если они изменились
-            updated = False
-            if first_name is not None and user.first_name != first_name:
-                user.first_name = first_name
-                updated = True
-            if last_name is not None and user.last_name != last_name:
-                user.last_name = last_name
-                updated = True
-            if username is not None and user.username != username:
-                user.username = username
-                updated = True
+            # Для верифицированных пользователей не обновляем имена автоматически
+            # (они были установлены вручную и не должны перезаписываться данными из Telegram)
+            if not user.is_verified:
+                # Обновляем данные пользователя, если они изменились (только для неверифицированных)
+                updated = False
+                if first_name is not None and user.first_name != first_name:
+                    user.first_name = first_name
+                    updated = True
+                if last_name is not None and user.last_name != last_name:
+                    user.last_name = last_name
+                    updated = True
+                if username is not None and user.username != username:
+                    user.username = username
+                    updated = True
+            else:
+                # Для верифицированных пользователей обновляем только username (если изменился)
+                # Имена (first_name, last_name) не обновляем, так как они были установлены вручную
+                if username is not None and user.username != username:
+                    user.username = username
             # DatabaseMiddleware автоматически сделает commit после успешного выполнения handler
         return user
 
