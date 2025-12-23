@@ -10,6 +10,7 @@ from aiogram.types import Message, CallbackQuery, InlineKeyboardMarkup, InlineKe
 from config.settings import settings
 from src.utils.auth import require_admin, require_admin_callback
 from src.utils.group_formatters import clean_group_name_for_display
+from src.utils.telegram_helpers import safe_edit_message
 from src.utils.admin_keyboards import (
     get_admin_panel_keyboard,
     get_groups_menu_keyboard,
@@ -1090,7 +1091,7 @@ async def process_user_name_edit(
         await message.answer("❌ Ошибка при изменении имени и фамилии. Попробуйте еще раз.")
 
 
-@router.callback_query(lambda c: c.data and c.data.startswith("admin:delete_user_"))
+@router.callback_query(lambda c: c.data and c.data.startswith("admin:delete_user_") and not c.data.startswith("admin:delete_user_confirm_"))
 @require_admin_callback
 async def callback_delete_user(
     callback: CallbackQuery,
@@ -1128,7 +1129,7 @@ async def callback_delete_user(
         [InlineKeyboardButton(text="❌ Отмена", callback_data=f"admin:edit_user_{user_id}")],
     ])
     
-    await callback.message.edit_text(text, reply_markup=keyboard)
+    await safe_edit_message(callback.message, text, reply_markup=keyboard)
     await callback.answer()
 
 
@@ -1139,9 +1140,12 @@ async def callback_delete_user_confirm(
     user_service: UserService,
 ) -> None:
     """Подтвердить и выполнить удаление пользователя."""
+    logger.info("callback_delete_user_confirm called with data: %s", callback.data)
     try:
         user_id = int(callback.data.split("_")[-1])
-    except (ValueError, IndexError):
+        logger.info("Parsed user_id: %s", user_id)
+    except (ValueError, IndexError) as e:
+        logger.error("Error parsing user_id from callback data '%s': %s", callback.data, e)
         await callback.answer("❌ Ошибка: неверный ID пользователя", show_alert=True)
         return
     
@@ -1155,24 +1159,34 @@ async def callback_delete_user_confirm(
     full_name = user.get_full_name() or user.username or f"User {user_id}"
     
     # Удаляем пользователя
-    deleted = await user_repo.delete(user_id)
-    
-    if deleted:
-        text = (
-            f"✅ <b>Пользователь удален</b>\n\n"
-            f"ID: <code>{user_id}</code>\n"
-            f"Имя: <b>{full_name}</b>\n\n"
-            f"Все данные пользователя и его голоса были удалены."
-        )
+    try:
+        logger.info("Attempting to delete user %s", user_id)
+        deleted = await user_repo.delete(user_id)
+        logger.info("Delete result for user %s: %s", user_id, deleted)
         
-        keyboard = InlineKeyboardMarkup(inline_keyboard=[
-            [InlineKeyboardButton(text="◀️ Назад к списку", callback_data="admin:list_verified")],
-        ])
-        
-        await callback.message.edit_text(text, reply_markup=keyboard)
-        await callback.answer("✅ Пользователь удален", show_alert=True)
-    else:
-        await callback.answer("❌ Ошибка при удалении пользователя", show_alert=True)
+        if deleted:
+            text = (
+                f"✅ <b>Пользователь удален</b>\n\n"
+                f"ID: <code>{user_id}</code>\n"
+                f"Имя: <b>{full_name}</b>\n\n"
+                f"Все данные пользователя и его голоса были удалены."
+            )
+            
+            keyboard = InlineKeyboardMarkup(inline_keyboard=[
+                [InlineKeyboardButton(text="◀️ Назад к списку", callback_data="admin:list_verified")],
+            ])
+            
+            await safe_edit_message(callback.message, text, reply_markup=keyboard)
+            await callback.answer("✅ Пользователь удален", show_alert=True)
+        else:
+            logger.error("Failed to delete user %s: delete() returned False", user_id)
+            await callback.answer("❌ Ошибка при удалении пользователя. Проверьте логи.", show_alert=True)
+    except Exception as e:  # noqa: BLE001
+        logger.error("Exception while deleting user %s: %s", user_id, e, exc_info=True)
+        try:
+            await callback.answer("❌ Ошибка при удалении пользователя. Проверьте логи.", show_alert=True)
+        except Exception:  # noqa: BLE001
+            logger.error("Failed to answer callback after error", exc_info=True)
 
 
 @router.message(Command("admin"))

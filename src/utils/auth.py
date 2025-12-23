@@ -78,6 +78,8 @@ def require_admin(func: Callable) -> Callable:
 
 def require_admin_callback(func: Callable) -> Callable:
     """Декоратор для проверки прав админа для CallbackQuery handlers."""
+    import logging
+    logger = logging.getLogger(__name__)
 
     @wraps(func)
     async def wrapper(
@@ -86,14 +88,28 @@ def require_admin_callback(func: Callable) -> Callable:
         **kwargs: Any,
     ) -> Any:
         user_id = callback.from_user.id
+        callback_data = getattr(callback, 'data', None)
+        
+        logger.info("require_admin_callback: user_id=%s, callback_data=%s, func=%s", 
+                    user_id, callback_data, func.__name__)
 
         if user_id not in settings.ADMIN_IDS:
+            logger.warning("User %s is not in ADMIN_IDS, blocking callback %s", user_id, callback_data)
             await callback.answer("⛔ У вас нет прав для выполнения этой команды", show_alert=True)
             return
 
         # Передаем все kwargs, включая data от middleware
         # В aiogram 3.x dependency injection работает автоматически через типы параметров
-        return await func(callback, *args, **kwargs)
+        logger.info("require_admin_callback: calling %s for user %s", func.__name__, user_id)
+        try:
+            return await func(callback, *args, **kwargs)
+        except Exception as e:  # noqa: BLE001
+            logger.error("Error in %s: %s", func.__name__, e, exc_info=True)
+            try:
+                await callback.answer("❌ Произошла ошибка. Проверьте логи.", show_alert=True)
+            except Exception:  # noqa: BLE001
+                pass
+            raise
 
     return wrapper
 

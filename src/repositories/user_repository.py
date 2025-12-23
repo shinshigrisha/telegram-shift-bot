@@ -1,3 +1,4 @@
+import logging
 from typing import Optional, List
 
 from sqlalchemy import select, delete
@@ -5,6 +6,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.models.user import User
 from src.models.user_vote import UserVote
+
+logger = logging.getLogger(__name__)
 
 
 class UserRepository:
@@ -113,18 +116,26 @@ class UserRepository:
     async def delete(self, user_id: int) -> bool:
         """Удалить пользователя и все его голоса."""
         try:
+            # Проверяем, существует ли пользователь
+            user = await self.get_by_id(user_id)
+            if not user:
+                logger.warning("Attempted to delete non-existent user %s", user_id)
+                return False
+            
             # Сначала удаляем все голоса пользователя
-            await self.session.execute(
+            votes_deleted = await self.session.execute(
                 delete(UserVote).where(UserVote.user_id == user_id)
             )
+            votes_count = votes_deleted.rowcount
+            logger.info("Deleted %d votes for user %s", votes_count, user_id)
             
             # Затем удаляем самого пользователя
-            user = await self.get_by_id(user_id)
-            if user:
-                await self.session.delete(user)
-                await self.session.flush()
-                return True
-            return False
-        except Exception:
+            await self.session.delete(user)
+            await self.session.flush()
+            
+            logger.info("Successfully deleted user %s (%s)", user_id, user.get_full_name())
+            return True
+        except Exception as e:  # noqa: BLE001
+            logger.error("Error deleting user %s: %s", user_id, e, exc_info=True)
             return False
 
