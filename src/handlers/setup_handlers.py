@@ -24,6 +24,20 @@ async def process_group_name(
     group_service: GroupService,
 ) -> None:
     """Обработка ввода названия группы для настройки слотов."""
+    # Проверяем, что сообщение содержит текст
+    if not message.text:
+        await message.answer(
+            "❌ Пожалуйста, отправьте текстовое сообщение с названием группы\n\n"
+            "Для отмены введите: <code>отмена</code>"
+        )
+        return
+    
+    # Проверяем на отмену
+    if message.text.strip().lower() == "отмена":
+        await state.clear()
+        await message.answer("❌ Отменено")
+        return
+    
     group_name = message.text.strip()
     group = await group_service.get_group_by_name(group_name)
 

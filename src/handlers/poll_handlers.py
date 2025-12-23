@@ -35,16 +35,14 @@ async def handle_poll_answer(
         poll_id = poll_answer.poll_id
         option_ids = poll_answer.option_ids
 
-        # Получаем пользователя из БД
-        user = await user_service.user_repo.get_by_id(user_id)
-        if not user:
-            # Создаем пользователя, если его нет
-            user = await user_service.get_or_create_user(
-                user_id=user_id,
-                first_name=poll_answer.user.first_name,
-                last_name=poll_answer.user.last_name,
-                username=poll_answer.user.username,
-            )
+        # Получаем или создаем пользователя, всегда обновляем данные
+        # Это гарантирует, что данные пользователя актуальны при каждом голосовании
+        user = await user_service.get_or_create_user(
+            user_id=user_id,
+            first_name=poll_answer.user.first_name,
+            last_name=poll_answer.user.last_name,
+            username=poll_answer.user.username,
+        )
 
         # Проверяем, является ли пользователь куратором
         user_is_curator = is_curator(poll_answer.user)

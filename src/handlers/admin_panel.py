@@ -269,6 +269,20 @@ async def process_group_name_for_create(
     group_service: GroupService,
 ) -> None:
     """Обработка ввода названия группы для создания."""
+    # Проверяем, что сообщение содержит текст
+    if not message.text:
+        await message.answer(
+            "❌ Пожалуйста, отправьте текстовое сообщение с названием группы\n\n"
+            "Для отмены введите: <code>отмена</code>"
+        )
+        return
+    
+    # Проверяем на отмену
+    if message.text.strip().lower() == "отмена":
+        await state.clear()
+        await message.answer("❌ Отменено")
+        return
+    
     group_name = message.text.strip()
     
     # Проверяем, существует ли группа с таким именем
@@ -302,6 +316,20 @@ async def process_chat_id_for_create(
     group_service: GroupService,
 ) -> None:
     """Обработка ввода chat_id для создания группы."""
+    # Проверяем, что сообщение содержит текст
+    if not message.text:
+        await message.answer(
+            "❌ Пожалуйста, отправьте текстовое сообщение с Chat ID группы\n\n"
+            "Для отмены введите: <code>отмена</code>"
+        )
+        return
+    
+    # Проверяем на отмену
+    if message.text.strip().lower() == "отмена":
+        await state.clear()
+        await message.answer("❌ Отменено")
+        return
+    
     try:
         chat_id = int(message.text.strip())
     except ValueError:
@@ -609,7 +637,7 @@ async def callback_slot_start_time(
     callback: CallbackQuery,
     state: FSMContext,
 ) -> None:
-    """Выбор времени начала слота через inline-клавиатуру (часы 00-11)."""
+    """Выбор времени начала слота через inline-клавиатуру (часы 00-23)."""
     slot_index = int(callback.data.split("_")[1])
     await state.update_data(editing_slot_index=slot_index, editing_field="start")
 
@@ -631,7 +659,7 @@ async def callback_slot_end_time(
     callback: CallbackQuery,
     state: FSMContext,
 ) -> None:
-    """Выбор времени конца слота через inline-клавиатуру (часы 00-11)."""
+    """Выбор времени конца слота через inline-клавиатуру (часы 00-23)."""
     slot_index = int(callback.data.split("_")[1])
     await state.update_data(editing_slot_index=slot_index, editing_field="end")
 
@@ -767,6 +795,20 @@ async def process_slot_couriers_count(
     state: FSMContext,
 ) -> None:
     """Обработка ввода количества курьеров."""
+    # Проверяем, что сообщение содержит текст
+    if not message.text:
+        await message.answer(
+            "❌ Пожалуйста, отправьте текстовое сообщение с числом от 1 до 20\n\n"
+            "Для отмены введите: <code>отмена</code>"
+        )
+        return
+    
+    # Проверяем на отмену
+    if message.text.strip().lower() == "отмена":
+        await state.clear()
+        await message.answer("❌ Отменено")
+        return
+    
     try:
         count = int(message.text.strip())
         
@@ -1154,6 +1196,21 @@ async def process_poll_creation_time(
     state: FSMContext,
 ) -> None:
     """Обработка ввода времени создания опросов."""
+    # Проверяем, что сообщение содержит текст
+    if not message.text:
+        await message.answer(
+            "❌ Пожалуйста, отправьте текстовое сообщение с временем в формате <b>hh:mm</b>\n\n"
+            "<b>Пример:</b> <code>09:00</code>\n\n"
+            "Для отмены введите: <code>отмена</code>"
+        )
+        return
+    
+    # Проверяем на отмену
+    if message.text.strip().lower() == "отмена":
+        await state.clear()
+        await message.answer("❌ Отменено")
+        return
+    
     time_str = message.text.strip()
     
     # Проверяем формат hh:mm
@@ -1222,6 +1279,21 @@ async def process_poll_closing_time(
     state: FSMContext,
 ) -> None:
     """Обработка ввода времени закрытия опросов."""
+    # Проверяем, что сообщение содержит текст
+    if not message.text:
+        await message.answer(
+            "❌ Пожалуйста, отправьте текстовое сообщение с временем в формате <b>hh:mm</b>\n\n"
+            "<b>Пример:</b> <code>19:00</code>\n\n"
+            "Для отмены введите: <code>отмена</code>"
+        )
+        return
+    
+    # Проверяем на отмену
+    if message.text.strip().lower() == "отмена":
+        await state.clear()
+        await message.answer("❌ Отменено")
+        return
+    
     time_str = message.text.strip()
     
     # Проверяем формат hh:mm
@@ -1299,6 +1371,21 @@ async def process_reminder_hours(
     state: FSMContext,
 ) -> None:
     """Обработка ввода часов напоминаний."""
+    # Проверяем, что сообщение содержит текст
+    if not message.text:
+        await message.answer(
+            "❌ Пожалуйста, отправьте текстовое сообщение с часами напоминаний\n\n"
+            "Введите часы через запятую (например: <code>18,19</code>) или <code>0</code> для отключения\n\n"
+            "Для отмены введите: <code>отмена</code>"
+        )
+        return
+    
+    # Проверяем на отмену
+    if message.text.strip().lower() == "отмена":
+        await state.clear()
+        await message.answer("❌ Отменено")
+        return
+    
     hours_str = message.text.strip()
     
     data = await state.get_data()
@@ -1602,6 +1689,20 @@ async def process_topic_id_input(
     group_service: GroupService,
 ) -> None:
     """Обработка введенного topic_id."""
+    # Проверяем, что сообщение содержит текст
+    if not message.text:
+        await message.answer(
+            "❌ Пожалуйста, отправьте текстовое сообщение с Topic ID\n\n"
+            "Для отмены введите: <code>отмена</code>"
+        )
+        return
+    
+    # Проверяем на отмену
+    if message.text.strip().lower() == "отмена":
+        await state.clear()
+        await message.answer("❌ Отменено")
+        return
+    
     try:
         topic_id = int(message.text.strip())
     except (ValueError, AttributeError):
@@ -2041,6 +2142,20 @@ async def process_new_group_name(
     group_service: GroupService,
 ) -> None:
     """Обработка ввода нового названия группы."""
+    # Проверяем, что сообщение содержит текст
+    if not message.text:
+        await message.answer(
+            "❌ Пожалуйста, отправьте текстовое сообщение с новым названием группы\n\n"
+            "Для отмены введите: <code>отмена</code>"
+        )
+        return
+    
+    # Проверяем на отмену
+    if message.text.strip().lower() == "отмена":
+        await state.clear()
+        await message.answer("❌ Отменено")
+        return
+    
     new_name = message.text.strip()
     
     if not new_name:
@@ -2648,10 +2763,19 @@ async def process_manual_screenshot(
         await message.answer("❌ Ошибка: состояние потеряно. Начните заново.")
         return
     
+    # Проверяем на отмену (если это текстовое сообщение)
+    if message.text and message.text.strip().lower() == "отмена":
+        await state.clear()
+        await message.answer("❌ Отменено")
+        return
+    
     # Проверяем, что это фото
     if not message.photo:
         logger.warning("Message is not a photo, ignoring")
-        await message.answer("❌ Пожалуйста, отправьте фото (скриншот)")
+        await message.answer(
+            "❌ Пожалуйста, отправьте фото (скриншот)\n\n"
+            "Для отмены введите: <code>отмена</code>"
+        )
         return
     
     logger.info("Photo detected, processing...")
@@ -3353,6 +3477,12 @@ async def process_broadcast_message(
     group_repo: GroupRepository,
 ) -> None:
     """Обработка ввода сообщения для рассылки (поддерживает текст, фото, файлы)."""
+    # Проверяем на отмену (если это текстовое сообщение)
+    if message.text and message.text.strip().lower() == "отмена":
+        await state.clear()
+        await message.answer("❌ Отменено")
+        return
+    
     # Проверяем, есть ли контент для отправки
     has_text = bool(message.text or message.caption)
     has_photo = bool(message.photo)

@@ -88,9 +88,9 @@ def create_time_selection_keyboard(prefix: str, current_time: str | None = None)
     keyboard_buttons: list[list[InlineKeyboardButton]] = []
 
     if current_time is None:
-        # Стадия выбора ЧАСОВ – 00-11
-        hours = [f"{i:02d}" for i in range(12)]
-        # Формируем по 4 часа в ряд (итого 3 строки)
+        # Стадия выбора ЧАСОВ – 00-23 (все 24 часа)
+        hours = [f"{i:02d}" for i in range(24)]
+        # Формируем по 4 часа в ряд (итого 6 строк: 00-03, 04-07, 08-11, 12-15, 16-19, 20-23)
         cols = 4
         rows = ceil(len(hours) / cols)
         for r in range(rows):

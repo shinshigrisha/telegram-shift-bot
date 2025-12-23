@@ -7,7 +7,6 @@ from src.models.database import AsyncSessionLocal
 from src.repositories.group_repository import GroupRepository
 from src.repositories.poll_repository import PollRepository
 from src.repositories.user_repository import UserRepository
-from src.repositories.screenshot_check_repository import ScreenshotCheckRepository
 from src.services.group_service import GroupService
 from src.services.user_service import UserService
 from src.services.poll_service import PollService
@@ -26,7 +25,6 @@ class DatabaseMiddleware(BaseMiddleware):
             group_repo = GroupRepository(session)
             poll_repo = PollRepository(session)
             user_repo = UserRepository(session)
-            screenshot_check_repo = ScreenshotCheckRepository(session)
             group_service = GroupService(session)
             user_service = UserService(session)
             
@@ -59,7 +57,6 @@ class DatabaseMiddleware(BaseMiddleware):
             data["group_repo"] = group_repo
             data["poll_repo"] = poll_repo
             data["user_repo"] = user_repo
-            data["screenshot_check_repo"] = screenshot_check_repo
             data["group_service"] = group_service
             data["user_service"] = user_service
             data["poll_service"] = poll_service

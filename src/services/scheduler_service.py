@@ -86,7 +86,6 @@ class SchedulerService:
             misfire_grace_time=3600,  # Прощаем задержки до 1 часа (на случай длительных перезагрузок)
         )
         
-        # Проверка скриншотов отключена
 
         self.scheduler.start()
         logger.info("Scheduler started")
@@ -342,10 +341,6 @@ class SchedulerService:
         except Exception as e:  # noqa: BLE001
             logger.error("Error in health check job: %s", e)
 
-    async def _check_screenshots_job(self) -> None:
-        """Метод больше не используется - проверка скриншотов отключена."""
-        # Автоматическая проверка скриншотов больше не выполняется
-        pass
 
     async def _check_and_close_polls_on_startup(self) -> None:
         """Проверить и закрыть опросы при старте бота, если время закрытия уже прошло."""
@@ -384,13 +379,23 @@ class SchedulerService:
                     )
                     
                     closed = await poll_service.close_expired_polls()
+                    
+                    # Синхронизируем результаты опросов, которые были закрыты офлайн
+                    synced = await poll_service.sync_offline_poll_results()
+                    
                     await session.commit()
                     
-                    if closed > 0:
-                        logger.info("✅ Closed %d expired polls on startup", closed)
+                    if closed > 0 or synced > 0:
+                        message_parts = []
+                        if closed > 0:
+                            message_parts.append(f"закрыто опросов: {closed}")
+                        if synced > 0:
+                            message_parts.append(f"синхронизировано опросов: {synced}")
+                        
+                        logger.info("✅ При запуске: %s", ", ".join(message_parts))
                         if settings.ENABLE_ADMIN_NOTIFICATIONS:
                             await self.notification_service.notify_admins(
-                                f"✅ При запуске закрыто опросов: {closed}"
+                                f"✅ При запуске: {', '.join(message_parts)}"
                             )
                     else:
                         logger.info("No expired polls found on startup")

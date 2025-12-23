@@ -26,10 +26,35 @@ async def handle_new_member(
     """Обработка добавления нового участника в группу."""
     try:
         user_id = event.new_chat_member.user.id
+        user = event.new_chat_member.user
         
         # Пропускаем, если это сам бот
         if user_id == bot.id:
             return
+        
+        # Автоматически сохраняем/обновляем данные пользователя при входе в группу
+        if user_service:
+            try:
+                await user_service.get_or_create_user(
+                    user_id=user_id,
+                    first_name=user.first_name,
+                    last_name=user.last_name,
+                    username=user.username,
+                )
+                logger.info(
+                    "User data saved/updated for new member %s (%s %s) in group %s",
+                    user_id,
+                    user.first_name,
+                    user.last_name,
+                    event.chat.id,
+                )
+            except Exception as e:
+                logger.error(
+                    "Error saving user data for new member %s: %s",
+                    user_id,
+                    e,
+                    exc_info=True,
+                )
         
         # Проверяем, является ли новый участник админом группы
         from aiogram.types import ChatMemberAdministrator, ChatMemberOwner
@@ -57,7 +82,7 @@ async def handle_new_member(
                     await bot.send_message(
                         chat_id=event.chat.id,
                         text=(
-                            f"👋 Привет, {event.new_chat_member.user.full_name}!\n\n"
+                            f"👋 Привет, {user.full_name}!\n\n"
                             "Для участия в опросах необходимо пройти верификацию.\n\n"
                             "Пожалуйста, используйте команду <b>/start</b> в личных сообщениях с ботом."
                         ),

@@ -37,7 +37,7 @@ async def setup_bot(bot: Bot, dp: Dispatcher, redis: Redis) -> None:
     dp["bot"] = bot  # type: ignore[index]
 
     # Регистрация middleware (порядок важен!)
-    # DatabaseMiddleware нужен для всех типов событий (Message, CallbackQuery и PollAnswer)
+    # DatabaseMiddleware нужен для всех типов событий (Message, CallbackQuery, PollAnswer и ChatMemberUpdated)
     db_middleware = DatabaseMiddleware()
     # Используем глобальную регистрацию для всех типов событий
     dp.update.middleware(db_middleware)  # Применяется ко всем типам событий
@@ -45,6 +45,12 @@ async def setup_bot(bot: Bot, dp: Dispatcher, redis: Redis) -> None:
     dp.message.middleware(db_middleware)  # Сначала создаем сессию БД для сообщений
     dp.callback_query.middleware(db_middleware)  # И для callback query
     dp.poll_answer.middleware(db_middleware)  # И для poll_answer событий
+    dp.chat_member.middleware(db_middleware)  # И для chat_member событий (вход в группу)
+    
+    # UserDataMiddleware - автоматическое сохранение данных пользователя при сообщениях
+    from src.middlewares.user_data_middleware import UserDataMiddleware
+    dp.message.middleware(UserDataMiddleware())
+    
     # Верификация отключена - middleware не регистрируется
     # dp.message.middleware(VerificationMiddleware())  # Затем проверяем верификацию
     dp.message.middleware(AdminMiddleware())
@@ -61,8 +67,6 @@ async def setup_bot(bot: Bot, dp: Dispatcher, redis: Redis) -> None:
     dp.include_router(report_handlers.router)
     dp.include_router(monitoring_handlers.router)
     # Обработка скриншотов отключена
-    # from src.handlers import screenshot_handlers
-    # dp.include_router(screenshot_handlers.router)  # Обработка скриншотов в теме 'приход/уход'
     dp.include_router(user_handlers.router)
 
     # Устанавливаем команды бота для автодополнения

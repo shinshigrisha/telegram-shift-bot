@@ -411,41 +411,59 @@ class PollService:
         return question, options
 
     async def close_expired_polls(self) -> int:
-        """Закрыть опросы, у которых истекло время."""
+        """
+        Закрыть все активные опросы во всех группах.
+        
+        В 19:00 закрываются ВСЕ активные опросы независимо от индивидуального
+        времени закрытия группы. Это гарантирует, что голосование прекращается
+        одновременно во всех группах.
+        """
         now = datetime.now()
-        logger.info("Closing expired polls... (current time: %s)", now.strftime("%H:%M:%S"))
+        logger.info("Closing all active polls... (current time: %s)", now.strftime("%H:%M:%S"))
 
-        groups = await self.group_repo.get_active_groups()
+        # Получаем все активные опросы (не только на сегодня, но и на другие даты)
+        active_polls = await self.poll_repo.get_all_active_polls()
+        
+        if not active_polls:
+            logger.info("No active polls to close")
+            return 0
+
         closed_count = 0
-        skipped_count = 0
+        errors = []
 
-        for group in groups:
-            if now.time() < group.poll_close_time:
-                skipped_count += 1
-                logger.debug(
-                    "Skipping group %s (current time: %s < close time: %s)",
-                    group.name,
-                    now.time().strftime("%H:%M:%S"),
-                    group.poll_close_time.strftime("%H:%M:%S") if group.poll_close_time else "None"
-                )
-                continue
-
-            today = date.today()
-            poll = await self.poll_repo.get_active_by_group_and_date(
-                group.id,
-                today,
-            )
-
-            if not poll:
-                continue
-
+        for poll in active_polls:
             try:
-                await self._close_single_poll(group, poll, today, now)
-                closed_count += 1
-            except Exception as e:  # noqa: BLE001
-                logger.error("Error closing poll for %s: %s", group.name, e)
+                # Получаем группу для опроса
+                group = await self.group_repo.get_by_id(poll.group_id)
+                if not group:
+                    errors.append(f"Опрос {poll.id}: группа не найдена")
+                    logger.warning("Group not found for poll %s", poll.id)
+                    continue
 
-        logger.info("Closed %s polls (skipped %s groups with time not reached)", closed_count, skipped_count)
+                # Закрываем опрос
+                await self._close_single_poll(
+                    group=group,
+                    poll=poll,
+                    poll_date=poll.poll_date,
+                    close_time=now,
+                )
+                closed_count += 1
+                logger.info("Closed poll %s for group %s", poll.id, group.name)
+                
+            except Exception as e:  # noqa: BLE001
+                error_msg = f"Опрос {poll.id} (группа: {group.name if 'group' in locals() else 'Unknown'}): {str(e)}"
+                errors.append(error_msg)
+                logger.error("Error closing poll %s: %s", poll.id, e, exc_info=True)
+
+        logger.info(
+            "Closed %d polls out of %d active polls",
+            closed_count,
+            len(active_polls)
+        )
+        
+        if errors:
+            logger.warning("Errors closing polls: %s", errors[:5])  # Логируем первые 5 ошибок
+        
         return closed_count
 
     async def _close_single_poll(
@@ -489,6 +507,12 @@ class PollService:
         )
 
         logger.info("Closed poll for %s", group.name)
+        
+        # Отправляем результаты опроса после закрытия
+        try:
+            await self._send_poll_results(group, poll, poll_date)
+        except Exception as e:  # noqa: BLE001
+            logger.error("Error sending poll results for group %s: %s", group.name, e, exc_info=True)
 
     async def get_poll_results_text(self, poll_id: str) -> str:
         """Получить текстовое представление результатов опроса."""
@@ -1025,5 +1049,373 @@ class PollService:
             "или проверьте опросы через админ-панель после их создания."
         )
         return None
+
+    async def _send_poll_results(
+        self,
+        group,
+        poll: DailyPoll,
+        poll_date: date,
+    ) -> None:
+        """
+        Отправить результаты опроса в группу после закрытия.
+        
+        Args:
+            group: Группа
+            poll: Закрытый опрос
+            poll_date: Дата опроса
+        """
+        # Получаем опрос со всеми голосами
+        poll_with_votes = await self.poll_repo.get_poll_with_votes_and_users(poll.id)
+        if not poll_with_votes:
+            logger.warning("Poll not found for results: %s", poll.id)
+            return
+        
+        # Форматируем результаты
+        results = await self._format_poll_results(group, poll_with_votes, poll_date)
+        
+        # Отправляем в тему группы (где был опрос)
+        topic_id = getattr(group, "telegram_topic_id", None)
+        
+        # results может быть кортежем (первое сообщение, второе сообщение) или строкой
+        if isinstance(results, tuple):
+            first_message, second_message = results
+        else:
+            first_message = results
+            second_message = None
+        
+        try:
+            # Отправляем первое сообщение
+            await self.bot.send_message(
+                chat_id=group.telegram_chat_id,
+                text=first_message,
+                message_thread_id=topic_id,
+            )
+            logger.info("Sent poll results (first message) for group %s", group.name)
+            
+            # Отправляем второе сообщение, если есть
+            if second_message:
+                await asyncio.sleep(0.5)  # Небольшая задержка между сообщениями
+                await self.bot.send_message(
+                    chat_id=group.telegram_chat_id,
+                    text=second_message,
+                    message_thread_id=topic_id,
+                )
+                logger.info("Sent poll results (second message) for group %s", group.name)
+        except Exception as e:  # noqa: BLE001
+            logger.error("Error sending poll results message for group %s: %s", group.name, e)
+            # Пытаемся отправить без topic_id
+            try:
+                await self.bot.send_message(
+                    chat_id=group.telegram_chat_id,
+                    text=first_message,
+                )
+                if second_message:
+                    await asyncio.sleep(0.5)
+                    await self.bot.send_message(
+                        chat_id=group.telegram_chat_id,
+                        text=second_message,
+                    )
+            except Exception as e2:  # noqa: BLE001
+                logger.error("Error sending poll results without topic_id for group %s: %s", group.name, e2)
+
+    async def _format_poll_results(
+        self,
+        group,
+        poll: DailyPoll,
+        poll_date: date,
+    ) -> str | tuple[str, str]:
+        """
+        Форматировать результаты опроса в читабельном виде.
+        
+        Формат:
+        ЗИЗ-1
+        ВЫХОДЫ КУРЬЕРОВ 23.12.25
+        
+        07:30-19:30
+        1. Фамилия Имя
+        2. Фамилия Имя
+        
+        ...
+        
+        Не отметились:
+        1. Фамилия Имя
+        2. Фамилия Имя
+        
+        Выходной:
+        1. Фамилия Имя
+        2. Фамилия Имя
+        
+        Returns:
+            str - если нет неотметившихся и выходных
+            tuple[str, str] - (первое сообщение, второе сообщение)
+        """
+        from src.utils.group_formatters import clean_group_name_for_display
+        
+        # Заголовок
+        group_name = clean_group_name_for_display(group.name)
+        date_str = poll_date.strftime("%d.%m.%y")
+        
+        lines = [
+            f"<b>{group_name}</b>",
+            f"ВЫХОДЫ КУРЬЕРОВ {date_str}",
+            "",
+        ]
+        
+        # Получаем все голоса для определения неотметившихся и выходных
+        from sqlalchemy import select
+        from src.models.user_vote import UserVote
+        from sqlalchemy.orm import selectinload
+        
+        all_votes_result = await self.poll_repo.session.execute(
+            select(UserVote)
+            .where(UserVote.poll_id == poll.id)
+            .options(selectinload(UserVote.user))
+        )
+        all_votes = list(all_votes_result.scalars().all())
+        
+        # Собираем ID всех проголосовавших
+        voted_user_ids = {vote.user_id for vote in all_votes}
+        
+        # Собираем выходных (голосовали за "Выходной")
+        day_off_votes = [vote for vote in all_votes if vote.voted_option == "Выходной"]
+        day_off_user_ids = {vote.user_id for vote in day_off_votes}
+        
+        # Получаем слоты с голосами
+        slots_with_votes = []
+        if poll.poll_slots:
+            for slot in poll.poll_slots:
+                slot_votes = [vote for vote in all_votes if vote.slot_id == slot.id]
+                if slot_votes:  # Только слоты с голосами
+                    slots_with_votes.append((slot, slot_votes))
+        
+        # Сортируем слоты по времени начала
+        slots_with_votes.sort(key=lambda x: x[0].start_time)
+        
+        # Форматируем слоты
+        for slot, slot_votes in slots_with_votes:
+            start_time = slot.start_time.strftime("%H:%M")
+            end_time = slot.end_time.strftime("%H:%M")
+            lines.append(f"{start_time}-{end_time}")
+            
+            # Получаем имена пользователей
+            user_names = []
+            for vote in slot_votes:
+                if vote.user:
+                    full_name = vote.user.get_full_name()
+                    if full_name and full_name.strip():
+                        user_names.append(full_name)
+                    elif vote.user_name:
+                        user_names.append(vote.user_name)
+                    else:
+                        user_names.append(f"User {vote.user_id}")
+                elif vote.user_name:
+                    user_names.append(vote.user_name)
+                else:
+                    user_names.append(f"User {vote.user_id}")
+            
+            # Нумеруем пользователей
+            for idx, name in enumerate(user_names, 1):
+                lines.append(f"{idx}. {name}")
+            
+            lines.append("")  # Пустая строка между слотами
+        
+        # Отдельное сообщение для неотметившихся и выходных
+        # Получаем всех верифицированных пользователей из группы
+        from src.repositories.user_repository import UserRepository
+        from src.models.database import AsyncSessionLocal
+        
+        # Используем новую сессию для получения пользователей
+        async with AsyncSessionLocal() as session:
+            user_repo = UserRepository(session)
+            
+            # Получаем всех верифицированных пользователей
+            verified_users = await user_repo.get_verified_users()
+            
+            # Фильтруем пользователей группы (проверяем через Telegram API)
+            group_member_ids = set()
+            for user in verified_users:
+                try:
+                    chat_member = await self.bot.get_chat_member(group.telegram_chat_id, user.id)
+                    if chat_member.status in ["member", "administrator", "creator"]:
+                        # Проверяем, не является ли куратором
+                        from src.utils.auth import is_curator
+                        if not is_curator(user):
+                            group_member_ids.add(user.id)
+                except Exception:
+                    # Если не удалось проверить, пропускаем
+                    pass
+            
+            # Неотметившиеся (не голосовали вообще)
+            non_voted_user_ids = group_member_ids - voted_user_ids
+            
+            # Выходные (голосовали за "Выходной")
+            day_off_user_ids_filtered = day_off_user_ids & group_member_ids
+            
+            # Формируем второе сообщение
+            second_message_lines = []
+            
+            if non_voted_user_ids:
+                non_voted_users = await user_repo.get_by_ids(list(non_voted_user_ids))
+                non_voted_names = []
+                for user in non_voted_users:
+                    full_name = user.get_full_name()
+                    if full_name and full_name.strip():
+                        non_voted_names.append(full_name)
+                
+                if non_voted_names:
+                    second_message_lines.append("<b>Не отметились:</b>")
+                    for idx, name in enumerate(non_voted_names, 1):
+                        second_message_lines.append(f"{idx}. {name}")
+                    second_message_lines.append("")
+            
+            if day_off_user_ids_filtered:
+                day_off_users = await user_repo.get_by_ids(list(day_off_user_ids_filtered))
+                day_off_names = []
+                for user in day_off_users:
+                    full_name = user.get_full_name()
+                    if full_name and full_name.strip():
+                        day_off_names.append(full_name)
+                
+                if day_off_names:
+                    second_message_lines.append("<b>Выходной:</b>")
+                    for idx, name in enumerate(day_off_names, 1):
+                        second_message_lines.append(f"{idx}. {name}")
+        
+            # Отправляем первое сообщение
+            first_message = "\n".join(lines)
+            
+            # Отправляем второе сообщение, если есть данные
+            if second_message_lines:
+                second_message = "\n".join(second_message_lines)
+                return first_message, second_message
+            
+            return first_message
+
+    async def sync_offline_poll_results(self) -> int:
+        """
+        Синхронизировать результаты опросов, которые были закрыты офлайн (пока бот был остановлен).
+        
+        Проверяет опросы, которые должны были закрыться, но в БД еще "active",
+        и синхронизирует их статус с Telegram.
+        
+        Returns:
+            Количество синхронизированных опросов
+        """
+        from datetime import datetime
+        
+        logger.info("Starting sync of offline poll results...")
+        
+        # Получаем все активные опросы
+        active_polls = await self.poll_repo.get_all_active_polls()
+        
+        if not active_polls:
+            logger.info("No active polls to sync")
+            return 0
+        
+        synced_count = 0
+        now = datetime.now()
+        
+        # Проверяем опросы, которые должны были закрыться
+        for poll in active_polls:
+            try:
+                # Получаем группу
+                group = await self.group_repo.get_by_id(poll.group_id)
+                if not group:
+                    logger.warning("Group not found for poll %s", poll.id)
+                    continue
+                
+                # Проверяем, должно ли было закрыться время закрытия
+                poll_date = poll.poll_date
+                closing_time = getattr(group, "poll_close_time", None)
+                
+                # Если время закрытия прошло, проверяем статус опроса в Telegram
+                should_be_closed = False
+                if closing_time:
+                    # Создаем datetime для времени закрытия на дату опроса
+                    closing_datetime = datetime.combine(poll_date, closing_time)
+                    # Если текущее время после времени закрытия, опрос должен быть закрыт
+                    if now >= closing_datetime:
+                        should_be_closed = True
+                else:
+                    # Используем глобальное время закрытия
+                    from datetime import time
+                    from config.settings import settings
+                    global_closing_time = time(settings.POLL_CLOSING_HOUR, settings.POLL_CLOSING_MINUTE)
+                    closing_datetime = datetime.combine(poll_date, global_closing_time)
+                    if now >= closing_datetime:
+                        should_be_closed = True
+                
+                if not should_be_closed:
+                    continue
+                
+                # Пытаемся проверить статус опроса в Telegram
+                # Если опрос уже закрыт в Telegram, но в БД еще "active", синхронизируем
+                if poll.telegram_message_id:
+                    try:
+                        # Пытаемся закрыть опрос через API
+                        # Если опрос уже закрыт, получим ошибку, но это нормально
+                        await self.bot.stop_poll(
+                            chat_id=group.telegram_chat_id,
+                            message_id=poll.telegram_message_id,
+                        )
+                        # Если успешно закрыли, обновляем статус в БД
+                        await self.poll_repo.update(
+                            poll.id,
+                            status="closed",
+                            closed_at=now,
+                        )
+                        logger.info("Closed and synced poll %s for group %s", poll.id, group.name)
+                        
+                        # Отправляем результаты опроса
+                        try:
+                            await self._send_poll_results(group, poll, poll_date)
+                        except Exception as e:  # noqa: BLE001
+                            logger.error("Error sending poll results for synced poll %s: %s", poll.id, e)
+                        
+                        synced_count += 1
+                    except Exception as poll_error:  # noqa: BLE001
+                        # Если опрос уже закрыт или не найден, обновляем статус в БД
+                        error_msg = str(poll_error).lower()
+                        if any(keyword in error_msg for keyword in [
+                            "not found", "already closed", "poll is not active",
+                            "message to stop not found", "poll is closed"
+                        ]):
+                            # Опрос уже закрыт в Telegram, синхронизируем статус в БД
+                            await self.poll_repo.update(
+                                poll.id,
+                                status="closed",
+                                closed_at=now,
+                            )
+                            logger.info("Synced closed status for poll %s (group: %s)", poll.id, group.name)
+                            
+                            # Отправляем результаты опроса
+                            try:
+                                await self._send_poll_results(group, poll, poll_date)
+                            except Exception as e:  # noqa: BLE001
+                                logger.error("Error sending poll results for synced poll %s: %s", poll.id, e)
+                            
+                            synced_count += 1
+                        else:
+                            # Другие ошибки логируем
+                            logger.warning(
+                                "Error checking poll %s status in Telegram: %s",
+                                poll.id,
+                                poll_error
+                            )
+                else:
+                    # Если нет telegram_message_id, просто обновляем статус на основе времени
+                    await self.poll_repo.update(
+                        poll.id,
+                        status="closed",
+                        closed_at=now,
+                    )
+                    logger.info("Closed poll %s (no telegram_message_id) for group %s", poll.id, group.name)
+                    synced_count += 1
+                    
+            except Exception as e:  # noqa: BLE001
+                logger.error("Error syncing poll %s: %s", poll.id, e, exc_info=True)
+        
+        logger.info("Synced %d offline poll results", synced_count)
+        return synced_count
 
 

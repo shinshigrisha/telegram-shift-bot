@@ -80,16 +80,34 @@ class VerificationMiddleware(BaseMiddleware):
             if state:
                 current_state = await state.get_state()
                 # Если пользователь уже в процессе верификации, пропускаем
-                if current_state in (VerificationStates.waiting_for_first_name, VerificationStates.waiting_for_last_name):
+                if current_state == VerificationStates.waiting_for_full_name:
                     return await handler(event, data)
                 
                 # Запускаем процесс верификации
-                await state.set_state(VerificationStates.waiting_for_first_name)
-                await event.answer(
-                    "👋 <b>Добро пожаловать!</b>\n\n"
-                    "Для участия в опросах необходимо пройти верификацию.\n\n"
-                    "Пожалуйста, введите ваше <b>имя</b>:"
-                )
+                await state.set_state(VerificationStates.waiting_for_full_name)
+                # Отправляем сообщение в приватный чат пользователя
+                from aiogram import Bot
+                bot: Bot = data.get("bot")
+                if not bot:
+                    bot = Bot.get_current(no_error=True)
+                
+                if bot:
+                    try:
+                        verification_message = await bot.send_message(
+                            chat_id=event.from_user.id,
+                            text=(
+                                "👋 <b>Добро пожаловать!</b>\n\n"
+                                "Для участия в опросах необходимо пройти верификацию.\n\n"
+                                "Пожалуйста, введите ваши <b>Фамилию и Имя</b> через пробел:\n"
+                                "Формат: <b>Фамилия Имя</b>\n"
+                                "Пример: <code>Иванов Иван</code>\n\n"
+                                "Для отмены введите: <code>отмена</code>"
+                            ),
+                        )
+                        # Сохраняем ID сообщения для удаления
+                        await state.update_data(verification_bot_message_id=verification_message.message_id)
+                    except Exception as e:
+                        logger.error("Error sending verification message to user %s: %s", event.from_user.id, e)
                 return
 
         return await handler(event, data)

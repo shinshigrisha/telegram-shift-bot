@@ -20,7 +20,6 @@ from src.models.user import User  # noqa: F401
 from src.models.user_vote import UserVote  # noqa: F401
 from src.models.daily_poll import DailyPoll  # noqa: F401
 from src.models.poll_slot import PollSlot  # noqa: F401
-from src.models.screenshot_check import ScreenshotCheck  # noqa: F401
 
 # Паттерны для очистки
 COURIER_TAGS = ['8958', '7368', '6028']
