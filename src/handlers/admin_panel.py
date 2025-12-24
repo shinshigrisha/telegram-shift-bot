@@ -328,34 +328,34 @@ async def callback_verify_user(
     if user.is_verified:
         await callback.answer("ℹ️ Пользователь уже верифицирован", show_alert=True)
         return
-        
-        # Сохраняем user_id в состоянии
-        await state.update_data(verification_user_id=user_id)
-        
-        # Показываем текущие данные пользователя (если есть)
-        current_info = ""
-        if user.first_name or user.last_name:
-            current_name = user.get_full_name()
-            current_info = f"\n\nТекущие данные: <b>{current_name}</b>"
-        elif user.username:
-            current_info = f"\n\nТекущий username: <b>@{user.username}</b>"
-        
-        text = (
-            f"👤 <b>Верификация пользователя</b>\n\n"
-            f"ID: <code>{user_id}</code>{current_info}\n\n"
-            f"Введите <b>Фамилию и Имя</b> через пробел:\n"
-            f"Формат: <b>Фамилия Имя</b>\n"
-            f"Пример: <code>Иванов Иван</code>\n\n"
-            f"Для отмены введите: <code>отмена</code>"
-        )
-        
-        keyboard = InlineKeyboardMarkup(inline_keyboard=[
-            [InlineKeyboardButton(text="❌ Отмена", callback_data="admin:list_unverified")],
-        ])
-        
-        await callback.message.edit_text(text, reply_markup=keyboard)
-        await state.set_state(AdminPanelStates.waiting_for_verification_name)
-        await callback.answer()
+    
+    # Сохраняем user_id в состоянии
+    await state.update_data(verification_user_id=user_id)
+    
+    # Показываем текущие данные пользователя (если есть)
+    current_info = ""
+    if user.first_name or user.last_name:
+        current_name = user.get_full_name()
+        current_info = f"\n\nТекущие данные: <b>{current_name}</b>"
+    elif user.username:
+        current_info = f"\n\nТекущий username: <b>@{user.username}</b>"
+    
+    text = (
+        f"👤 <b>Верификация пользователя</b>\n\n"
+        f"ID: <code>{user_id}</code>{current_info}\n\n"
+        f"Введите <b>Фамилию и Имя</b> через пробел:\n"
+        f"Формат: <b>Фамилия Имя</b>\n"
+        f"Пример: <code>Иванов Иван</code>\n\n"
+        f"Для отмены введите: <code>отмена</code>"
+    )
+    
+    keyboard = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="❌ Отмена", callback_data="admin:list_unverified")],
+    ])
+    
+    await callback.message.edit_text(text, reply_markup=keyboard)
+    await state.set_state(AdminPanelStates.waiting_for_verification_name)
+    await callback.answer()
 
 
 @router.message(StateFilter(AdminPanelStates.waiting_for_verification_name))
