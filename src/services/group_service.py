@@ -54,8 +54,8 @@ class GroupService:
 
         group.update_slots(slots)
         # DatabaseMiddleware автоматически сделает commit после успешного выполнения handler
-        # Обновляем объект в сессии, чтобы изменения были видны
-        await self.session.refresh(group)
+        # Делаем flush, чтобы изменения были видны в сессии, но не коммитим (это сделает middleware)
+        await self.session.flush()
         return True
 
     async def get_system_stats(self) -> Dict[str, int]:
