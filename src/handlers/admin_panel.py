@@ -4068,7 +4068,8 @@ async def callback_show_results_for_group(
             [InlineKeyboardButton(text="◀️ Назад", callback_data="admin:polls_menu")],
         ])
         
-        await callback.message.edit_text(text, reply_markup=keyboard)
+        # Используем safe_edit_message для обработки ошибки "message is not modified"
+        await safe_edit_message(callback.message, text, reply_markup=keyboard)
         
     except Exception as e:
         logger.error("Error showing results: %s", e, exc_info=True)

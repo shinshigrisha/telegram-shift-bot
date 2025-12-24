@@ -1,4 +1,6 @@
 import logging
+import asyncio
+import time
 from typing import Optional
 
 from aiogram import Router
@@ -11,6 +13,10 @@ from src.utils.auth import is_curator
 
 logger = logging.getLogger(__name__)
 router = Router()
+
+# Настройки для retry механизма при поиске опроса
+POLL_RETRY_ATTEMPTS = 3
+POLL_RETRY_DELAYS = [0.5, 1.0, 2.0]  # Задержки в секундах между попытками
 
 
 @router.poll_answer()
@@ -55,10 +61,53 @@ async def handle_poll_answer(
             # (но у нас нет доступа к bot здесь, поэтому просто логируем)
             return
 
-        # Получаем опрос по telegram_poll_id
-        poll = await poll_repo.get_by_telegram_poll_id(poll_id)
+        # Получаем опрос по telegram_poll_id с retry механизмом
+        # Это решает проблему race condition: когда опрос только что создан,
+        # но еще не закоммичен в БД, он может быть не найден
+        poll = None
+        start_time = time.time()
+        
+        for attempt in range(POLL_RETRY_ATTEMPTS):
+            # Сбрасываем кэш сессии перед каждой попыткой, чтобы получить свежие данные из БД
+            poll_repo.session.expire_all()
+            
+            poll = await poll_repo.get_by_telegram_poll_id(poll_id)
+            if poll:
+                if attempt > 0:
+                    elapsed_time = time.time() - start_time
+                    logger.info(
+                        "Poll %s found after %d retry attempts (%.2f seconds). "
+                        "Race condition resolved.",
+                        poll_id, attempt + 1, elapsed_time
+                    )
+                break
+            
+            if attempt < POLL_RETRY_ATTEMPTS - 1:
+                # Ждем перед следующей попыткой
+                delay = POLL_RETRY_DELAYS[attempt] if attempt < len(POLL_RETRY_DELAYS) else 2.0
+                logger.info(
+                    "Poll not found for poll_id: %s (attempt %d/%d), retrying in %.1f seconds... "
+                    "This may happen if the poll was just created and not yet committed to DB.",
+                    poll_id, attempt + 1, POLL_RETRY_ATTEMPTS, delay
+                )
+                await asyncio.sleep(delay)
+            else:
+                elapsed_time = time.time() - start_time
+                logger.warning(
+                    "Poll not found for poll_id: %s after %d attempts (%.2f seconds). "
+                    "This may happen if the poll was just created and not yet committed to DB.",
+                    poll_id, POLL_RETRY_ATTEMPTS, elapsed_time
+                )
+        
         if not poll:
-            logger.warning("Poll not found for poll_id: %s", poll_id)
+            elapsed_time = time.time() - start_time
+            # Используем данные из poll_answer.user вместо обращения к БД через user.get_full_name()
+            user_full_name = poll_answer.user.full_name or f"{poll_answer.user.first_name or ''} {poll_answer.user.last_name or ''}".strip() or f"User {user_id}"
+            logger.error(
+                "Failed to find poll %s for user %s (%s) after %d retry attempts (%.2f seconds). "
+                "Vote will be lost. This may indicate a problem with poll creation or DB commit.",
+                poll_id, user_id, user_full_name, POLL_RETRY_ATTEMPTS, elapsed_time
+            )
             return
 
         # Проверяем, что опрос активен
@@ -112,7 +161,14 @@ async def handle_poll_answer(
                 slot_id = None  # Для ночных опросов нет слотов
 
         # Получаем имя пользователя для сохранения
-        user_name = user.get_full_name() or poll_answer.user.full_name or f"User {user_id}"
+        # Используем данные из poll_answer.user, чтобы избежать lazy-loading проблем с SQLAlchemy
+        # poll_answer.user уже содержит актуальные данные пользователя
+        user_name = (
+            poll_answer.user.full_name or
+            f"{poll_answer.user.first_name or ''} {poll_answer.user.last_name or ''}".strip() or
+            poll_answer.user.username or
+            f"User {user_id}"
+        )
 
         # Проверяем, не голосовал ли пользователь уже в этом опросе
         from sqlalchemy import select
@@ -164,7 +220,7 @@ async def handle_poll_answer(
                 
                 logger.info(
                     "User %s (%s) voted in poll %s, option: %s, slot_id: %s",
-                    user.get_full_name(),
+                    user_name,
                     user_id,
                     poll_id,
                     option_ids,
