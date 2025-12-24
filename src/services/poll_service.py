@@ -4,6 +4,7 @@ import logging
 import asyncio
 
 from aiogram import Bot
+from aiogram.exceptions import TelegramBadRequest
 
 from src.models.daily_poll import DailyPoll
 from src.repositories.poll_repository import PollRepository
@@ -426,32 +427,65 @@ class PollService:
             logger.info("No active polls to close")
             return 0
 
-        closed_count = 0
-        errors = []
+        # Загружаем группы для всех опросов заранее
+        group_ids = {poll.group_id for poll in active_polls}
+        groups_dict = {}
+        for group_id in group_ids:
+            group = await self.group_repo.get_by_id(group_id)
+            if group:
+                groups_dict[group_id] = group
 
-        for poll in active_polls:
+        # Параллельно закрываем все опросы
+        async def close_poll_task(poll: DailyPoll) -> Tuple[bool, Optional[str]]:
+            """Задача закрытия одного опроса."""
             try:
-                # Получаем группу для опроса
-                group = await self.group_repo.get_by_id(poll.group_id)
+                group = groups_dict.get(poll.group_id)
                 if not group:
-                    errors.append(f"Опрос {poll.id}: группа не найдена")
-                    logger.warning("Group not found for poll %s", poll.id)
-                    continue
+                    return False, f"Опрос {poll.id}: группа не найдена"
+
+                # Проверяем статус опроса перед закрытием
+                # Обновляем опрос из БД, чтобы убедиться, что он все еще активен
+                current_poll = await self.poll_repo.get_by_id(poll.id)
+                if not current_poll or current_poll.status != "active":
+                    logger.debug("Poll %s already closed, skipping", poll.id)
+                    return False, None  # Уже закрыт, не ошибка
 
                 # Закрываем опрос
                 await self._close_single_poll(
                     group=group,
-                    poll=poll,
-                    poll_date=poll.poll_date,
+                    poll=current_poll,
+                    poll_date=current_poll.poll_date,
                     close_time=now,
                 )
-                closed_count += 1
-                logger.info("Closed poll %s for group %s", poll.id, group.name)
+                return True, None
                 
             except Exception as e:  # noqa: BLE001
-                error_msg = f"Опрос {poll.id} (группа: {group.name if 'group' in locals() else 'Unknown'}): {str(e)}"
-                errors.append(error_msg)
+                group_name = groups_dict.get(poll.group_id).name if poll.group_id in groups_dict else "Unknown"
+                error_msg = f"Опрос {poll.id} (группа: {group_name}): {str(e)}"
                 logger.error("Error closing poll %s: %s", poll.id, e, exc_info=True)
+                return False, error_msg
+
+        # Выполняем закрытие параллельно
+        results = await asyncio.gather(
+            *[close_poll_task(poll) for poll in active_polls],
+            return_exceptions=True
+        )
+
+        closed_count = 0
+        errors = []
+
+        for i, result in enumerate(results):
+            if isinstance(result, Exception):
+                poll = active_polls[i]
+                error_msg = f"Опрос {poll.id}: {str(result)}"
+                errors.append(error_msg)
+                logger.error("Unexpected error closing poll %s: %s", poll.id, result, exc_info=True)
+            else:
+                success, error = result
+                if success:
+                    closed_count += 1
+                elif error:
+                    errors.append(error)
 
         logger.info(
             "Closed %d polls out of %d active polls",
@@ -483,34 +517,63 @@ class PollService:
         if close_time is None:
             close_time = datetime.now()
         
+        # Проверяем, не закрыт ли опрос уже
+        if poll.status == "closed":
+            logger.debug("Poll %s for group %s already closed, skipping", poll.id, group.name)
+            return
+
         # message_thread_id не поддерживается в stop_poll API
+        poll_was_already_closed = False
         try:
             await self.bot.stop_poll(
                 chat_id=group.telegram_chat_id,
                 message_id=poll.telegram_message_id,
             )
-        except Exception as poll_error:  # noqa: BLE001
+        except TelegramBadRequest as poll_error:
             # Если опрос уже закрыт или сообщение не найдено, просто обновляем статус в БД
             error_msg = str(poll_error).lower()
             if "not found" in error_msg or "already closed" in error_msg or "poll is not active" in error_msg:
-                logger.warning("Poll already closed or not found for %s, updating status in DB", group.name)
+                logger.debug("Poll already closed or not found for %s (poll_id: %s), updating status in DB", group.name, poll.id)
+                poll_was_already_closed = True
+                # Не пробрасываем ошибку дальше - это нормальная ситуация при повторных попытках закрытия
+            else:
+                # Другие ошибки Telegram API пробрасываем дальше
+                logger.warning("TelegramBadRequest closing poll for %s: %s", group.name, poll_error)
+                raise
+        except Exception as poll_error:  # noqa: BLE001
+            # Обрабатываем другие типы ошибок
+            error_msg = str(poll_error).lower()
+            if "not found" in error_msg or "already closed" in error_msg or "poll is not active" in error_msg:
+                logger.debug("Poll already closed or not found for %s (poll_id: %s), updating status in DB", group.name, poll.id)
+                poll_was_already_closed = True
             else:
                 # Другие ошибки пробрасываем дальше
+                logger.error("Unexpected error closing poll for %s: %s", group.name, poll_error)
                 raise
 
-        await self.poll_repo.update(
-            poll.id,
-            status="closed",
-            closed_at=close_time,
-        )
-
-        logger.info("Closed poll for %s", group.name)
+        # Обновляем статус в БД только если опрос еще не был закрыт
+        if not poll_was_already_closed:
+            await self.poll_repo.update(
+                poll.id,
+                status="closed",
+                closed_at=close_time,
+            )
+            logger.info("Closed poll for %s", group.name)
+        else:
+            # Обновляем статус в БД на всякий случай (если он еще не обновлен)
+            await self.poll_repo.update(
+                poll.id,
+                status="closed",
+                closed_at=close_time,
+            )
+            logger.debug("Updated status for already closed poll %s for group %s", poll.id, group.name)
         
-        # Отправляем результаты опроса после закрытия
-        try:
-            await self._send_poll_results(group, poll, poll_date)
-        except Exception as e:  # noqa: BLE001
-            logger.error("Error sending poll results for group %s: %s", group.name, e, exc_info=True)
+        # Отправляем результаты опроса только если опрос был закрыт сейчас (не был уже закрыт)
+        if not poll_was_already_closed:
+            try:
+                await self._send_poll_results(group, poll, poll_date)
+            except Exception as e:  # noqa: BLE001
+                logger.error("Error sending poll results for group %s: %s", group.name, e, exc_info=True)
 
     async def get_poll_results_text(self, poll_id: str) -> str:
         """Получить текстовое представление результатов опроса."""
@@ -1416,5 +1479,6 @@ class PollService:
         
         logger.info("Synced %d offline poll results", synced_count)
         return synced_count
+
 
 
