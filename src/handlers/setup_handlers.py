@@ -6,6 +6,7 @@ from aiogram import Router
 from aiogram.filters import StateFilter
 from aiogram.fsm.context import FSMContext
 from aiogram.types import Message
+from aiogram.enums import ChatType
 
 from src.states.setup_states import SetupStates
 from src.services.group_service import GroupService
@@ -24,6 +25,10 @@ async def process_group_name(
     group_service: GroupService,
 ) -> None:
     """Обработка ввода названия группы для настройки слотов."""
+    # Обрабатываем только личные сообщения
+    if message.chat.type != ChatType.PRIVATE:
+        return
+    
     # Проверяем, что сообщение содержит текст
     if not message.text:
         await message.answer(
@@ -88,6 +93,10 @@ async def process_slots_input(
     group_service: GroupService,
 ) -> None:
     """Обработка ввода слотов."""
+    # Обрабатываем только личные сообщения
+    if message.chat.type != ChatType.PRIVATE:
+        return
+    
     logger.info("Processing slots input: %s", message.text)
     
     # Проверяем, что сообщение содержит текст
