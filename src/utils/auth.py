@@ -1,11 +1,15 @@
 from functools import wraps
 from typing import Callable, Any, Union, Optional
+import logging
 
 from aiogram.types import Message, CallbackQuery, User as TelegramUser
 from aiogram.fsm.context import FSMContext
+from aiogram.exceptions import TelegramNetworkError, TelegramAPIError
 
 from config.settings import settings
 from src.models.user import User as DbUser
+
+logger = logging.getLogger(__name__)
 
 
 # Список кураторов, которые не требуют верификации и имеют особые права
@@ -103,6 +107,23 @@ def require_admin_callback(func: Callable) -> Callable:
         logger.info("require_admin_callback: calling %s for user %s", func.__name__, user_id)
         try:
             return await func(callback, *args, **kwargs)
+        except (TelegramNetworkError, TelegramAPIError) as e:
+            # Сетевые ошибки и ошибки API - временные проблемы, не критичные
+            error_msg = str(e).lower()
+            if "connection reset" in error_msg or "timeout" in error_msg or "cannot connect" in error_msg:
+                logger.warning("Network error in %s: %s", func.__name__, e)
+                try:
+                    await callback.answer("⚠️ Проблема с подключением к Telegram. Попробуйте позже.", show_alert=True)
+                except Exception:  # noqa: BLE001
+                    pass
+            else:
+                logger.error("Telegram API error in %s: %s", func.__name__, e, exc_info=True)
+                try:
+                    await callback.answer("❌ Ошибка Telegram API. Проверьте логи.", show_alert=True)
+                except Exception:  # noqa: BLE001
+                    pass
+            # Не пробрасываем сетевые ошибки дальше - это временные проблемы
+            return
         except Exception as e:  # noqa: BLE001
             logger.error("Error in %s: %s", func.__name__, e, exc_info=True)
             try:

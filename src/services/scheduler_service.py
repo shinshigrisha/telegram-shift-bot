@@ -39,6 +39,7 @@ class SchedulerService:
                 minute=settings.POLL_CREATION_MINUTE,
             ),
             id="create_polls",
+            misfire_grace_time=3600,  # Прощаем задержки до 1 часа (на случай перезапуска бота)
         )
 
         # Основная задача закрытия опросов в 19:00
@@ -95,6 +96,10 @@ class SchedulerService:
         # Это нужно на случай, если бот был перезапущен после времени закрытия
         import asyncio
         asyncio.create_task(self._check_and_close_polls_on_startup())
+        
+        # Проверяем и создаем опросы при старте, если время создания уже прошло
+        # Это нужно на случай, если бот был перезапущен после времени создания
+        asyncio.create_task(self._check_and_create_polls_on_startup())
 
     async def _create_polls_job(self) -> None:
         logger.info("Running create_polls job")
@@ -408,6 +413,86 @@ class SchedulerService:
                 )
         except Exception as e:  # noqa: BLE001
             logger.error("Error checking polls on startup: %s", e, exc_info=True)
+
+    async def _check_and_create_polls_on_startup(self) -> None:
+        """Проверить и создать опросы при старте бота, если время создания уже прошло."""
+        try:
+            from datetime import datetime, date, timedelta
+            from src.models.database import AsyncSessionLocal
+            from src.repositories.group_repository import GroupRepository
+            from src.repositories.poll_repository import PollRepository
+            
+            # Небольшая задержка, чтобы дать боту полностью запуститься
+            import asyncio
+            await asyncio.sleep(5)
+            
+            from datetime import time
+            now = datetime.now()
+            current_time = now.time()
+            creation_time = time(settings.POLL_CREATION_HOUR, settings.POLL_CREATION_MINUTE)
+            
+            # Проверяем только если текущее время после времени создания
+            # и до времени закрытия (чтобы не создавать опросы вечером)
+            closing_time = time(settings.POLL_CLOSING_HOUR, settings.POLL_CLOSING_MINUTE)
+            
+            if creation_time <= current_time < closing_time:
+                logger.info(
+                    "Checking for missing polls on startup (current time: %s, creation time: %s)",
+                    current_time.strftime("%H:%M"),
+                    creation_time.strftime("%H:%M")
+                )
+                
+                async with AsyncSessionLocal() as session:
+                    group_repo = GroupRepository(session)
+                    poll_repo = PollRepository(session)
+                    
+                    # Проверяем, есть ли опросы на завтра
+                    tomorrow = date.today() + timedelta(days=1)
+                    groups = await group_repo.get_active_groups()
+                    missing_polls = []
+                    
+                    for group in groups:
+                        poll = await poll_repo.get_by_group_and_date(group.id, tomorrow)
+                        if not poll:
+                            missing_polls.append(group)
+                    
+                    if missing_polls:
+                        logger.info("Found %d groups without polls for tomorrow, creating...", len(missing_polls))
+                        
+                        poll_service = PollService(
+                            bot=self.bot,
+                            poll_repo=poll_repo,
+                            group_repo=group_repo,
+                            screenshot_service=None,
+                        )
+                        
+                        created, errors = await poll_service.create_daily_polls(retry_failed=True)
+                        
+                        await session.commit()
+                        
+                        if created > 0 or errors:
+                            message_parts = []
+                            if created > 0:
+                                message_parts.append(f"создано опросов: {created}")
+                            if errors:
+                                message_parts.append(f"ошибок: {len(errors)}")
+                            
+                            logger.info("✅ При запуске: %s", ", ".join(message_parts))
+                            if settings.ENABLE_ADMIN_NOTIFICATIONS:
+                                await self.notification_service.notify_admins(
+                                    f"✅ При запуске: {', '.join(message_parts)}"
+                                )
+                    else:
+                        logger.info("All polls for tomorrow already exist")
+            else:
+                logger.info(
+                    "Skipping poll creation check on startup (current time: %s, creation time: %s, closing time: %s)",
+                    current_time.strftime("%H:%M"),
+                    creation_time.strftime("%H:%M"),
+                    closing_time.strftime("%H:%M")
+                )
+        except Exception as e:  # noqa: BLE001
+            logger.error("Error checking polls creation on startup: %s", e, exc_info=True)
 
     async def stop(self) -> None:
         self.scheduler.shutdown()
