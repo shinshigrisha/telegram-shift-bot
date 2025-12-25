@@ -1,4 +1,6 @@
+import json
 import logging
+from pathlib import Path
 from typing import Any
 
 from aiogram import Bot, Dispatcher
@@ -6,6 +8,27 @@ from aiogram.types import BotCommand
 from redis.asyncio import Redis
 
 from config.settings import settings
+
+# #region agent log
+DEBUG_LOG_PATH = Path("/Users/senya.miroshnichenko/Desktop/telegram-shift-bot/.cursor/debug.log")
+
+def debug_log(session_id: str, run_id: str, hypothesis_id: str, location: str, message: str, data: dict) -> None:
+    """Записать отладочный лог в NDJSON формате."""
+    try:
+        with open(DEBUG_LOG_PATH, "a", encoding="utf-8") as f:
+            log_entry = {
+                "sessionId": session_id,
+                "runId": run_id,
+                "hypothesisId": hypothesis_id,
+                "location": location,
+                "message": message,
+                "data": data,
+                "timestamp": 0,  # Синхронный контекст
+            }
+            f.write(json.dumps(log_entry, ensure_ascii=False) + "\n")
+    except Exception:  # noqa: BLE001
+        pass  # Игнорируем ошибки логирования
+# #endregion
 
 from src.middlewares.auth_middleware import AdminMiddleware
 from src.middlewares.rate_limit_middleware import RateLimitMiddleware
@@ -72,8 +95,8 @@ async def setup_bot(bot: Bot, dp: Dispatcher, redis: Redis) -> None:
     # Устанавливаем команды бота для автодополнения
     await set_bot_commands(bot)
 
-    # Инициализация планировщика
-    await init_scheduler(bot, dp)
+    # Инициализация планировщика перенесена в main() после проверки подключения
+    # чтобы не запускать планировщик, если бот не может подключиться к Telegram API
 
     logger.info("Настройка бота завершена")
 
@@ -86,7 +109,7 @@ async def setup_bot(bot: Bot, dp: Dispatcher, redis: Redis) -> None:
                 await dp.workflow_data["scheduler_service"].stop()  # type: ignore[index]
 
             if "redis" in dp.workflow_data:
-                await dp.workflow_data["redis"].close()  # type: ignore[index]
+                await dp.workflow_data["redis"].aclose()  # type: ignore[index]
         except Exception as e:
             logger.error("Ошибка при завершении работы: %s", e)
         
@@ -98,6 +121,7 @@ async def setup_bot(bot: Bot, dp: Dispatcher, redis: Redis) -> None:
 async def set_bot_commands(bot: Bot) -> None:
     """Установка команд бота для автодополнения и меню через слэш."""
     from aiogram.types import MenuButtonCommands
+    from aiogram.enums import BotCommandScopeType
     
     # Команды для всех пользователей
     user_commands = [
@@ -105,8 +129,8 @@ async def set_bot_commands(bot: Bot) -> None:
         BotCommand(command="help", description="❓ Справка по командам"),
     ]
     
-    # Команды для админов (только основные, остальное через админ-панель)
-    admin_commands = [
+    # Команды с админской командой (команда /admin защищена middleware)
+    all_commands = user_commands + [
         BotCommand(command="admin", description="👑 Админ-панель"),
     ]
     
@@ -117,24 +141,17 @@ async def set_bot_commands(bot: Bot) -> None:
         # Устанавливаем команды для русского языка
         await bot.set_my_commands(user_commands, language_code="ru")
         
-        # Устанавливаем команды для админов (если есть)
-        if settings.ADMIN_IDS:
-            from aiogram.enums import BotCommandScopeType
-            for admin_id in settings.ADMIN_IDS:
-                try:
-                    # Для дефолтного языка
-                    await bot.set_my_commands(
-                        user_commands + admin_commands,
-                        scope={"type": BotCommandScopeType.CHAT, "chat_id": admin_id}
-                    )
-                    # Для русского языка
-                    await bot.set_my_commands(
-                        user_commands + admin_commands,
-                        scope={"type": BotCommandScopeType.CHAT, "chat_id": admin_id},
-                        language_code="ru"
-                    )
-                except Exception as e:
-                    logger.warning("Не удалось установить команды для админа %s: %s", admin_id, e)
+        # Устанавливаем команды для всех приватных чатов (включая админскую команду)
+        # Команда /admin защищена middleware, поэтому обычные пользователи не смогут её использовать
+        await bot.set_my_commands(
+            all_commands,
+            scope={"type": BotCommandScopeType.ALL_PRIVATE_CHATS}
+        )
+        await bot.set_my_commands(
+            all_commands,
+            scope={"type": BotCommandScopeType.ALL_PRIVATE_CHATS},
+            language_code="ru"
+        )
         
         # Устанавливаем описание бота на русском языке
         try:
@@ -158,7 +175,12 @@ async def set_bot_commands(bot: Bot) -> None:
 
 
 async def init_scheduler(bot: Bot, dp: Dispatcher) -> None:
-    """Инициализация планировщика задач."""
+    """
+    Инициализация планировщика задач.
+    
+    ВАЖНО: Эта функция должна вызываться ПОСЛЕ успешной проверки подключения к Telegram API,
+    чтобы не запускать планировщик, если бот не может подключиться.
+    """
     try:
         from src.services.notification_service import NotificationService
         from src.services.scheduler_service import SchedulerService
