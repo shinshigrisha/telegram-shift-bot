@@ -4,7 +4,7 @@ import logging
 import asyncio
 
 from aiogram import Bot
-from aiogram.exceptions import TelegramBadRequest
+from aiogram.exceptions import TelegramBadRequest, TelegramNetworkError
 
 from src.models.daily_poll import DailyPoll
 from src.repositories.poll_repository import PollRepository
@@ -524,32 +524,64 @@ class PollService:
 
         # message_thread_id не поддерживается в stop_poll API
         poll_was_already_closed = False
-        try:
-            await self.bot.stop_poll(
-                chat_id=group.telegram_chat_id,
-                message_id=poll.telegram_message_id,
-            )
-        except TelegramBadRequest as poll_error:
-            # Если опрос уже закрыт или сообщение не найдено, просто обновляем статус в БД
-            error_msg = str(poll_error).lower()
-            if "not found" in error_msg or "already closed" in error_msg or "poll is not active" in error_msg:
-                logger.debug("Poll already closed or not found for %s (poll_id: %s), updating status in DB", group.name, poll.id)
-                poll_was_already_closed = True
-                # Не пробрасываем ошибку дальше - это нормальная ситуация при повторных попытках закрытия
-            else:
-                # Другие ошибки Telegram API пробрасываем дальше
-                logger.warning("TelegramBadRequest closing poll for %s: %s", group.name, poll_error)
-                raise
-        except Exception as poll_error:  # noqa: BLE001
-            # Обрабатываем другие типы ошибок
-            error_msg = str(poll_error).lower()
-            if "not found" in error_msg or "already closed" in error_msg or "poll is not active" in error_msg:
-                logger.debug("Poll already closed or not found for %s (poll_id: %s), updating status in DB", group.name, poll.id)
-                poll_was_already_closed = True
-            else:
-                # Другие ошибки пробрасываем дальше
-                logger.error("Unexpected error closing poll for %s: %s", group.name, poll_error)
-                raise
+        
+        # Повторные попытки при сетевых ошибках
+        max_retries = 3
+        retry_delay = 2.0
+        
+        for attempt in range(1, max_retries + 1):
+            try:
+                await self.bot.stop_poll(
+                    chat_id=group.telegram_chat_id,
+                    message_id=poll.telegram_message_id,
+                )
+                # Успешно закрыли опрос, выходим из цикла
+                break
+            except TelegramNetworkError as network_error:
+                # Сетевые ошибки - повторяем попытку
+                if attempt < max_retries:
+                    logger.warning(
+                        "Попытка %d/%d: Сетевая ошибка при закрытии опроса для %s: %s. "
+                        "Повторная попытка через %.1f секунд...",
+                        attempt,
+                        max_retries,
+                        group.name,
+                        str(network_error)[:100],
+                        retry_delay,
+                    )
+                    await asyncio.sleep(retry_delay)
+                else:
+                    # Последняя попытка не удалась - логируем и пробрасываем ошибку
+                    logger.error(
+                        "Не удалось закрыть опрос для %s после %d попыток из-за сетевой ошибки: %s",
+                        group.name,
+                        max_retries,
+                        str(network_error)[:200],
+                    )
+                    raise
+            except TelegramBadRequest as poll_error:
+                # Если опрос уже закрыт или сообщение не найдено, просто обновляем статус в БД
+                error_msg = str(poll_error).lower()
+                if "not found" in error_msg or "already closed" in error_msg or "poll is not active" in error_msg:
+                    logger.debug("Poll already closed or not found for %s (poll_id: %s), updating status in DB", group.name, poll.id)
+                    poll_was_already_closed = True
+                    # Не пробрасываем ошибку дальше - это нормальная ситуация при повторных попытках закрытия
+                    break
+                else:
+                    # Другие ошибки Telegram API пробрасываем дальше
+                    logger.warning("TelegramBadRequest closing poll for %s: %s", group.name, poll_error)
+                    raise
+            except Exception as poll_error:  # noqa: BLE001
+                # Обрабатываем другие типы ошибок
+                error_msg = str(poll_error).lower()
+                if "not found" in error_msg or "already closed" in error_msg or "poll is not active" in error_msg:
+                    logger.debug("Poll already closed or not found for %s (poll_id: %s), updating status in DB", group.name, poll.id)
+                    poll_was_already_closed = True
+                    break
+                else:
+                    # Другие ошибки пробрасываем дальше
+                    logger.error("Unexpected error closing poll for %s: %s", group.name, poll_error)
+                    raise
 
         # Обновляем статус в БД только если опрос еще не был закрыт
         if not poll_was_already_closed:
