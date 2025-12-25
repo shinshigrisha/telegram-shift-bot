@@ -78,10 +78,18 @@ async def main() -> None:
         signal.signal(signal.SIGTERM, signal_handler)  # Docker stop, systemd stop
 
         # Запускаем поллинг с поддержкой graceful shutdown
+        # Параметры поллинга:
+        # - handle_as_tasks=True: обработка обновлений в отдельных задачах для параллелизма
+        # - close_bot_session=True: автоматическое закрытие сессии при остановке
+        # - request_timeout: таймаут для запросов (по умолчанию 5 секунд)
+        # - allowed_updates: разрешенные типы обновлений (None = все)
+        logger.info("Запуск поллинга обновлений от Telegram API...")
         await dp_instance.start_polling(
             bot_instance,
             handle_as_tasks=True,
             close_bot_session=True,
+            # Увеличиваем таймаут для более устойчивой работы при сетевых проблемах
+            request_timeout=10.0,
         )
 
     except KeyboardInterrupt:
