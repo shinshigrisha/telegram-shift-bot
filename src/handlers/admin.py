@@ -402,7 +402,6 @@ async def cmd_create_polls(
             bot=bot,
             poll_repo=poll_repo,
             group_repo=group_repo,
-            screenshot_service=None,  # Можно добавить позже
         )
         
         await message.answer("⏳ Создание опросов...")

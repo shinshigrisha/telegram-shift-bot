@@ -153,3 +153,4 @@ def require_repositories(data: Dict[str, Any]) -> tuple[GroupRepository, PollRep
         UserRepository(session),
     )
 
+

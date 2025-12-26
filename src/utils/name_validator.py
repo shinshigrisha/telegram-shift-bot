@@ -95,3 +95,4 @@ def validate_single_name(name: str, field_name: str = "Имя") -> Tuple[bool, O
     
     return True, cleaned_name, None
 
+

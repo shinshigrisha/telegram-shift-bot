@@ -43,7 +43,6 @@ class DatabaseMiddleware(BaseMiddleware):
                         bot=bot,
                         poll_repo=poll_repo,
                         group_repo=group_repo,
-                        screenshot_service=None,
                     )
                 except Exception:
                     # Если не удалось создать PollService, продолжаем без него

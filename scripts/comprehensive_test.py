@@ -30,7 +30,6 @@ from src.repositories.group_repository import GroupRepository
 from src.repositories.poll_repository import PollRepository
 from src.services.group_service import GroupService
 from src.services.poll_service import PollService
-from src.services.screenshot_service import ScreenshotService
 from src.services.notification_service import NotificationService
 from src.services.scheduler_service import SchedulerService
 
@@ -63,7 +62,6 @@ class TestRunner:
         self.poll_repo = None
         self.group_service = None
         self.poll_service = None
-        self.screenshot_service = None
         self.notification_service = None
         self.test_group_id = None
 
@@ -84,17 +82,10 @@ class TestRunner:
         self.group_service = GroupService(self.session)
         
         # Инициализируем сервисы
-        self.screenshot_service = ScreenshotService()
-        try:
-            await self.screenshot_service.initialize()
-        except Exception as e:
-            logger.warning("Screenshot service не инициализирован: %s", e)
-        
         self.poll_service = PollService(
             bot=self.bot,
             poll_repo=self.poll_repo,
             group_repo=self.group_repo,
-            screenshot_service=self.screenshot_service,
         )
         
         self.notification_service = NotificationService(
@@ -106,9 +97,6 @@ class TestRunner:
     async def cleanup(self):
         """Очистка ресурсов."""
         logger.info("🧹 Очистка ресурсов...")
-        
-        if self.screenshot_service:
-            await self.screenshot_service.close()
         
         if self.session:
             await self.session.close()
@@ -405,30 +393,8 @@ class TestRunner:
                 )
                 await self.session.commit()
                 
-                # Пытаемся создать скриншот
-                if self.screenshot_service and self.screenshot_service.context:
-                    logger.info("📸 Создание скриншота результатов...")
-                    try:
-                        # Получаем текстовое представление результатов
-                        poll_results_text = await self.poll_service.get_poll_results_text(str(poll.id))
-                        screenshot_path = await self.screenshot_service.create_poll_screenshot(
-                            bot=self.bot,
-                            chat_id=group.telegram_chat_id,
-                            message_id=poll.telegram_message_id,
-                            group_name=group.name,
-                            poll_date=tomorrow,
-                            poll_results_text=poll_results_text,
-                        )
-                        if screenshot_path:
-                            logger.info(f"✅ Скриншот создан: {screenshot_path}")
-                            await self.poll_repo.update(
-                                poll.id,
-                                screenshot_path=str(screenshot_path),
-                            )
-                            await self.session.commit()
-                        else:
-                            logger.warning("⚠️  Скриншот не создан, используется текстовый отчет")
-                    except Exception as e:
+                # Скриншоты отключены - используем только текстовые отчеты
+                try:
                         logger.warning(f"⚠️  Ошибка при создании скриншота: {e}")
                 
                 logger.info("✅ Опрос закрыт успешно")

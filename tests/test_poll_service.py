@@ -14,9 +14,8 @@ async def test_create_daily_polls_no_existing_poll():
     mock_bot = AsyncMock()
     mock_poll_repo = AsyncMock()
     mock_group_repo = AsyncMock()
-    mock_screenshot_service = AsyncMock()
 
-    service = PollService(mock_bot, mock_poll_repo, mock_group_repo, mock_screenshot_service)
+    service = PollService(mock_bot, mock_poll_repo, mock_group_repo)
 
     # Настройка моков
     mock_group = MagicMock()
@@ -60,9 +59,8 @@ async def test_create_daily_polls_existing_active_poll():
     mock_bot = AsyncMock()
     mock_poll_repo = AsyncMock()
     mock_group_repo = AsyncMock()
-    mock_screenshot_service = AsyncMock()
 
-    service = PollService(mock_bot, mock_poll_repo, mock_group_repo, mock_screenshot_service)
+    service = PollService(mock_bot, mock_poll_repo, mock_group_repo)
 
     mock_group = MagicMock()
     mock_group.id = 1
@@ -89,9 +87,8 @@ async def test_create_daily_polls_force_mode():
     mock_bot = AsyncMock()
     mock_poll_repo = AsyncMock()
     mock_group_repo = AsyncMock()
-    mock_screenshot_service = AsyncMock()
 
-    service = PollService(mock_bot, mock_poll_repo, mock_group_repo, mock_screenshot_service)
+    service = PollService(mock_bot, mock_poll_repo, mock_group_repo)
 
     mock_group = MagicMock()
     mock_group.id = 1
@@ -153,9 +150,8 @@ async def test_create_daily_polls_closed_poll_deleted():
     mock_bot = AsyncMock()
     mock_poll_repo = AsyncMock()
     mock_group_repo = AsyncMock()
-    mock_screenshot_service = AsyncMock()
 
-    service = PollService(mock_bot, mock_poll_repo, mock_group_repo, mock_screenshot_service)
+    service = PollService(mock_bot, mock_poll_repo, mock_group_repo)
 
     mock_group = MagicMock()
     mock_group.id = 1
@@ -203,11 +199,8 @@ async def test_close_expired_polls():
     mock_bot = AsyncMock()
     mock_poll_repo = AsyncMock()
     mock_group_repo = AsyncMock()
-    mock_screenshot_service = AsyncMock()
-    # Мок для screenshot - возвращает путь к файлу
-    mock_screenshot_service.create_poll_screenshot = AsyncMock(return_value="/path/to/screenshot.png")
 
-    service = PollService(mock_bot, mock_poll_repo, mock_group_repo, mock_screenshot_service)
+    service = PollService(mock_bot, mock_poll_repo, mock_group_repo)
 
     # Мок группы с временем закрытия опросов (19:00)
     mock_group = MagicMock()

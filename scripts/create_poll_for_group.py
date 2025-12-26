@@ -16,7 +16,6 @@ from src.models.database import AsyncSessionLocal
 from src.repositories.group_repository import GroupRepository
 from src.repositories.poll_repository import PollRepository
 from src.services.poll_service import PollService
-from src.services.screenshot_service import ScreenshotService
 
 # Импортируем все модели для правильной инициализации SQLAlchemy
 from src.models.group import Group  # noqa: F401
@@ -75,13 +74,10 @@ async def create_poll_for_group(group_name: str, poll_date: date | None = None):
                 print(f"✓ Настроено слотов: {len(slots)}")
             
             # Создаем сервис опросов
-            # ScreenshotService можно передать None, если скриншоты не нужны
-            screenshot_service = None  # Можно использовать ScreenshotService() если нужны скриншоты
             poll_service = PollService(
                 bot=bot,
                 poll_repo=poll_repo,
                 group_repo=group_repo,
-                screenshot_service=screenshot_service,
             )
             
             print(f"⏳ Создание опроса...")

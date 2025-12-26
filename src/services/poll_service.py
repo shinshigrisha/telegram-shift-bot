@@ -9,7 +9,6 @@ from aiogram.exceptions import TelegramBadRequest, TelegramNetworkError
 from src.models.daily_poll import DailyPoll
 from src.repositories.poll_repository import PollRepository
 from src.repositories.group_repository import GroupRepository
-from src.services.screenshot_service import ScreenshotService
 from src.utils.auth import is_curator
 from config.settings import settings
 
@@ -23,12 +22,10 @@ class PollService:
         bot: Bot,
         poll_repo: PollRepository,
         group_repo: GroupRepository,
-        screenshot_service: Optional[ScreenshotService] = None,
     ) -> None:
         self.bot = bot
         self.poll_repo = poll_repo
         self.group_repo = group_repo
-        self.screenshot_service = screenshot_service
 
     async def create_daily_polls(self, retry_failed: bool = False, force: bool = False) -> Tuple[int, List[str]]:
         """

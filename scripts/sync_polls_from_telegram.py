@@ -18,7 +18,6 @@ from src.models.database import AsyncSessionLocal
 from src.repositories.group_repository import GroupRepository
 from src.repositories.poll_repository import PollRepository
 from src.services.poll_service import PollService
-from src.services.screenshot_service import ScreenshotService
 
 logging.basicConfig(
     level=logging.INFO,
@@ -43,15 +42,6 @@ async def sync_polls_from_telegram(poll_date: date | None = None) -> None:
     bot = Bot(token=settings.BOT_TOKEN)
     
     try:
-        # Инициализируем сервис скриншотов
-        screenshot_service = ScreenshotService()
-        try:
-            await screenshot_service.initialize()
-            logger.info("Сервис скриншотов инициализирован")
-        except Exception as e:
-            logger.warning("Не удалось инициализировать сервис скриншотов: %s", e)
-            screenshot_service = None
-        
         async with AsyncSessionLocal() as session:
             group_repo = GroupRepository(session)
             poll_repo = PollRepository(session)
@@ -60,7 +50,6 @@ async def sync_polls_from_telegram(poll_date: date | None = None) -> None:
                 bot=bot,
                 poll_repo=poll_repo,
                 group_repo=group_repo,
-                screenshot_service=screenshot_service,
             )
             
             # Получаем все активные группы
@@ -109,8 +98,6 @@ async def sync_polls_from_telegram(poll_date: date | None = None) -> None:
             logger.info("=" * 80)
             
     finally:
-        if screenshot_service:
-            await screenshot_service.close()
         await bot.session.close()
 
 

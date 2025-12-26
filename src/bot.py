@@ -1,39 +1,14 @@
-import json
 import logging
-from pathlib import Path
 from typing import Any
 
 from aiogram import Bot, Dispatcher
-from aiogram.types import BotCommand
 from redis.asyncio import Redis
 
 from config.settings import settings
 
-# #region agent log
-DEBUG_LOG_PATH = Path("/Users/senya.miroshnichenko/Desktop/telegram-shift-bot/.cursor/debug.log")
-
-def debug_log(session_id: str, run_id: str, hypothesis_id: str, location: str, message: str, data: dict) -> None:
-    """Записать отладочный лог в NDJSON формате."""
-    try:
-        with open(DEBUG_LOG_PATH, "a", encoding="utf-8") as f:
-            log_entry = {
-                "sessionId": session_id,
-                "runId": run_id,
-                "hypothesisId": hypothesis_id,
-                "location": location,
-                "message": message,
-                "data": data,
-                "timestamp": 0,  # Синхронный контекст
-            }
-            f.write(json.dumps(log_entry, ensure_ascii=False) + "\n")
-    except Exception:  # noqa: BLE001
-        pass  # Игнорируем ошибки логирования
-# #endregion
-
 from src.middlewares.auth_middleware import AdminMiddleware
 from src.middlewares.rate_limit_middleware import RateLimitMiddleware
 from src.middlewares.database_middleware import DatabaseMiddleware
-from src.middlewares.verification_middleware import VerificationMiddleware
 from src.middlewares.message_cleanup_middleware import MessageCleanupMiddleware
 
 from src.handlers import (
@@ -89,7 +64,6 @@ async def setup_bot(bot: Bot, dp: Dispatcher, redis: Redis) -> None:
     dp.include_router(setup_handlers.router)
     dp.include_router(report_handlers.router)
     dp.include_router(monitoring_handlers.router)
-    # Обработка скриншотов отключена
     dp.include_router(user_handlers.router)
 
     # Устанавливаем команды бота для автодополнения
@@ -120,7 +94,7 @@ async def setup_bot(bot: Bot, dp: Dispatcher, redis: Redis) -> None:
 
 async def set_bot_commands(bot: Bot) -> None:
     """Установка команд бота для автодополнения и меню через слэш."""
-    from aiogram.types import MenuButtonCommands
+    from aiogram.types import BotCommand, MenuButtonCommands
     from aiogram.enums import BotCommandScopeType
     
     # Команды для всех пользователей

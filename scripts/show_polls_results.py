@@ -39,7 +39,6 @@ async def show_polls_results():
                 bot=bot,
                 poll_repo=poll_repo,
                 group_repo=group_repo,
-                screenshot_service=None,
             )
             
             from datetime import timedelta

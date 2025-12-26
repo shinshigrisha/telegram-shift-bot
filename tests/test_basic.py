@@ -11,9 +11,8 @@ async def test_poll_creation():
     mock_bot = AsyncMock()
     mock_poll_repo = AsyncMock()
     mock_group_repo = AsyncMock()
-    mock_screenshot_service = AsyncMock()
 
-    service = PollService(mock_bot, mock_poll_repo, mock_group_repo, mock_screenshot_service)
+    service = PollService(mock_bot, mock_poll_repo, mock_group_repo)
 
     mock_group = MagicMock()
     mock_group.id = 1

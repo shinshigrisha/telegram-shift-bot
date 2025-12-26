@@ -7,14 +7,15 @@
 from . import admin_panel_navigation  # noqa: F401
 from . import admin_panel_monitoring  # noqa: F401
 from . import admin_panel_groups  # noqa: F401
-from . import admin_panel_slots  # noqa: F401
-from . import admin_panel_schedule  # noqa: F401
-from . import admin_panel_topics  # noqa: F401
-from . import admin_panel_polls  # noqa: F401
-from . import admin_panel_verification  # noqa: F401
-from . import admin_panel_vote_restore  # noqa: F401
-from . import admin_panel_users  # noqa: F401
-from . import admin_panel_broadcast  # noqa: F401
+# TODO: Добавить остальные модули после их создания
+# from . import admin_panel_slots
+# from . import admin_panel_schedule
+# from . import admin_panel_topics
+# from . import admin_panel_polls
+# from . import admin_panel_verification
+# from . import admin_panel_vote_restore
+# from . import admin_panel_users
+# from . import admin_panel_broadcast
 
 from aiogram import Router
 
@@ -25,14 +26,7 @@ router = Router()
 router.include_router(admin_panel_navigation.router)
 router.include_router(admin_panel_monitoring.router)
 router.include_router(admin_panel_groups.router)
-router.include_router(admin_panel_slots.router)
-router.include_router(admin_panel_schedule.router)
-router.include_router(admin_panel_topics.router)
-router.include_router(admin_panel_polls.router)
-router.include_router(admin_panel_verification.router)
-router.include_router(admin_panel_vote_restore.router)
-router.include_router(admin_panel_users.router)
-router.include_router(admin_panel_broadcast.router)
+# TODO: Добавить остальные routers после создания модулей
 # router.include_router(admin_panel_slots.router)
 # router.include_router(admin_panel_schedule.router)
 # router.include_router(admin_panel_topics.router)

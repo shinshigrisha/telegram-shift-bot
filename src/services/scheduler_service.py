@@ -26,6 +26,7 @@ class SchedulerService:
         self.bot = bot
         self.poll_service = poll_service
         self.notification_service = notification_service
+        self._startup_tasks: list = []  # Для отслеживания задач запуска
 
     async def start(self) -> None:
         """Запуск планировщика."""
@@ -95,11 +96,23 @@ class SchedulerService:
         # Проверяем и закрываем опросы при старте, если время закрытия уже прошло
         # Это нужно на случай, если бот был перезапущен после времени закрытия
         import asyncio
-        asyncio.create_task(self._check_and_close_polls_on_startup())
+        try:
+            task1 = asyncio.create_task(self._check_and_close_polls_on_startup())
+            self._startup_tasks.append(task1)
+            # Добавляем обработку ошибок для задачи
+            task1.add_done_callback(lambda t: logger.error("Startup task failed: %s", t.exception()) if t.exception() else None)
+        except Exception as e:
+            logger.error("Failed to create startup task for closing polls: %s", e, exc_info=True)
         
         # Проверяем и создаем опросы при старте, если время создания уже прошло
         # Это нужно на случай, если бот был перезапущен после времени создания
-        asyncio.create_task(self._check_and_create_polls_on_startup())
+        try:
+            task2 = asyncio.create_task(self._check_and_create_polls_on_startup())
+            self._startup_tasks.append(task2)
+            # Добавляем обработку ошибок для задачи
+            task2.add_done_callback(lambda t: logger.error("Startup task failed: %s", t.exception()) if t.exception() else None)
+        except Exception as e:
+            logger.error("Failed to create startup task for creating polls: %s", e, exc_info=True)
 
     async def _create_polls_job(self) -> None:
         logger.info("Running create_polls job")
@@ -117,7 +130,6 @@ class SchedulerService:
                     bot=self.bot,
                     poll_repo=poll_repo,
                     group_repo=group_repo,
-                    screenshot_service=None,
                 )
                 
                 created, errors = await poll_service.create_daily_polls(retry_failed=True)
@@ -159,7 +171,6 @@ class SchedulerService:
                     bot=self.bot,
                     poll_repo=poll_repo,
                     group_repo=group_repo,
-                    screenshot_service=None,
                 )
                 
                 closed = await poll_service.close_expired_polls()
@@ -381,7 +392,6 @@ class SchedulerService:
                         bot=self.bot,
                         poll_repo=poll_repo,
                         group_repo=group_repo,
-                        screenshot_service=None,
                     )
                     
                     closed = await poll_service.close_expired_polls()
@@ -463,7 +473,6 @@ class SchedulerService:
                             bot=self.bot,
                             poll_repo=poll_repo,
                             group_repo=group_repo,
-                            screenshot_service=None,
                         )
                         
                         created, errors = await poll_service.create_daily_polls(retry_failed=True)
@@ -495,7 +504,16 @@ class SchedulerService:
             logger.error("Error checking polls creation on startup: %s", e, exc_info=True)
 
     async def stop(self) -> None:
-        self.scheduler.shutdown()
-        logger.info("Scheduler stopped")
+        """Остановка планировщика."""
+        try:
+            # Проверяем, запущен ли планировщик перед остановкой
+            if self.scheduler.running:
+                self.scheduler.shutdown(wait=False)
+                logger.info("Scheduler stopped")
+            else:
+                logger.debug("Scheduler already stopped")
+        except Exception as e:  # noqa: BLE001
+            # Обрабатываем любые ошибки при остановке (например, SchedulerNotRunningError)
+            logger.warning("Error stopping scheduler (may already be stopped): %s", e)
 
 

@@ -3,9 +3,6 @@ import pytest
 from unittest.mock import AsyncMock, MagicMock, patch
 import sys
 
-# Мокируем playwright до импорта модулей, которые его используют
-sys.modules['playwright'] = MagicMock()
-sys.modules['playwright.async_api'] = MagicMock()
 
 # Мокируем создание engine БД для тестов (до импорта database)
 _patched_engine = patch('sqlalchemy.ext.asyncio.create_async_engine', return_value=MagicMock())
@@ -43,15 +40,6 @@ def mock_group_repo():
 def mock_user_repo():
     """Фикстура для мока UserRepository."""
     return AsyncMock()
-
-
-@pytest.fixture
-def mock_screenshot_service():
-    """Фикстура для мока ScreenshotService."""
-    mock_service = AsyncMock()
-    mock_service.create_poll_screenshot = AsyncMock(return_value="/path/to/screenshot.png")
-    mock_service.initialize = AsyncMock()
-    return mock_service
 
 
 @pytest.fixture(autouse=True)

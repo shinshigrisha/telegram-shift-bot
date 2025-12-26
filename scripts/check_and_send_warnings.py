@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Скрипт для проверки незаполненных слотов и отправки замечаний со скриншотами.
+Скрипт для проверки незаполненных слотов и отправки замечаний.
 """
 import asyncio
 import logging
@@ -19,7 +19,6 @@ from src.models.database import AsyncSessionLocal
 from src.repositories.group_repository import GroupRepository
 from src.repositories.poll_repository import PollRepository
 from src.services.poll_service import PollService
-from src.services.screenshot_service import ScreenshotService
 
 logging.basicConfig(
     level=logging.INFO,
@@ -29,7 +28,7 @@ logger = logging.getLogger(__name__)
 
 
 async def check_and_send_warnings():
-    """Проверить все группы и отправить замечания со скриншотами."""
+    """Проверить все группы и отправить замечания о незаполненных слотах."""
     try:
         logger.info("Запуск проверки незаполненных слотов...")
         
@@ -39,15 +38,6 @@ async def check_and_send_warnings():
             parse_mode=ParseMode.HTML,
         )
         
-        # Инициализируем сервис скриншотов
-        screenshot_service = ScreenshotService()
-        try:
-            await screenshot_service.initialize()
-            logger.info("Сервис скриншотов инициализирован")
-        except Exception as e:
-            logger.warning("Не удалось инициализировать сервис скриншотов: %s", e)
-            screenshot_service = None
-        
         async with AsyncSessionLocal() as session:
             group_repo = GroupRepository(session)
             poll_repo = PollRepository(session)
@@ -56,7 +46,6 @@ async def check_and_send_warnings():
                 bot=bot,
                 poll_repo=poll_repo,
                 group_repo=group_repo,
-                screenshot_service=screenshot_service,
             )
             
             # Получаем все активные группы
@@ -92,28 +81,6 @@ async def check_and_send_warnings():
                     logger.info("  Найдены проблемы в группе %s:", group.name)
                     logger.info("    Незаполненных слотов: %d", len(underfilled_slots))
                     logger.info("    Неотметившихся: %d", len(non_voters))
-                    
-                    # Создаем скриншот
-                    screenshot_path = None
-                    if screenshot_service and screenshot_service.context:
-                        try:
-                            poll_with_data = await poll_repo.get_poll_with_votes_and_users(str(poll.id))
-                            poll_slots_data = []
-                            if poll_with_data and hasattr(poll_with_data, 'poll_slots'):
-                                for slot in poll_with_data.poll_slots:
-                                    poll_slots_data.append({'slot': slot})
-                            
-                            screenshot_path = await screenshot_service.create_poll_screenshot(
-                                bot=bot,
-                                chat_id=group.telegram_chat_id,
-                                message_id=poll.telegram_message_id,
-                                group_name=group.name,
-                                poll_date=today,
-                                poll_slots_data=poll_slots_data,
-                            )
-                            logger.info("  Скриншот создан: %s", screenshot_path)
-                        except Exception as e:
-                            logger.error("  Ошибка при создании скриншота: %s", e)
                     
                     # Формируем сообщение с замечаниями
                     warning_parts = [
@@ -173,26 +140,14 @@ async def check_and_send_warnings():
                         try:
                             general_topic_id = getattr(target_group, "general_chat_topic_id")
                             
-                            # Отправляем скриншот, если есть
-                            if screenshot_path and screenshot_path.exists():
-                                from aiogram.types import FSInputFile
-                                photo = FSInputFile(str(screenshot_path))
-                                await bot.send_photo(
-                                    chat_id=target_group.telegram_chat_id,
-                                    photo=photo,
-                                    caption=warning_message,
-                                    message_thread_id=general_topic_id,
-                                )
-                                logger.info("  Отправлено замечание со скриншотом в группу %s", target_group.name)
-                            else:
-                                # Отправляем только текст
-                                await bot.send_message(
-                                    chat_id=target_group.telegram_chat_id,
-                                    text=warning_message,
-                                    message_thread_id=general_topic_id,
-                                    parse_mode="HTML",  # Включаем HTML для тэгания через user_id
-                                )
-                                logger.info("  Отправлено замечание (без скриншота) в группу %s", target_group.name)
+                            # Отправляем замечание
+                            await bot.send_message(
+                                chat_id=target_group.telegram_chat_id,
+                                text=warning_message,
+                                message_thread_id=general_topic_id,
+                                parse_mode="HTML",  # Включаем HTML для тэгания через user_id
+                            )
+                            logger.info("  Отправлено замечание в группу %s", target_group.name)
                             
                             warnings_sent += 1
                         except Exception as e:
@@ -208,8 +163,6 @@ async def check_and_send_warnings():
     except Exception as e:
         logger.error("Ошибка при проверке: %s", e, exc_info=True)
     finally:
-        if screenshot_service:
-            await screenshot_service.close()
         await bot.session.close()
 
 
