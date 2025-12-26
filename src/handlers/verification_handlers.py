@@ -526,15 +526,15 @@ if HAS_VERIFICATION_STATES:
                     failed_count,
                     skipped_count
                 )
-                        
-                        if restored_count == 0 and failed_count == 0:
-                            logger.warning(
-                                "⚠️ No permissions were restored for user %s. Possible reasons: "
-                                "1. User is not a member of any active groups in DB, "
-                                "2. All groups were skipped due to membership check failures, "
-                                "3. No active groups found in DB",
-                                user_id
-                            )
+                
+                if restored_count == 0 and failed_count == 0:
+                    logger.warning(
+                        "⚠️ No permissions were restored for user %s. Possible reasons: "
+                        "1. User is not a member of any active groups in DB, "
+                        "2. All groups were skipped due to membership check failures, "
+                        "3. No active groups found in DB",
+                        user_id
+                    )
             except Exception as e:
                 logger.error(
                     "Error restoring permissions for user %s: %s",
