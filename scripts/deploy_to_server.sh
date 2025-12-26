@@ -14,7 +14,7 @@ RED='\033[0;31m'
 NC='\033[0m' # No Color
 
 # Параметры сервера (замените на свои)
-SERVER_IP="<IP_АДРЕС_СЕРВЕРА>"
+SERVER_IP="<IP_АДРЕС_СЕРВЕРА>"  # Замените на IP-адрес вашего сервера
 SERVER_USER="root"  # или ваш пользователь
 SERVER_PATH="/opt/telegram-shift-bot"
 
