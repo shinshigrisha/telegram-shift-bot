@@ -27,6 +27,7 @@ router = Router()
 @router.message(Command("start"))
 async def cmd_start(
     message: Message,
+    command: CommandObject,
     state: Optional[FSMContext] = None,
     user_service: Optional[UserService] = None,
 ) -> None:
@@ -83,51 +84,72 @@ async def cmd_start(
     user_is_curator = is_curator(user)
     
     # Проверяем верификацию (только если включена и пользователь не куратор)
+    logger.info(
+        "User %s called /start. ENABLE_VERIFICATION=%s, is_curator=%s, has_user_service=%s, has_state=%s",
+        user_id,
+        settings.ENABLE_VERIFICATION,
+        user_is_curator,
+        user_service is not None,
+        state is not None
+    )
+    
     if settings.ENABLE_VERIFICATION and not user_is_curator and user_service and state:
         is_verified = await user_service.is_verified(user_id)
         
+        # Проверяем параметр команды /start (например, /start verify)
+        # В aiogram 3.x command.args - это строка или None
+        start_param = None
+        if command:
+            try:
+                start_param = command.args  # Это строка, например "verify"
+            except AttributeError:
+                # Если args нет, пытаемся получить из текста сообщения
+                if message.text:
+                    parts = message.text.split(maxsplit=1)
+                    if len(parts) > 1:
+                        start_param = parts[1]
+        
+        logger.info(
+            "User %s called /start with param: '%s', is_verified: %s",
+            user_id,
+            start_param,
+            is_verified
+        )
+        
+        # Если не верифицирован, всегда запускаем процесс верификации
         if not is_verified:
+            logger.info("Starting verification process for user %s", user_id)
             # Если не верифицирован, запускаем процесс верификации
             current_state = await state.get_state()
             if current_state != VerificationStates.waiting_for_full_name:
                 await state.set_state(VerificationStates.waiting_for_full_name)
-                # Отправляем сообщение в приватный чат пользователя
-                from aiogram import Bot
-                bot = Bot.get_current()
-                if not bot:
-                    # Пытаемся получить bot из data
-                    bot = message.bot if hasattr(message, 'bot') else None
                 
-                if bot:
+                # Отправляем приветственное сообщение с просьбой ввести фамилию и имя
+                try:
+                    welcome_text = (
+                        "👋 <b>Добро пожаловать!</b>\n\n"
+                        f"Привет, {user.full_name}!\n\n"
+                        "Для участия в опросах необходимо пройти верификацию.\n\n"
+                        "📝 <b>Пожалуйста, введите ваши Фамилию и Имя через пробел:</b>\n"
+                        "Формат: <b>Фамилия Имя</b>\n"
+                        "Пример: <code>Иванов Иван</code>\n\n"
+                        "Для отмены введите: <code>отмена</code>"
+                    )
+                    
+                    verification_message = await message.answer(welcome_text)
+                    # Сохраняем ID сообщения для удаления
+                    await state.update_data(verification_bot_message_id=verification_message.message_id)
+                except Exception as e:
+                    logger.error("Error sending verification message to user %s: %s", user_id, e, exc_info=True)
+                    # Если не удалось отправить, пытаемся отправить простое сообщение
                     try:
-                        verification_message = await bot.send_message(
-                            chat_id=user_id,
-                            text=(
-                                "👋 <b>Добро пожаловать!</b>\n\n"
-                                "Для участия в опросах необходимо пройти верификацию.\n\n"
-                                "Пожалуйста, введите ваши <b>Фамилию и Имя</b> через пробел:\n"
-                                "Формат: <b>Фамилия Имя</b>\n"
-                                "Пример: <code>Иванов Иван</code>\n\n"
-                                "Для отмены введите: <code>отмена</code>"
-                            ),
-                        )
-                        # Сохраняем ID сообщения для удаления
-                        await state.update_data(verification_bot_message_id=verification_message.message_id)
-                    except Exception as e:
-                        logger.error("Error sending verification message to user %s: %s", user_id, e)
-                        # Если не удалось отправить в приватный чат, отправляем в текущий чат
                         await message.answer(
                             "👋 <b>Добро пожаловать!</b>\n\n"
                             "Для участия в опросах необходимо пройти верификацию.\n\n"
-                            "Пожалуйста, напишите боту в личные сообщения и введите ваши <b>Фамилию и Имя</b>."
+                            "Пожалуйста, введите ваши <b>Фамилию и Имя</b> через пробел."
                         )
-                else:
-                    # Если bot недоступен, отправляем в текущий чат
-                    await message.answer(
-                        "👋 <b>Добро пожаловать!</b>\n\n"
-                        "Для участия в опросах необходимо пройти верификацию.\n\n"
-                        "Пожалуйста, напишите боту в личные сообщения и введите ваши <b>Фамилию и Имя</b>."
-                    )
+                    except Exception:
+                        logger.error("Failed to send fallback verification message to user %s", user_id)
                 return
     
     # Если верифицирован, показываем обычное приветствие

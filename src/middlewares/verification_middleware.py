@@ -1,8 +1,9 @@
 import logging
 from typing import Any, Awaitable, Callable, Dict, Optional
 
-from aiogram import BaseMiddleware
-from aiogram.types import Message, TelegramObject
+from aiogram import BaseMiddleware, Bot
+from aiogram.types import Message, TelegramObject, InlineKeyboardMarkup, InlineKeyboardButton
+from aiogram.enums import ChatType
 
 from config.settings import settings
 from src.services.user_service import UserService
@@ -37,21 +38,6 @@ class VerificationMiddleware(BaseMiddleware):
         if event.text and event.text.startswith("/start"):
             return await handler(event, data)
         
-        # Для команды /help проверяем верификацию
-        if event.text and event.text.startswith("/help"):
-            # Проверяем верификацию, но не блокируем
-            user_service: Optional[UserService] = data.get("user_service")
-            if user_service:
-                user_id = event.from_user.id
-                is_verified = await user_service.is_verified(user_id)
-                if not is_verified:
-                    await event.answer(
-                        "❌ Для использования бота необходимо пройти верификацию.\n\n"
-                        "Пожалуйста, используйте команду /start для начала работы."
-                    )
-                    return
-            return await handler(event, data)
-
         # Получаем user_service из data (должен быть добавлен DatabaseMiddleware)
         user_service: UserService | None = data.get("user_service")
         if not user_service:
@@ -62,7 +48,7 @@ class VerificationMiddleware(BaseMiddleware):
         # Проверяем верификацию
         is_verified = await user_service.is_verified(user_id)
 
-        # Если пользователь не верифицирован, запускаем процесс верификации
+        # Если пользователь не верифицирован
         if not is_verified:
             # Создаем или получаем пользователя
             await user_service.get_or_create_user(
@@ -72,6 +58,60 @@ class VerificationMiddleware(BaseMiddleware):
                 username=event.from_user.username,
             )
 
+            # Проверяем, является ли сообщение из группы (не из приватного чата)
+            is_group_chat = event.chat.type in (ChatType.GROUP, ChatType.SUPERGROUP)
+            
+            if is_group_chat:
+                # Пользователь не может писать (права ограничены), но на всякий случай блокируем обработку
+                # Если права не были ограничены, пытаемся ограничить их сейчас
+                bot: Bot = data.get("bot")
+                if not bot:
+                    bot = Bot.get_current(no_error=True)
+                
+                if bot:
+                    try:
+                        # Пытаемся ограничить права, если они еще не ограничены
+                        try:
+                            from aiogram.types import ChatPermissions
+                            await bot.restrict_chat_member(
+                                chat_id=event.chat.id,
+                                user_id=user_id,
+                                permissions=ChatPermissions(
+                                    can_send_messages=False,
+                                    can_send_media_messages=False,
+                                    can_send_polls=False,
+                                    can_send_other_messages=False,
+                                    can_add_web_page_previews=False,
+                                ),
+                            )
+                            logger.debug(
+                                "Restricted unverified user %s in chat %s (fallback)",
+                                user_id,
+                                event.chat.id
+                            )
+                        except Exception as restrict_error:
+                            # Если не удалось ограничить (нет прав или уже ограничен), продолжаем
+                            logger.debug(
+                                "Could not restrict unverified user %s: %s",
+                                user_id,
+                                restrict_error
+                            )
+                    except Exception as e:
+                        logger.error("Error handling unverified user in group: %s", e, exc_info=True)
+                
+                # Блокируем обработку сообщения (даже если права не удалось ограничить)
+                return
+            
+            # Для приватных чатов - проверяем команды
+            # Для команды /help показываем сообщение о необходимости верификации
+            if event.text and event.text.startswith("/help"):
+                await event.answer(
+                    "❌ Для использования бота необходимо пройти верификацию.\n\n"
+                    "Пожалуйста, используйте команду /start для начала работы."
+                )
+                return
+            
+            # Для других сообщений в приватном чате - запускаем процесс верификации
             # Получаем FSM context
             from aiogram.fsm.context import FSMContext
             state: FSMContext = data.get("state")
@@ -85,7 +125,6 @@ class VerificationMiddleware(BaseMiddleware):
                 # Запускаем процесс верификации
                 await state.set_state(VerificationStates.waiting_for_full_name)
                 # Отправляем сообщение в приватный чат пользователя
-                from aiogram import Bot
                 bot: Bot = data.get("bot")
                 if not bot:
                     bot = Bot.get_current(no_error=True)

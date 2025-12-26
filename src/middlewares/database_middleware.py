@@ -51,6 +51,17 @@ class DatabaseMiddleware(BaseMiddleware):
             # Убеждаемся, что bot в data для использования в хэндлерах
             if bot:
                 data["bot"] = bot
+            
+            # Получаем redis из dispatcher для использования в хэндлерах
+            try:
+                from aiogram import Bot
+                bot_instance = Bot.get_current(no_error=True)
+                if bot_instance and hasattr(bot_instance, '_dispatcher'):
+                    dispatcher = bot_instance._dispatcher
+                    if dispatcher and "redis" in dispatcher:
+                        data["redis"] = dispatcher["redis"]
+            except Exception:
+                pass
 
             data["db_session"] = session
             data["group_repo"] = group_repo

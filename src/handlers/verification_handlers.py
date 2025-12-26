@@ -176,6 +176,13 @@ if HAS_VERIFICATION_STATES:
             await delete_message_safe(bot, user_id, previous_bot_message_id)
         
         # Верифицируем пользователя
+        logger.info(
+            "Verifying user %s with name: %s %s",
+            user_id,
+            last_name,
+            first_name
+        )
+        
         user = await user_service.verify_user(
             user_id=user_id,
             first_name=first_name,
@@ -183,6 +190,182 @@ if HAS_VERIFICATION_STATES:
         )
         
         if user:
+            logger.info(
+                "User %s verified successfully. is_verified=%s",
+                user_id,
+                user.is_verified
+            )
+            
+            # Удаляем приветственные сообщения с кнопкой "Старт" из всех групп
+            try:
+                from redis.asyncio import Redis
+                import json
+                
+                # Пытаемся получить Redis
+                redis: Redis = None
+                
+                # Пытаемся получить через state.storage (если это RedisStorage)
+                if state:
+                    try:
+                        storage = state.storage
+                        if hasattr(storage, 'redis'):
+                            redis = storage.redis
+                    except Exception:
+                        pass
+                
+                # Если не получили через state, пытаемся через Bot.get_current()
+                if not redis:
+                    try:
+                        from aiogram import Bot
+                        bot_instance = Bot.get_current(no_error=True)
+                        if bot_instance and hasattr(bot_instance, '_dispatcher'):
+                            dispatcher = bot_instance._dispatcher
+                            if dispatcher and "redis" in dispatcher:
+                                redis = dispatcher["redis"]
+                    except Exception as redis_get_error:
+                        logger.debug("Could not get redis: %s", redis_get_error)
+                
+                if redis:
+                    # Ищем все ключи welcome_message для этого пользователя
+                    pattern = f"welcome_message:{user_id}:*"
+                    deleted_count = 0
+                    
+                    async for key in redis.scan_iter(match=pattern):
+                        try:
+                            message_data_str = await redis.get(key)
+                            if message_data_str:
+                                message_data = json.loads(message_data_str)
+                                msg_id = message_data.get("message_id")
+                                chat_id = message_data.get("chat_id")
+                                topic_id = message_data.get("topic_id")
+                                
+                                if msg_id and chat_id:
+                                    try:
+                                        await bot.delete_message(
+                                            chat_id=chat_id,
+                                            message_id=msg_id,
+                                            message_thread_id=topic_id,
+                                        )
+                                        deleted_count += 1
+                                        logger.info(
+                                            "✅ Deleted welcome message %s from chat %s (topic_id: %s)",
+                                            msg_id,
+                                            chat_id,
+                                            topic_id
+                                        )
+                                    except Exception as delete_error:
+                                        logger.debug(
+                                            "Could not delete welcome message %s from chat %s: %s",
+                                            msg_id,
+                                            chat_id,
+                                            delete_error
+                                        )
+                            
+                            # Удаляем ключ из Redis
+                            await redis.delete(key)
+                        except Exception as key_error:
+                            logger.warning("Error processing welcome message key %s: %s", key, key_error)
+                    
+                    if deleted_count > 0:
+                        logger.info(
+                            "Deleted %d welcome messages for user %s",
+                            deleted_count,
+                            user_id
+                        )
+                else:
+                    logger.warning("Redis not available, cannot delete welcome messages")
+            except Exception as cleanup_error:
+                logger.error(
+                    "Error deleting welcome messages for user %s: %s",
+                    user_id,
+                    cleanup_error,
+                    exc_info=True
+                )
+            
+            logger.info("User %s verified successfully, restoring permissions", user_id)
+            
+            # Восстанавливаем права пользователя во всех группах
+            try:
+                from aiogram.types import ChatPermissions
+                from src.repositories.group_repository import GroupRepository
+                
+                # Получаем сессию из user_service
+                session = user_service.session
+                group_repo = GroupRepository(session)
+                groups = await group_repo.get_active_groups()
+                
+                logger.info("Found %d active groups to restore permissions", len(groups))
+                
+                # Восстанавливаем права во всех группах
+                restored_count = 0
+                failed_count = 0
+                for group in groups:
+                    try:
+                        # Проверяем, является ли пользователь участником группы
+                        try:
+                            chat_member = await bot.get_chat_member(group.telegram_chat_id, user_id)
+                            # Если пользователь не в группе, пропускаем
+                            if chat_member.status in ("left", "kicked"):
+                                logger.debug(
+                                    "User %s is not a member of group %s, skipping",
+                                    user_id,
+                                    group.name
+                                )
+                                continue
+                        except Exception as check_error:
+                            logger.warning(
+                                "Failed to check membership for user %s in group %s: %s",
+                                user_id,
+                                group.name,
+                                check_error
+                            )
+                            # Пытаемся восстановить права в любом случае
+                        
+                        await bot.restrict_chat_member(
+                            chat_id=group.telegram_chat_id,
+                            user_id=user_id,
+                            permissions=ChatPermissions(
+                                can_send_messages=True,
+                                can_send_media_messages=True,
+                                can_send_polls=True,
+                                can_send_other_messages=True,
+                                can_add_web_page_previews=True,
+                                can_change_info=True,
+                                can_invite_users=True,
+                                can_pin_messages=False,  # Оставляем False для безопасности
+                            ),
+                        )
+                        restored_count += 1
+                        logger.info(
+                            "✅ Restored permissions for user %s in group %s (%s)",
+                            user_id,
+                            group.name,
+                            group.telegram_chat_id
+                        )
+                    except Exception as restore_error:
+                        failed_count += 1
+                        logger.warning(
+                            "❌ Failed to restore permissions for user %s in group %s (%s): %s",
+                            user_id,
+                            group.name,
+                            group.telegram_chat_id,
+                            restore_error
+                        )
+                
+                logger.info(
+                    "Permission restoration completed for user %s: %d restored, %d failed",
+                    user_id,
+                    restored_count,
+                    failed_count
+                )
+            except Exception as e:
+                logger.error(
+                    "Error restoring permissions for user %s: %s",
+                    user_id,
+                    e,
+                    exc_info=True
+                )
+            
             # Отправляем сообщение о завершении верификации в приватный чат
             try:
                 success_message = await bot.send_message(
@@ -192,7 +375,7 @@ if HAS_VERIFICATION_STATES:
                         f"Ваши данные:\n"
                         f"Фамилия: <b>{last_name}</b>\n"
                         f"Имя: <b>{first_name}</b>\n\n"
-                        f"Теперь вы можете участвовать в опросах."
+                        f"Теперь вы можете участвовать в опросах и писать в группах."
                     ),
                 )
                 # Удаляем финальное сообщение через 5 секунд (чтобы пользователь успел прочитать)

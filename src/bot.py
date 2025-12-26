@@ -49,8 +49,11 @@ async def setup_bot(bot: Bot, dp: Dispatcher, redis: Redis) -> None:
     from src.middlewares.user_data_middleware import UserDataMiddleware
     dp.message.middleware(UserDataMiddleware())
     
-    # Верификация отключена - middleware не регистрируется
-    # dp.message.middleware(VerificationMiddleware())  # Затем проверяем верификацию
+    # VerificationMiddleware - проверка верификации (только если включена)
+    if settings.ENABLE_VERIFICATION:
+        from src.middlewares.verification_middleware import VerificationMiddleware
+        dp.message.middleware(VerificationMiddleware())
+    
     dp.message.middleware(AdminMiddleware())
     dp.message.middleware(RateLimitMiddleware())
     dp.message.middleware(MessageCleanupMiddleware())  # Удаление предыдущих сообщений

@@ -50,8 +50,12 @@ class MessageCleanupMiddleware(BaseMiddleware):
                     or event.forward_from_chat is not None  # Пересланное из чата
                 )
                 
-                # Если это не исключение и есть предыдущее сообщение, удаляем его
-                if not is_exception and previous_message_id:
+                # Удаляем предыдущее сообщение только если это сообщение от бота
+                # НЕ удаляем сообщения пользователей!
+                is_bot_message = event.from_user and event.from_user.id == bot.id
+                
+                # Если это не исключение и есть предыдущее сообщение, и текущее сообщение от бота, удаляем предыдущее
+                if not is_exception and previous_message_id and is_bot_message:
                     try:
                         await delete_previous_bot_message(
                             bot=bot,
@@ -66,7 +70,7 @@ class MessageCleanupMiddleware(BaseMiddleware):
                 # Сохраняем ID текущего сообщения для следующего раза (если это ответ бота)
                 # Проверяем, что сообщение отправлено ботом
                 try:
-                    if event.from_user and event.from_user.id == bot.id:
+                    if is_bot_message:
                         await state.update_data(last_bot_message_id=event.message_id)
                 except Exception:
                     pass

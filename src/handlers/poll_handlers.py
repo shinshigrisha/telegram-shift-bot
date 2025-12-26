@@ -3,8 +3,8 @@ import asyncio
 import time
 from typing import Optional
 
-from aiogram import Router
-from aiogram.types import PollAnswer
+from aiogram import Router, Bot
+from aiogram.types import PollAnswer, InlineKeyboardMarkup, InlineKeyboardButton
 
 from config.settings import settings
 from src.services.user_service import UserService
@@ -22,6 +22,7 @@ POLL_RETRY_DELAYS = [0.5, 1.0, 2.0]  # Задержки в секундах ме
 @router.poll_answer()
 async def handle_poll_answer(
     poll_answer: PollAnswer,
+    bot: Bot,
     user_service: Optional[UserService] = None,
     poll_repo: Optional[PollRepository] = None,
 ) -> None:
@@ -57,8 +58,48 @@ async def handle_poll_answer(
         # Проверяем верификацию пользователя (только если верификация включена и пользователь не куратор)
         if settings.ENABLE_VERIFICATION and not user_is_curator and not user.is_verified:
             logger.warning("Unverified user %s tried to vote in poll %s", user_id, poll_id)
-            # Отправляем уведомление пользователю через бота
-            # (но у нас нет доступа к bot здесь, поэтому просто логируем)
+            # Отправляем сообщение с кнопкой "Старт" пользователю
+            try:
+                # Получаем username бота для создания ссылки
+                try:
+                    bot_info = await bot.get_me()
+                    bot_username = bot_info.username
+                except Exception:
+                    bot_username = None
+                
+                # Создаем inline-кнопку "Старт"
+                if bot_username:
+                    start_keyboard = InlineKeyboardMarkup(inline_keyboard=[
+                        [
+                            InlineKeyboardButton(
+                                text="🚀 Старт",
+                                url=f"https://t.me/{bot_username}?start=verify"
+                            )
+                        ]
+                    ])
+                else:
+                    start_keyboard = None
+                
+                # Отправляем сообщение пользователю
+                warning_text = (
+                    f"👋 Привет, {poll_answer.user.full_name}!\n\n"
+                    "❌ Для участия в опросах необходимо пройти верификацию.\n\n"
+                )
+                if start_keyboard:
+                    warning_text += "Нажмите кнопку <b>Старт</b> ниже, чтобы начать верификацию:"
+                else:
+                    warning_text += "Используйте команду <b>/start</b> в личных сообщениях с ботом для начала верификации."
+                
+                try:
+                    await bot.send_message(
+                        chat_id=user_id,
+                        text=warning_text,
+                        reply_markup=start_keyboard,
+                    )
+                except Exception as e:
+                    logger.warning("Failed to send verification warning to user %s: %s", user_id, e)
+            except Exception as e:
+                logger.error("Error sending verification warning to user %s: %s", user_id, e, exc_info=True)
             return
 
         # Получаем опрос по telegram_poll_id с retry механизмом
