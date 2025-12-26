@@ -321,6 +321,7 @@ if HAS_VERIFICATION_STATES:
                             )
                             # Пытаемся восстановить права в любом случае
                         
+                        # Восстанавливаем права пользователя - снимаем ограничение полностью
                         await bot.restrict_chat_member(
                             chat_id=group.telegram_chat_id,
                             user_id=user_id,
@@ -334,14 +335,43 @@ if HAS_VERIFICATION_STATES:
                                 can_invite_users=True,
                                 can_pin_messages=False,  # Оставляем False для безопасности
                             ),
+                            until_date=None,  # Снимаем ограничение полностью (без временных ограничений)
                         )
+                        
+                        # Проверяем, что права действительно восстановлены
+                        try:
+                            chat_member = await bot.get_chat_member(group.telegram_chat_id, user_id)
+                            if hasattr(chat_member, 'permissions') and chat_member.permissions:
+                                can_send = chat_member.permissions.can_send_messages
+                                logger.info(
+                                    "✅ Restored permissions for user %s in group %s (%s). can_send_messages=%s",
+                                    user_id,
+                                    group.name,
+                                    group.telegram_chat_id,
+                                    can_send
+                                )
+                                if not can_send:
+                                    logger.warning(
+                                        "⚠️ Permissions restored but can_send_messages is still False for user %s in group %s",
+                                        user_id,
+                                        group.name
+                                    )
+                            else:
+                                logger.info(
+                                    "✅ Restored permissions for user %s in group %s (%s)",
+                                    user_id,
+                                    group.name,
+                                    group.telegram_chat_id
+                                )
+                        except Exception as check_error:
+                            logger.warning(
+                                "Could not verify restored permissions for user %s in group %s: %s",
+                                user_id,
+                                group.name,
+                                check_error
+                            )
+                        
                         restored_count += 1
-                        logger.info(
-                            "✅ Restored permissions for user %s in group %s (%s)",
-                            user_id,
-                            group.name,
-                            group.telegram_chat_id
-                        )
                     except Exception as restore_error:
                         failed_count += 1
                         logger.warning(

@@ -47,6 +47,15 @@ class VerificationMiddleware(BaseMiddleware):
 
         # Проверяем верификацию
         is_verified = await user_service.is_verified(user_id)
+        
+        # Логируем для отладки (только для групп)
+        if event.chat.type in (ChatType.GROUP, ChatType.SUPERGROUP):
+            logger.debug(
+                "Verification check for user %s in chat %s: is_verified=%s",
+                user_id,
+                event.chat.id,
+                is_verified
+            )
 
         # Если пользователь не верифицирован
         if not is_verified:
