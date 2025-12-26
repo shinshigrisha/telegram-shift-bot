@@ -387,7 +387,7 @@ if HAS_VERIFICATION_STATES:
                         # Получаем chat_id и name группы
                         chat_id = getattr(group, 'telegram_chat_id', None) or getattr(group, 'chat_id', None) or group
                         group_name = getattr(group, 'name', f"Chat {chat_id}")
-                        logger.debug("Processing group: %s (chat_id: %s)", group_name, chat_id)
+                        logger.info("Processing group: %s (chat_id: %s)", group_name, chat_id)
                         
                         # Проверяем, является ли пользователь участником группы
                         user_is_member = False
@@ -395,12 +395,19 @@ if HAS_VERIFICATION_STATES:
                         try:
                             chat_member = await bot.get_chat_member(chat_id, user_id)
                             member_status = chat_member.status
+                            logger.info(
+                                "User %s status in group %s (%s): %s",
+                                user_id,
+                                group_name,
+                                chat_id,
+                                member_status
+                            )
                             # Проверяем все возможные статусы участника
                             # member, administrator, creator - пользователь в группе
                             # restricted - пользователь ограничен (нужно восстановить права)
                             # left, kicked - пользователь не в группе
                             if member_status in ("left", "kicked"):
-                                logger.debug(
+                                logger.warning(
                                     "User %s is not a member of group %s (status: %s), skipping",
                                     user_id,
                                     group_name,
@@ -409,7 +416,7 @@ if HAS_VERIFICATION_STATES:
                                 skipped_count += 1
                                 continue
                             user_is_member = True
-                            logger.debug(
+                            logger.info(
                                 "User %s is member of group %s (status: %s), will restore permissions",
                                 user_id,
                                 group_name,
@@ -419,7 +426,7 @@ if HAS_VERIFICATION_STATES:
                             error_msg = str(check_error).lower()
                             # Если ошибка "user not found" или "chat not found" - пропускаем
                             if "user not found" in error_msg or "chat not found" in error_msg:
-                                logger.debug(
+                                logger.warning(
                                     "User %s or group %s not found, skipping: %s",
                                     user_id,
                                     group_name,
