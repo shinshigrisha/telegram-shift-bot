@@ -36,10 +36,21 @@ docker exec shift-bot-postgres pg_dump -U bot_user shift_bot > backups/postgres_
 #### 1.2. Создание бэкапа Redis
 
 ```bash
-# Создайте snapshot Redis
-docker exec shift-bot-redis redis-cli --rdb /data/dump.rdb
+# Создайте snapshot Redis (используйте пароль из .env файла)
+REDIS_PASSWORD=$(grep REDIS_PASSWORD .env | cut -d '=' -f2 | tr -d '"' | tr -d "'")
+docker exec shift-bot-redis redis-cli -a "$REDIS_PASSWORD" BGSAVE
+
+# Дождитесь завершения сохранения (обычно 1-2 секунды)
+sleep 2
 
 # Скопируйте файл бэкапа
+docker cp shift-bot-redis:/data/dump.rdb backups/redis_backup_$(date +%Y%m%d_%H%M%S).rdb
+```
+
+**Примечание:** Если у вас нет доступа к файлу `.env`, замените `$REDIS_PASSWORD` на ваш пароль Redis или выполните команду без чтения из .env:
+```bash
+docker exec shift-bot-redis redis-cli -a "ваш_пароль" BGSAVE
+sleep 2
 docker cp shift-bot-redis:/data/dump.rdb backups/redis_backup_$(date +%Y%m%d_%H%M%S).rdb
 ```
 
@@ -438,8 +449,10 @@ cd /opt/telegram-shift-bot
 # Бэкап PostgreSQL
 docker exec shift-bot-postgres pg_dump -U bot_user shift_bot > backups/postgres_backup_$(date +%Y%m%d_%H%M%S).sql
 
-# Бэкап Redis
-docker exec shift-bot-redis redis-cli --rdb /data/dump.rdb
+# Бэкап Redis (используйте пароль из .env файла)
+REDIS_PASSWORD=$(grep REDIS_PASSWORD .env | cut -d '=' -f2 | tr -d '"' | tr -d "'")
+docker exec shift-bot-redis redis-cli -a "$REDIS_PASSWORD" BGSAVE
+sleep 2  # Даем время на завершение сохранения
 docker cp shift-bot-redis:/data/dump.rdb backups/redis_backup_$(date +%Y%m%d_%H%M%S).rdb
 ```
 

@@ -8,8 +8,10 @@
 # Бэкап PostgreSQL
 docker exec shift-bot-postgres pg_dump -U bot_user shift_bot > backups/postgres_backup_$(date +%Y%m%d_%H%M%S).sql
 
-# Бэкап Redis
-docker exec shift-bot-redis redis-cli --rdb /data/dump.rdb
+# Бэкап Redis (используйте пароль из .env файла)
+REDIS_PASSWORD=$(grep REDIS_PASSWORD .env | cut -d '=' -f2 | tr -d '"' | tr -d "'")
+docker exec shift-bot-redis redis-cli -a "$REDIS_PASSWORD" BGSAVE
+sleep 2  # Даем время на завершение сохранения
 docker cp shift-bot-redis:/data/dump.rdb backups/redis_backup_$(date +%Y%m%d_%H%M%S).rdb
 ```
 
@@ -152,8 +154,10 @@ tail -f /opt/telegram-shift-bot/logs/bot.log
 # PostgreSQL
 docker exec shift-bot-postgres pg_dump -U bot_user shift_bot > backups/postgres_backup_$(date +%Y%m%d_%H%M%S).sql
 
-# Redis
-docker exec shift-bot-redis redis-cli --rdb /data/dump.rdb
+# Redis (используйте пароль из .env файла)
+REDIS_PASSWORD=$(grep REDIS_PASSWORD .env | cut -d '=' -f2 | tr -d '"' | tr -d "'")
+docker exec shift-bot-redis redis-cli -a "$REDIS_PASSWORD" BGSAVE
+sleep 2  # Даем время на завершение сохранения
 docker cp shift-bot-redis:/data/dump.rdb backups/redis_backup_$(date +%Y%m%d_%H%M%S).rdb
 ```
 

@@ -46,10 +46,20 @@ docker exec shift-bot-postgres pg_dump -U bot_user shift_bot > "${BACKUP_DIR}/po
 
 # Бэкап Redis
 echo "Создание бэкапа Redis..."
-docker exec shift-bot-redis redis-cli --rdb /data/dump.rdb > /dev/null 2>&1 || true
-docker cp shift-bot-redis:/data/dump.rdb "${BACKUP_DIR}/redis_backup_${TIMESTAMP}.rdb" 2>/dev/null || {
-    echo -e "${YELLOW}⚠️  Предупреждение: не удалось создать бэкап Redis (может быть пустым)${NC}"
-}
+if [ -f .env ]; then
+    REDIS_PASSWORD=$(grep REDIS_PASSWORD .env | cut -d '=' -f2 | tr -d '"' | tr -d "'")
+    if [ -n "$REDIS_PASSWORD" ]; then
+        docker exec shift-bot-redis redis-cli -a "$REDIS_PASSWORD" BGSAVE > /dev/null 2>&1 || true
+        sleep 2  # Даем время на завершение сохранения
+        docker cp shift-bot-redis:/data/dump.rdb "${BACKUP_DIR}/redis_backup_${TIMESTAMP}.rdb" 2>/dev/null || {
+            echo -e "${YELLOW}⚠️  Предупреждение: не удалось создать бэкап Redis (может быть пустым)${NC}"
+        }
+    else
+        echo -e "${YELLOW}⚠️  Предупреждение: REDIS_PASSWORD не найден в .env, пропускаем бэкап Redis${NC}"
+    fi
+else
+    echo -e "${YELLOW}⚠️  Предупреждение: файл .env не найден, пропускаем бэкап Redis${NC}"
+fi
 
 echo -e "${GREEN}✅ Бэкапы созданы:${NC}"
 echo "  - ${BACKUP_DIR}/postgres_backup_${TIMESTAMP}.sql"
