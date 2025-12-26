@@ -368,20 +368,26 @@ if HAS_VERIFICATION_STATES:
                                 restricted_chat_id
                             )
                 
+                db_groups_count = len(await group_repo.get_active_groups())
                 logger.info("Found %d groups to restore permissions (from DB: %d, from Redis: %d)", 
                            len(groups), 
-                           len(await group_repo.get_active_groups()),
+                           db_groups_count,
                            len(restricted_chat_ids))
                 
                 # Восстанавливаем права во всех группах
                 restored_count = 0
                 failed_count = 0
                 skipped_count = 0
+                logger.info("Starting permission restoration loop for %d groups", len(groups))
+                
+                if len(groups) == 0:
+                    logger.warning("No groups found to restore permissions for user %s", user_id)
                 for group in groups:
                     try:
                         # Получаем chat_id и name группы
                         chat_id = getattr(group, 'telegram_chat_id', None) or getattr(group, 'chat_id', None) or group
                         group_name = getattr(group, 'name', f"Chat {chat_id}")
+                        logger.debug("Processing group: %s (chat_id: %s)", group_name, chat_id)
                         
                         # Проверяем, является ли пользователь участником группы
                         user_is_member = False
@@ -430,21 +436,43 @@ if HAS_VERIFICATION_STATES:
                             )
                         
                         # Восстанавливаем права пользователя - снимаем ограничение полностью
-                        await bot.restrict_chat_member(
-                            chat_id=chat_id,
-                            user_id=user_id,
-                            permissions=ChatPermissions(
-                                can_send_messages=True,
-                                can_send_media_messages=True,
-                                can_send_polls=True,
-                                can_send_other_messages=True,
-                                can_add_web_page_previews=True,
-                                can_change_info=True,
-                                can_invite_users=True,
-                                can_pin_messages=False,  # Оставляем False для безопасности
-                            ),
-                            until_date=None,  # Снимаем ограничение полностью (без временных ограничений)
+                        logger.info(
+                            "Attempting to restore permissions for user %s in group %s (%s)",
+                            user_id,
+                            group_name,
+                            chat_id
                         )
+                        try:
+                            await bot.restrict_chat_member(
+                                chat_id=chat_id,
+                                user_id=user_id,
+                                permissions=ChatPermissions(
+                                    can_send_messages=True,
+                                    can_send_media_messages=True,
+                                    can_send_polls=True,
+                                    can_send_other_messages=True,
+                                    can_add_web_page_previews=True,
+                                    can_change_info=True,
+                                    can_invite_users=True,
+                                    can_pin_messages=False,  # Оставляем False для безопасности
+                                ),
+                                until_date=None,  # Снимаем ограничение полностью (без временных ограничений)
+                            )
+                            logger.debug(
+                                "Successfully called restrict_chat_member for user %s in group %s",
+                                user_id,
+                                group_name
+                            )
+                        except Exception as restrict_error:
+                            logger.error(
+                                "Error calling restrict_chat_member for user %s in group %s: %s",
+                                user_id,
+                                group_name,
+                                restrict_error,
+                                exc_info=True
+                            )
+                            failed_count += 1
+                            continue
                         
                         # Проверяем, что права действительно восстановлены
                         try:
@@ -482,21 +510,22 @@ if HAS_VERIFICATION_STATES:
                         restored_count += 1
                     except Exception as restore_error:
                         failed_count += 1
-                        logger.warning(
+                        logger.error(
                             "❌ Failed to restore permissions for user %s in group %s (%s): %s",
                             user_id,
                             group_name,
                             chat_id,
-                            restore_error
+                            restore_error,
+                            exc_info=True
                         )
                 
-                        logger.info(
-                            "Permission restoration completed for user %s: %d restored, %d failed, %d skipped",
-                            user_id,
-                            restored_count,
-                            failed_count,
-                            skipped_count
-                        )
+                logger.info(
+                    "Permission restoration completed for user %s: %d restored, %d failed, %d skipped",
+                    user_id,
+                    restored_count,
+                    failed_count,
+                    skipped_count
+                )
                         
                         if restored_count == 0 and failed_count == 0:
                             logger.warning(
