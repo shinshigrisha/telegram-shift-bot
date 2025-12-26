@@ -284,6 +284,59 @@ if HAS_VERIFICATION_STATES:
             
             logger.info("User %s verified successfully, restoring permissions", user_id)
             
+            # Сначала восстанавливаем права в группах, где пользователь был ограничен (из Redis)
+            restricted_chat_ids = set()
+            try:
+                from redis.asyncio import Redis
+                import json
+                
+                # Пытаемся получить Redis
+                redis: Redis = None
+                
+                # Пытаемся получить через state.storage (если это RedisStorage)
+                if state:
+                    try:
+                        storage = state.storage
+                        if hasattr(storage, 'redis'):
+                            redis = storage.redis
+                    except Exception:
+                        pass
+                
+                # Если не получили через state, пытаемся через Bot.get_current()
+                if not redis:
+                    try:
+                        from aiogram import Bot
+                        bot_instance = Bot.get_current(no_error=True)
+                        if bot_instance and hasattr(bot_instance, '_dispatcher'):
+                            dispatcher = bot_instance._dispatcher
+                            if dispatcher and "redis" in dispatcher:
+                                redis = dispatcher["redis"]
+                    except Exception as redis_get_error:
+                        logger.debug("Could not get redis: %s", redis_get_error)
+                
+                if redis:
+                    # Ищем все ключи welcome_message для этого пользователя
+                    pattern = f"welcome_message:{user_id}:*"
+                    async for key in redis.scan_iter(match=pattern):
+                        try:
+                            message_data_str = await redis.get(key)
+                            if message_data_str:
+                                message_data = json.loads(message_data_str)
+                                chat_id = message_data.get("chat_id")
+                                if chat_id:
+                                    restricted_chat_ids.add(chat_id)
+                        except Exception:
+                            pass
+                    
+                    if restricted_chat_ids:
+                        logger.info(
+                            "Found %d groups where user %s was restricted (from Redis)",
+                            len(restricted_chat_ids),
+                            user_id
+                        )
+            except Exception as redis_error:
+                logger.warning("Could not get restricted chat IDs from Redis: %s", redis_error)
+            
             # Восстанавливаем права пользователя во всех группах
             try:
                 from aiogram.types import ChatPermissions
@@ -292,38 +345,93 @@ if HAS_VERIFICATION_STATES:
                 # Получаем сессию из user_service
                 session = user_service.session
                 group_repo = GroupRepository(session)
+                
+                # Получаем группы из БД для восстановления прав
                 groups = await group_repo.get_active_groups()
                 
-                logger.info("Found %d active groups to restore permissions", len(groups))
+                # Добавляем группы из Redis, если их нет в БД
+                if restricted_chat_ids:
+                    for restricted_chat_id in restricted_chat_ids:
+                        # Проверяем, есть ли группа в БД
+                        group = await group_repo.get_by_chat_id(restricted_chat_id)
+                        if not group:
+                            # Если группы нет в БД, создаем временный объект для восстановления прав
+                            from types import SimpleNamespace
+                            temp_group = SimpleNamespace(
+                                telegram_chat_id=restricted_chat_id,
+                                name=f"Chat {restricted_chat_id}",
+                                is_active=True
+                            )
+                            groups.append(temp_group)
+                            logger.debug(
+                                "Added group from Redis (not in DB): chat_id=%s",
+                                restricted_chat_id
+                            )
+                
+                logger.info("Found %d groups to restore permissions (from DB: %d, from Redis: %d)", 
+                           len(groups), 
+                           len(await group_repo.get_active_groups()),
+                           len(restricted_chat_ids))
                 
                 # Восстанавливаем права во всех группах
                 restored_count = 0
                 failed_count = 0
+                skipped_count = 0
                 for group in groups:
                     try:
+                        # Получаем chat_id и name группы
+                        chat_id = getattr(group, 'telegram_chat_id', None) or getattr(group, 'chat_id', None) or group
+                        group_name = getattr(group, 'name', f"Chat {chat_id}")
+                        
                         # Проверяем, является ли пользователь участником группы
+                        user_is_member = False
+                        member_status = None
                         try:
-                            chat_member = await bot.get_chat_member(group.telegram_chat_id, user_id)
-                            # Если пользователь не в группе, пропускаем
-                            if chat_member.status in ("left", "kicked"):
+                            chat_member = await bot.get_chat_member(chat_id, user_id)
+                            member_status = chat_member.status
+                            # Проверяем все возможные статусы участника
+                            # member, administrator, creator - пользователь в группе
+                            # restricted - пользователь ограничен (нужно восстановить права)
+                            # left, kicked - пользователь не в группе
+                            if member_status in ("left", "kicked"):
                                 logger.debug(
-                                    "User %s is not a member of group %s, skipping",
+                                    "User %s is not a member of group %s (status: %s), skipping",
                                     user_id,
-                                    group.name
+                                    group_name,
+                                    member_status
                                 )
+                                skipped_count += 1
                                 continue
-                        except Exception as check_error:
-                            logger.warning(
-                                "Failed to check membership for user %s in group %s: %s",
+                            user_is_member = True
+                            logger.debug(
+                                "User %s is member of group %s (status: %s), will restore permissions",
                                 user_id,
-                                group.name,
+                                group_name,
+                                member_status
+                            )
+                        except Exception as check_error:
+                            error_msg = str(check_error).lower()
+                            # Если ошибка "user not found" или "chat not found" - пропускаем
+                            if "user not found" in error_msg or "chat not found" in error_msg:
+                                logger.debug(
+                                    "User %s or group %s not found, skipping: %s",
+                                    user_id,
+                                    group_name,
+                                    check_error
+                                )
+                                skipped_count += 1
+                                continue
+                            # Для других ошибок пытаемся восстановить права в любом случае
+                            logger.warning(
+                                "Failed to check membership for user %s in group %s: %s. Will try to restore permissions anyway.",
+                                user_id,
+                                group_name,
                                 check_error
                             )
-                            # Пытаемся восстановить права в любом случае
                         
                         # Восстанавливаем права пользователя - снимаем ограничение полностью
                         await bot.restrict_chat_member(
-                            chat_id=group.telegram_chat_id,
+                            chat_id=chat_id,
                             user_id=user_id,
                             permissions=ChatPermissions(
                                 can_send_messages=True,
@@ -340,34 +448,34 @@ if HAS_VERIFICATION_STATES:
                         
                         # Проверяем, что права действительно восстановлены
                         try:
-                            chat_member = await bot.get_chat_member(group.telegram_chat_id, user_id)
+                            chat_member = await bot.get_chat_member(chat_id, user_id)
                             if hasattr(chat_member, 'permissions') and chat_member.permissions:
                                 can_send = chat_member.permissions.can_send_messages
                                 logger.info(
                                     "✅ Restored permissions for user %s in group %s (%s). can_send_messages=%s",
                                     user_id,
-                                    group.name,
-                                    group.telegram_chat_id,
+                                    group_name,
+                                    chat_id,
                                     can_send
                                 )
                                 if not can_send:
                                     logger.warning(
                                         "⚠️ Permissions restored but can_send_messages is still False for user %s in group %s",
                                         user_id,
-                                        group.name
+                                        group_name
                                     )
                             else:
                                 logger.info(
                                     "✅ Restored permissions for user %s in group %s (%s)",
                                     user_id,
-                                    group.name,
-                                    group.telegram_chat_id
+                                    group_name,
+                                    chat_id
                                 )
                         except Exception as check_error:
                             logger.warning(
                                 "Could not verify restored permissions for user %s in group %s: %s",
                                 user_id,
-                                group.name,
+                                group_name,
                                 check_error
                             )
                         
@@ -377,17 +485,27 @@ if HAS_VERIFICATION_STATES:
                         logger.warning(
                             "❌ Failed to restore permissions for user %s in group %s (%s): %s",
                             user_id,
-                            group.name,
-                            group.telegram_chat_id,
+                            group_name,
+                            chat_id,
                             restore_error
                         )
                 
-                logger.info(
-                    "Permission restoration completed for user %s: %d restored, %d failed",
-                    user_id,
-                    restored_count,
-                    failed_count
-                )
+                        logger.info(
+                            "Permission restoration completed for user %s: %d restored, %d failed, %d skipped",
+                            user_id,
+                            restored_count,
+                            failed_count,
+                            skipped_count
+                        )
+                        
+                        if restored_count == 0 and failed_count == 0:
+                            logger.warning(
+                                "⚠️ No permissions were restored for user %s. Possible reasons: "
+                                "1. User is not a member of any active groups in DB, "
+                                "2. All groups were skipped due to membership check failures, "
+                                "3. No active groups found in DB",
+                                user_id
+                            )
             except Exception as e:
                 logger.error(
                     "Error restoring permissions for user %s: %s",
