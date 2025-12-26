@@ -403,11 +403,11 @@ if HAS_VERIFICATION_STATES:
                                 member_status
                             )
                             # Проверяем все возможные статусы участника
-                            # member, administrator, creator - пользователь в группе
-                            # restricted - пользователь ограничен (нужно восстановить права)
-                            # left, kicked - пользователь не в группе
+                            # member, administrator, creator - пользователь в группе (нужно восстановить права на всякий случай)
+                            # restricted - пользователь ограничен (ОБЯЗАТЕЛЬНО нужно восстановить права!)
+                            # left, kicked - пользователь не в группе (пропускаем)
                             if member_status in ("left", "kicked"):
-                                logger.warning(
+                                logger.info(
                                     "User %s is not a member of group %s (status: %s), skipping",
                                     user_id,
                                     group_name,
@@ -415,13 +415,22 @@ if HAS_VERIFICATION_STATES:
                                 )
                                 skipped_count += 1
                                 continue
+                            
+                            # Для всех остальных статусов (member, restricted, administrator, creator) восстанавливаем права
                             user_is_member = True
-                            logger.info(
-                                "User %s is member of group %s (status: %s), will restore permissions",
-                                user_id,
-                                group_name,
-                                member_status
-                            )
+                            if member_status == "restricted":
+                                logger.info(
+                                    "User %s is RESTRICTED in group %s, will restore permissions",
+                                    user_id,
+                                    group_name
+                                )
+                            else:
+                                logger.info(
+                                    "User %s is member of group %s (status: %s), will restore permissions",
+                                    user_id,
+                                    group_name,
+                                    member_status
+                                )
                         except Exception as check_error:
                             error_msg = str(check_error).lower()
                             # Если ошибка "user not found" или "chat not found" - пропускаем

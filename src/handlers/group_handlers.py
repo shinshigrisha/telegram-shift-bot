@@ -101,6 +101,7 @@ async def handle_new_member(
                             can_invite_users=False,
                             can_pin_messages=False,
                         ),
+                        until_date=None,  # Ограничение без срока (до восстановления прав)
                     )
                     logger.info(
                         "✅ Restricted unverified user %s in chat %s",
