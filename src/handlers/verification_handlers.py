@@ -328,6 +328,18 @@ if HAS_VERIFICATION_STATES:
                         except Exception:
                             pass
                     
+                    # Также ищем ключи restricted_user для этого пользователя
+                    restricted_pattern = f"restricted_user:{user_id}:*"
+                    async for key in redis.scan_iter(match=restricted_pattern):
+                        try:
+                            # Ключ имеет формат restricted_user:{user_id}:{chat_id}
+                            parts = key.split(":")
+                            if len(parts) >= 3:
+                                chat_id = int(parts[2])
+                                restricted_chat_ids.add(chat_id)
+                        except Exception:
+                            pass
+                    
                     if restricted_chat_ids:
                         logger.info(
                             "Found %d groups where user %s was restricted (from Redis)",
@@ -406,15 +418,29 @@ if HAS_VERIFICATION_STATES:
                             # member, administrator, creator - пользователь в группе (нужно восстановить права на всякий случай)
                             # restricted - пользователь ограничен (ОБЯЗАТЕЛЬНО нужно восстановить права!)
                             # left, kicked - пользователь не в группе (пропускаем)
+                            
+                            # Если группа из Redis (где пользователь был ограничен), восстанавливаем права в любом случае
+                            is_from_redis = hasattr(group, 'telegram_chat_id') and group.telegram_chat_id in restricted_chat_ids
+                            
                             if member_status in ("left", "kicked"):
-                                logger.info(
-                                    "User %s is not a member of group %s (status: %s), skipping",
-                                    user_id,
-                                    group_name,
-                                    member_status
-                                )
-                                skipped_count += 1
-                                continue
+                                # Если группа из Redis, все равно пытаемся восстановить права (может быть ошибка проверки)
+                                if is_from_redis:
+                                    logger.warning(
+                                        "User %s status is %s in group %s from Redis, but will try to restore permissions anyway",
+                                        user_id,
+                                        member_status,
+                                        group_name
+                                    )
+                                    # Продолжаем восстановление прав
+                                else:
+                                    logger.info(
+                                        "User %s is not a member of group %s (status: %s), skipping",
+                                        user_id,
+                                        group_name,
+                                        member_status
+                                    )
+                                    skipped_count += 1
+                                    continue
                             
                             # Для всех остальных статусов (member, restricted, administrator, creator) восстанавливаем права
                             user_is_member = True
@@ -433,16 +459,30 @@ if HAS_VERIFICATION_STATES:
                                 )
                         except Exception as check_error:
                             error_msg = str(check_error).lower()
-                            # Если ошибка "user not found" или "chat not found" - пропускаем
+                            
+                            # Если группа из Redis (где пользователь был ограничен), восстанавливаем права в любом случае
+                            is_from_redis = hasattr(group, 'telegram_chat_id') and group.telegram_chat_id in restricted_chat_ids
+                            
+                            # Если ошибка "user not found" или "chat not found"
                             if "user not found" in error_msg or "chat not found" in error_msg:
-                                logger.warning(
-                                    "User %s or group %s not found, skipping: %s",
-                                    user_id,
-                                    group_name,
-                                    check_error
-                                )
-                                skipped_count += 1
-                                continue
+                                # Если группа из Redis, все равно пытаемся восстановить права
+                                if is_from_redis:
+                                    logger.warning(
+                                        "User %s or group %s not found, but group is from Redis. Will try to restore permissions anyway: %s",
+                                        user_id,
+                                        group_name,
+                                        check_error
+                                    )
+                                    # Продолжаем восстановление прав
+                                else:
+                                    logger.warning(
+                                        "User %s or group %s not found, skipping: %s",
+                                        user_id,
+                                        group_name,
+                                        check_error
+                                    )
+                                    skipped_count += 1
+                                    continue
                             # Для других ошибок пытаемся восстановить права в любом случае
                             logger.warning(
                                 "Failed to check membership for user %s in group %s: %s. Will try to restore permissions anyway.",
@@ -450,6 +490,7 @@ if HAS_VERIFICATION_STATES:
                                 group_name,
                                 check_error
                             )
+                            # Продолжаем попытку восстановления прав даже при ошибке проверки
                         
                         # Восстанавливаем права пользователя - снимаем ограничение полностью
                         logger.info(
@@ -524,6 +565,36 @@ if HAS_VERIFICATION_STATES:
                             )
                         
                         restored_count += 1
+                        
+                        # Удаляем ключ restricted_user из Redis после успешного восстановления прав
+                        try:
+                            # Пытаемся получить redis снова
+                            current_redis = None
+                            if state:
+                                try:
+                                    storage = state.storage
+                                    if hasattr(storage, 'redis'):
+                                        current_redis = storage.redis
+                                except Exception:
+                                    pass
+                            
+                            if not current_redis:
+                                try:
+                                    from aiogram import Bot
+                                    bot_instance = Bot.get_current(no_error=True)
+                                    if bot_instance and hasattr(bot_instance, '_dispatcher'):
+                                        dispatcher = bot_instance._dispatcher
+                                        if dispatcher and "redis" in dispatcher:
+                                            current_redis = dispatcher["redis"]
+                                except Exception:
+                                    pass
+                            
+                            if current_redis and chat_id in restricted_chat_ids:
+                                restricted_key = f"restricted_user:{user_id}:{chat_id}"
+                                await current_redis.delete(restricted_key)
+                                logger.debug("Deleted restricted_user key from Redis: %s", restricted_key)
+                        except Exception:
+                            pass
                     except Exception as restore_error:
                         failed_count += 1
                         logger.error(

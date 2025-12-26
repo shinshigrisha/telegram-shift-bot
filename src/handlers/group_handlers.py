@@ -233,6 +233,11 @@ async def handle_new_member(
                             }
                             await redis.set(redis_key, json.dumps(message_data), ex=86400 * 7)  # Храним 7 дней
                             logger.debug("Saved welcome message ID to Redis: %s", redis_key)
+                            
+                            # Также сохраняем информацию о том, что пользователь был ограничен в этой группе
+                            restricted_key = f"restricted_user:{user_id}:{chat_id}"
+                            await redis.set(restricted_key, "1", ex=86400 * 7)  # Храним 7 дней
+                            logger.debug("Saved restricted user info to Redis: %s", restricted_key)
                     except Exception as redis_error:
                         logger.warning("Failed to save welcome message ID to Redis: %s", redis_error)
                 except Exception as e:
