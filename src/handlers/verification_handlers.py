@@ -532,29 +532,61 @@ if HAS_VERIFICATION_STATES:
                             continue
                         
                         # Проверяем, что права действительно восстановлены
+                        # Даем Telegram время обновить статус (небольшая задержка)
+                        import asyncio
+                        await asyncio.sleep(0.5)  # 500ms задержка для обновления статуса в Telegram
+                        
                         try:
                             chat_member = await bot.get_chat_member(chat_id, user_id)
-                            if hasattr(chat_member, 'permissions') and chat_member.permissions:
-                                can_send = chat_member.permissions.can_send_messages
-                                logger.info(
-                                    "✅ Restored permissions for user %s in group %s (%s). can_send_messages=%s",
-                                    user_id,
-                                    group_name,
-                                    chat_id,
-                                    can_send
-                                )
-                                if not can_send:
-                                    logger.warning(
-                                        "⚠️ Permissions restored but can_send_messages is still False for user %s in group %s",
+                            logger.info(
+                                "Checking restored permissions - user %s status in group %s: %s",
+                                user_id,
+                                group_name,
+                                chat_member.status
+                            )
+                            
+                            # Проверяем permissions для статусов member, restricted, administrator, creator
+                            if chat_member.status in ("member", "restricted", "administrator", "creator"):
+                                if hasattr(chat_member, 'permissions') and chat_member.permissions:
+                                    can_send = chat_member.permissions.can_send_messages
+                                    logger.info(
+                                        "✅ Restored permissions for user %s in group %s (%s). Status: %s, can_send_messages=%s",
                                         user_id,
-                                        group_name
+                                        group_name,
+                                        chat_id,
+                                        chat_member.status,
+                                        can_send
                                     )
+                                    if not can_send:
+                                        logger.error(
+                                            "❌ CRITICAL: Permissions restored but can_send_messages is still False for user %s in group %s. Status: %s",
+                                            user_id,
+                                            group_name,
+                                            chat_member.status
+                                        )
+                                else:
+                                    # Если статус member/administrator/creator, но нет permissions - это нормально (полные права)
+                                    if chat_member.status in ("member", "administrator", "creator"):
+                                        logger.info(
+                                            "✅ Restored permissions for user %s in group %s (%s). Status: %s (full permissions)",
+                                            user_id,
+                                            group_name,
+                                            chat_id,
+                                            chat_member.status
+                                        )
+                                    else:
+                                        logger.warning(
+                                            "⚠️ User %s in group %s has status %s but no permissions attribute",
+                                            user_id,
+                                            group_name,
+                                            chat_member.status
+                                        )
                             else:
-                                logger.info(
-                                    "✅ Restored permissions for user %s in group %s (%s)",
+                                logger.warning(
+                                    "⚠️ User %s in group %s has unexpected status: %s",
                                     user_id,
                                     group_name,
-                                    chat_id
+                                    chat_member.status
                                 )
                         except Exception as check_error:
                             logger.warning(
