@@ -303,17 +303,20 @@ class SchedulerService:
                 
                 for group in groups:
                     try:
+                        # Используем очищенное название для вывода
+                        display_name = clean_group_name_for_display(group.name)
+                        
                         # Проверяем, существует ли опрос на завтра
                         poll = await poll_repo.get_by_group_and_date(group.id, tomorrow)
                         
                         if not poll:
-                            issues.append(f"❌ {group.name}: опрос на завтра не создан")
+                            issues.append(f"❌ {display_name}: опрос на завтра не создан")
                             continue
                         
                         # Проверяем, активен ли опрос
                         # Статус "closed" - нормальная ситуация после 19:00, не сообщаем об этом
                         if poll.status not in ["active", "closed"]:
-                            issues.append(f"⚠️ {group.name}: опрос имеет неожиданный статус (статус: {poll.status})")
+                            issues.append(f"⚠️ {display_name}: опрос имеет неожиданный статус (статус: {poll.status})")
                         
                         # Проверяем доступность бота в группе
                         try:
@@ -322,7 +325,7 @@ class SchedulerService:
                                 user_id=self.bot.id
                             )
                             if chat_member.status not in ["administrator", "member", "creator"]:
-                                issues.append(f"🚨 {group.name}: бот не может войти в группу (статус: {chat_member.status})")
+                                issues.append(f"🚨 {display_name}: бот не может войти в группу (статус: {chat_member.status})")
                         except Exception as e:  # noqa: BLE001
                             error_msg = str(e).lower()
                             error_type = type(e).__name__
@@ -335,28 +338,28 @@ class SchedulerService:
                                     group.name,
                                     e
                                 )
-                                issues.append(f"⚠️ {group.name}: временная проблема подключения к Telegram API")
+                                issues.append(f"⚠️ {display_name}: временная проблема подключения к Telegram API")
                             elif "chat not found" in error_msg:
                                 logger.error(
                                     "Chat not found for group %s (chat_id: %s). Bot may have been removed.",
                                     group.name,
                                     group.telegram_chat_id
                                 )
-                                issues.append(f"🚨 {group.name}: чат не найден (бот удален из группы?)")
+                                issues.append(f"🚨 {display_name}: чат не найден (бот удален из группы?)")
                             elif "bot was kicked" in error_msg or "bot was blocked" in error_msg:
                                 logger.error(
                                     "Bot was kicked from group %s (chat_id: %s). Please add bot back or deactivate group.",
                                     group.name,
                                     group.telegram_chat_id
                                 )
-                                issues.append(f"🚨 {group.name}: бот исключен из группы")
+                                issues.append(f"🚨 {display_name}: бот исключен из группы")
                             elif "timeout" in error_msg or "timed out" in error_msg:
                                 logger.warning(
                                     "Timeout checking bot status in group %s: %s",
                                     group.name,
                                     e
                                 )
-                                issues.append(f"⚠️ {group.name}: таймаут при проверке статуса")
+                                issues.append(f"⚠️ {display_name}: таймаут при проверке статуса")
                             else:
                                 # Неизвестная ошибка
                                 logger.error(
@@ -365,11 +368,12 @@ class SchedulerService:
                                     e,
                                     exc_info=True
                                 )
-                                issues.append(f"🚨 {group.name}: ошибка проверки статуса ({error_type})")
+                                issues.append(f"🚨 {display_name}: ошибка проверки статуса ({error_type})")
                             
                     except Exception as e:
                         logger.error("Error checking group %s: %s", group.name, e)
-                        issues.append(f"❌ {group.name}: ошибка проверки ({str(e)[:50]})")
+                        display_name = clean_group_name_for_display(group.name)
+                        issues.append(f"❌ {display_name}: ошибка проверки ({str(e)[:50]})")
             
             # Отправляем уведомления админам, если есть проблемы
             if issues and settings.ENABLE_HEALTH_CHECK_NOTIFICATIONS:

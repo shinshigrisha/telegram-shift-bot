@@ -69,7 +69,9 @@ class PollService:
                 if existing:
                     if force:
                         # Принудительное создание: удаляем существующий опрос перед созданием нового
-                        group_name = group.name  # Сохраняем имя до обработки ошибок
+                        group_name = group.name  # Сохраняем имя до обработки ошибок для логов
+                        from src.utils.group_formatters import clean_group_name_for_display
+                        display_name = clean_group_name_for_display(group_name)  # Очищенное название для сообщений
                         try:
                             logger.info("Force mode: removing existing poll for %s on %s", group_name, tomorrow)
                             
@@ -92,11 +94,11 @@ class PollService:
                                 logger.info("Deleted existing poll for %s", group_name)
                             else:
                                 logger.warning("Failed to delete existing poll for %s", group_name)
-                                errors.append(f"{group_name} (не удалось удалить существующий опрос)")
+                                errors.append(f"{display_name} (не удалось удалить существующий опрос)")
                                 continue
                         except Exception as delete_error:
                             logger.error("Error deleting existing poll for %s: %s", group_name, delete_error)
-                            errors.append(f"{group_name} (не удалось удалить существующий опрос: {str(delete_error)[:50]})")
+                            errors.append(f"{display_name} (не удалось удалить существующий опрос: {str(delete_error)[:50]})")
                             continue
                     else:
                         logger.info("Active poll already exists for %s on %s", group.name, tomorrow)
@@ -110,15 +112,18 @@ class PollService:
                 else:
                     # Сохраняем группу для повторной попытки
                     failed_groups.append(group)
+                    # Используем очищенное название для вывода пользователю
+                    from src.utils.group_formatters import clean_group_name_for_display
+                    display_name = clean_group_name_for_display(group.name)
                     # Проверяем причину неудачи
                     if not getattr(group, "is_night", False):
                         slots = group.get_slots_config()
                         if not slots or len(slots) == 0:
-                            errors.append(f"{group.name} (нет слотов - используйте /setup_ziz)")
+                            errors.append(f"{display_name} (нет слотов - используйте /setup_ziz)")
                         else:
-                            errors.append(f"{group.name} (не удалось создать)")
+                            errors.append(f"{display_name} (не удалось создать)")
                     else:
-                        errors.append(f"{group.name} (не удалось создать)")
+                        errors.append(f"{display_name} (не удалось создать)")
 
             except Exception as e:  # noqa: BLE001
                 error_msg = str(e)
@@ -127,14 +132,17 @@ class PollService:
                 # Сохраняем имя группы ДО попытки обращения к атрибутам (сессия может быть в rollback)
                 try:
                     group_name = group.name
+                    from src.utils.group_formatters import clean_group_name_for_display
+                    display_name = clean_group_name_for_display(group_name)
                 except Exception:
                     group_name = "Unknown"
+                    display_name = "Unknown"
                 
                 # Обрабатываем ошибки сессии БД
                 if "PendingRollbackError" in str(type(e).__name__) or "rollback" in error_msg.lower() or "MissingGreenlet" in str(type(e).__name__):
                     logger.error("Database session error for %s: %s", group_name, e)
                     # Не пытаемся делать rollback - сессия уже в rollback состоянии
-                    errors.append(f"{group_name} (ошибка БД - сессия в rollback)")
+                    errors.append(f"{display_name} (ошибка БД - сессия в rollback)")
                     continue
                 
                 if "chat not found" in error_msg.lower() or "chat not found" in error_msg:
@@ -144,7 +152,7 @@ class PollService:
                         group_name,
                         getattr(group, "telegram_chat_id", "Unknown"),
                     )
-                    errors.append(f"{group_name} (чат не найден)")
+                    errors.append(f"{display_name} (чат не найден)")
                 elif "bot was kicked" in error_msg.lower() or "bot was blocked" in error_msg.lower():
                     logger.error(
                         "Bot was kicked from group %s (chat_id: %s). "
@@ -154,10 +162,10 @@ class PollService:
                         getattr(group, "telegram_chat_id", "Unknown"),
                         group_name,
                     )
-                    errors.append(f"{group_name} (бот исключен из группы - добавьте бота обратно или деактивируйте группу)")
+                    errors.append(f"{display_name} (бот исключен из группы - добавьте бота обратно или деактивируйте группу)")
                 else:
                     logger.error("Error creating poll for %s: %s", group_name, e)
-                    errors.append(f"{group_name} ({error_msg[:50]})")
+                    errors.append(f"{display_name} ({error_msg[:50]})")
 
         # Повторная попытка для неудачных групп (если включено)
         if retry_failed and failed_groups:
@@ -178,8 +186,10 @@ class PollService:
                     poll = await self._create_poll_for_group(group, tomorrow)
                     if poll:
                         created_count += 1
-                        # Удаляем из списка ошибок
-                        errors = [e for e in errors if not e.startswith(f"{group.name}")]
+                        # Удаляем из списка ошибок (проверяем как оригинальное, так и очищенное название)
+                        from src.utils.group_formatters import clean_group_name_for_display
+                        display_name = clean_group_name_for_display(group.name)
+                        errors = [e for e in errors if not e.startswith(f"{group.name}") and not e.startswith(f"{display_name}")]
                         logger.info("Successfully created poll for %s on retry", group.name)
                 except Exception as e:
                     logger.error("Error retrying poll creation for %s: %s", group.name, e)
