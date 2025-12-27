@@ -86,22 +86,24 @@ async def handle_new_member(
             
             if not is_verified:
                 # Ограничиваем права пользователя на отправку сообщений
+                # Важно: не баним пользователя, а только ограничиваем отправку сообщений
                 try:
                     from aiogram.types import ChatPermissions
+                    # Устанавливаем только ограничения на отправку сообщений
+                    # Это создает ограничение (restricted), а не бан (kicked)
+                    # Пользователь сможет читать сообщения (это подразумевается автоматически)
                     await bot.restrict_chat_member(
                         chat_id=event.chat.id,
                         user_id=user_id,
                         permissions=ChatPermissions(
-                            can_send_messages=False,
+                            can_send_messages=False,  # Запрещаем отправку сообщений
                             can_send_media_messages=False,
                             can_send_polls=False,
                             can_send_other_messages=False,
                             can_add_web_page_previews=False,
-                            can_change_info=False,
-                            can_invite_users=False,
-                            can_pin_messages=False,
+                            # Не указываем until_date - ограничение будет действовать до явного снятия
+                            # Это создает ограничение (restricted), а не бан (kicked)
                         ),
-                        until_date=None,  # Ограничение без срока (до восстановления прав)
                     )
                     logger.info(
                         "✅ Restricted unverified user %s in chat %s",
