@@ -311,8 +311,9 @@ class SchedulerService:
                             continue
                         
                         # Проверяем, активен ли опрос
-                        if poll.status != "active":
-                            issues.append(f"⚠️ {group.name}: опрос неактивен (статус: {poll.status})")
+                        # Статус "closed" - нормальная ситуация после 19:00, не сообщаем об этом
+                        if poll.status not in ["active", "closed"]:
+                            issues.append(f"⚠️ {group.name}: опрос имеет неожиданный статус (статус: {poll.status})")
                         
                         # Проверяем доступность бота в группе
                         try:
