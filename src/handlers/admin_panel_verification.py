@@ -218,11 +218,21 @@ async def process_verification_name(
     if verified_user:
         full_name_display = verified_user.get_full_name()
         
-        # Восстанавливаем права пользователя во всех группах
+        # Удаляем приветственные сообщения из групп и восстанавливаем права
         try:
             from aiogram import Bot
             bot = Bot.get_current(no_error=True)
             if bot:
+                # Удаляем приветственные сообщения
+                deleted_count = await user_service.delete_welcome_messages(
+                    bot=bot,
+                    user_id=user_id,
+                    state=state,
+                )
+                if deleted_count > 0:
+                    logger.info("Deleted %d welcome messages for user %s", deleted_count, user_id)
+                
+                # Восстанавливаем права пользователя во всех группах
                 restored_count, failed_count, skipped_count = await user_service.restore_user_permissions(
                     bot=bot,
                     user_id=user_id,
@@ -236,7 +246,7 @@ async def process_verification_name(
                     skipped_count
                 )
         except Exception as e:
-            logger.error("Error restoring permissions for user %s: %s", user_id, e, exc_info=True)
+            logger.error("Error during cleanup and permission restoration for user %s: %s", user_id, e, exc_info=True)
         
         # Отправляем подтверждение
         await message.answer(

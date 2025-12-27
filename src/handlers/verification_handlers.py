@@ -197,90 +197,11 @@ if HAS_VERIFICATION_STATES:
             )
             
             # Удаляем приветственные сообщения с кнопкой "Старт" из всех групп
-            try:
-                from redis.asyncio import Redis
-                import json
-                
-                # Пытаемся получить Redis
-                redis: Redis = None
-                
-                # Пытаемся получить через state.storage (если это RedisStorage)
-                if state:
-                    try:
-                        storage = state.storage
-                        if hasattr(storage, 'redis'):
-                            redis = storage.redis
-                    except Exception:
-                        pass
-                
-                # Если не получили через state, пытаемся через Bot.get_current()
-                if not redis:
-                    try:
-                        from aiogram import Bot
-                        bot_instance = Bot.get_current(no_error=True)
-                        if bot_instance and hasattr(bot_instance, '_dispatcher'):
-                            dispatcher = bot_instance._dispatcher
-                            if dispatcher and "redis" in dispatcher:
-                                redis = dispatcher["redis"]
-                    except Exception as redis_get_error:
-                        logger.debug("Could not get redis: %s", redis_get_error)
-                
-                if redis:
-                    # Ищем все ключи welcome_message для этого пользователя
-                    pattern = f"welcome_message:{user_id}:*"
-                    deleted_count = 0
-                    
-                    async for key in redis.scan_iter(match=pattern):
-                        try:
-                            message_data_str = await redis.get(key)
-                            if message_data_str:
-                                message_data = json.loads(message_data_str)
-                                msg_id = message_data.get("message_id")
-                                chat_id = message_data.get("chat_id")
-                                topic_id = message_data.get("topic_id")
-                                
-                                if msg_id and chat_id:
-                                    try:
-                                        await bot.delete_message(
-                                            chat_id=chat_id,
-                                            message_id=msg_id,
-                                            message_thread_id=topic_id,
-                                        )
-                                        deleted_count += 1
-                                        logger.info(
-                                            "✅ Deleted welcome message %s from chat %s (topic_id: %s)",
-                                            msg_id,
-                                            chat_id,
-                                            topic_id
-                                        )
-                                    except Exception as delete_error:
-                                        logger.debug(
-                                            "Could not delete welcome message %s from chat %s: %s",
-                                            msg_id,
-                                            chat_id,
-                                            delete_error
-                                        )
-                            
-                            # Удаляем ключ из Redis
-                            await redis.delete(key)
-                        except Exception as key_error:
-                            logger.warning("Error processing welcome message key %s: %s", key, key_error)
-                    
-                    if deleted_count > 0:
-                        logger.info(
-                            "Deleted %d welcome messages for user %s",
-                            deleted_count,
-                            user_id
-                        )
-                else:
-                    logger.warning("Redis not available, cannot delete welcome messages")
-            except Exception as cleanup_error:
-                logger.error(
-                    "Error deleting welcome messages for user %s: %s",
-                    user_id,
-                    cleanup_error,
-                    exc_info=True
-                )
+            deleted_count = await user_service.delete_welcome_messages(
+                bot=bot,
+                user_id=user_id,
+                state=state,
+            )
             
             logger.info("User %s verified successfully, restoring permissions", user_id)
             

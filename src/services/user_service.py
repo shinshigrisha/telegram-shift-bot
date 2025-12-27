@@ -65,6 +65,112 @@ class UserService:
         user = await self.user_repo.get_by_id(user_id)
         return user.is_verified if user else False
 
+    async def delete_welcome_messages(
+        self,
+        bot,
+        user_id: int,
+        redis=None,
+        state=None,
+    ) -> int:
+        """
+        Удалить приветственные сообщения из групп для пользователя.
+        
+        Args:
+            bot: Экземпляр Bot
+            user_id: ID пользователя
+            redis: Экземпляр Redis (опционально)
+            state: FSMContext (опционально, для получения Redis)
+        
+        Returns:
+            Количество удаленных сообщений
+        """
+        from redis.asyncio import Redis as RedisType
+        import json
+        
+        try:
+            # Пытаемся получить Redis
+            current_redis: RedisType = redis
+            
+            if not current_redis and state:
+                try:
+                    storage = state.storage
+                    if hasattr(storage, 'redis'):
+                        current_redis = storage.redis
+                except Exception:
+                    pass
+            
+            if not current_redis:
+                try:
+                    from aiogram import Bot
+                    bot_instance = Bot.get_current(no_error=True)
+                    if bot_instance and hasattr(bot_instance, '_dispatcher'):
+                        dispatcher = bot_instance._dispatcher
+                        if dispatcher and "redis" in dispatcher:
+                            current_redis = dispatcher["redis"]
+                except Exception:
+                    pass
+            
+            if not current_redis:
+                logger.warning("Redis not available, cannot delete welcome messages")
+                return 0
+            
+            # Ищем все ключи welcome_message для этого пользователя
+            pattern = f"welcome_message:{user_id}:*"
+            deleted_count = 0
+            
+            async for key in current_redis.scan_iter(match=pattern):
+                try:
+                    message_data_str = await current_redis.get(key)
+                    if message_data_str:
+                        message_data = json.loads(message_data_str)
+                        msg_id = message_data.get("message_id")
+                        chat_id = message_data.get("chat_id")
+                        topic_id = message_data.get("topic_id")
+                        
+                        if msg_id and chat_id:
+                            try:
+                                await bot.delete_message(
+                                    chat_id=chat_id,
+                                    message_id=msg_id,
+                                    message_thread_id=topic_id,
+                                )
+                                deleted_count += 1
+                                logger.info(
+                                    "✅ Deleted welcome message %s from chat %s (topic_id: %s)",
+                                    msg_id,
+                                    chat_id,
+                                    topic_id
+                                )
+                            except Exception as delete_error:
+                                logger.debug(
+                                    "Could not delete welcome message %s from chat %s: %s",
+                                    msg_id,
+                                    chat_id,
+                                    delete_error
+                                )
+                    
+                    # Удаляем ключ из Redis
+                    await current_redis.delete(key)
+                except Exception as key_error:
+                    logger.warning("Error processing welcome message key %s: %s", key, key_error)
+            
+            if deleted_count > 0:
+                logger.info(
+                    "Deleted %d welcome messages for user %s",
+                    deleted_count,
+                    user_id
+                )
+            
+            return deleted_count
+        except Exception as cleanup_error:
+            logger.error(
+                "Error deleting welcome messages for user %s: %s",
+                user_id,
+                cleanup_error,
+                exc_info=True
+            )
+            return 0
+
     async def restore_user_permissions(
         self,
         bot,
