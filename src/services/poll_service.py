@@ -393,11 +393,8 @@ class PollService:
             
             seen_slots.add(slot_key)
             
-            # Форматируем время: добавляем "С" перед временем >= 10:00
-            if int(start.split(':')[0]) >= 10:
-                time_range = f"С {start} до {end}"
-            else:
-                time_range = f"{start} до {end}"
+            # Форматируем время единообразно для всех времен
+            time_range = f"{start} до {end}"
             
             # Создаем опцию с указанием лимита людей
             option_text = f"{time_range} - {limit} {'человек' if limit == 1 else 'человека' if limit < 5 else 'человек'}"
