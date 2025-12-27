@@ -206,6 +206,38 @@ async def process_chat_id_for_create(
         await message.answer(notification_text)
         await state.clear()
         
+        # Автоматически показываем обновленный список групп
+        # чтобы новая группа сразу была видна
+        try:
+            groups = await group_service.get_all_groups()
+            
+            if not groups:
+                text = "📭 Нет зарегистрированных групп"
+            else:
+                text = "📋 <b>Список групп:</b>\n\n"
+                for g in groups:
+                    status = "✅" if g.is_active else "❌"
+                    night = "🌙" if g.is_night else "☀️"
+                    slots = len(g.get_slots_config())
+                    display_name = clean_group_name_for_display(g.name)
+                    topic_info = f" | Topic: {g.telegram_topic_id}" if getattr(g, "telegram_topic_id", None) else ""
+                    
+                    text += (
+                        f"{status} {night} <b>{display_name}</b>\n"
+                        f"   ID: {g.id} | Chat: {g.telegram_chat_id}{topic_info}\n"
+                        f"   Слотов: {slots} | Закрытие: {g.poll_close_time}\n\n"
+                    )
+            
+            keyboard = InlineKeyboardMarkup(inline_keyboard=[
+                [InlineKeyboardButton(text="◀️ Назад", callback_data="admin:groups_menu")],
+            ])
+            
+            # Отправляем обновленный список групп
+            await message.answer(text, reply_markup=keyboard)
+        except Exception as e:
+            logger.error("Error showing updated groups list: %s", e, exc_info=True)
+            # Если ошибка - не критично, просто не показываем список
+        
     except Exception as e:
         logger.error("Error creating group: %s", e, exc_info=True)
         await message.answer(

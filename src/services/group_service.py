@@ -43,6 +43,10 @@ class GroupService:
             telegram_topic_id=telegram_topic_id,
             is_night=is_night,
         )
+        # Делаем flush, чтобы группа была доступна в текущей сессии для последующих запросов
+        await self.session.flush()
+        # Обновляем объект из БД, чтобы убедиться, что он синхронизирован
+        await self.session.refresh(group)
         # DatabaseMiddleware автоматически сделает commit после успешного выполнения handler
         return group
 
