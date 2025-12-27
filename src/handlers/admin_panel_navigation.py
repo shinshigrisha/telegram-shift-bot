@@ -66,8 +66,8 @@ async def callback_groups_menu(callback: CallbackQuery) -> None:
         "📋 <b>Управление группами</b>\n\n"
         "Выберите действие:"
     )
-    await callback.message.edit_text(text, reply_markup=get_groups_menu_keyboard())
-    await callback.answer()
+    await safe_edit_message(callback.message, text, reply_markup=get_groups_menu_keyboard())
+    await safe_answer_callback(callback)
 
 
 @router.callback_query(lambda c: c.data == "admin:settings_menu")
@@ -80,8 +80,8 @@ async def callback_settings_menu(callback: CallbackQuery) -> None:
         "⚙️ <b>Настройки</b>\n\n"
         "Выберите действие:"
     )
-    await callback.message.edit_text(text, reply_markup=get_settings_menu_keyboard())
-    await callback.answer()
+    await safe_edit_message(callback.message, text, reply_markup=get_settings_menu_keyboard())
+    await safe_answer_callback(callback)
 
 
 @router.callback_query(lambda c: c.data == "admin:polls_menu")
@@ -94,8 +94,8 @@ async def callback_polls_menu(callback: CallbackQuery) -> None:
         "📊 <b>Управление опросами</b>\n\n"
         "Выберите действие:"
     )
-    await callback.message.edit_text(text, reply_markup=get_polls_menu_keyboard())
-    await callback.answer()
+    await safe_edit_message(callback.message, text, reply_markup=get_polls_menu_keyboard())
+    await safe_answer_callback(callback)
 
 
 @router.callback_query(lambda c: c.data == "admin:monitoring_menu")
@@ -108,6 +108,6 @@ async def callback_monitoring_menu(callback: CallbackQuery) -> None:
         "📈 <b>Мониторинг</b>\n\n"
         "Выберите действие:"
     )
-    await callback.message.edit_text(text, reply_markup=get_monitoring_menu_keyboard())
-    await callback.answer()
+    await safe_edit_message(callback.message, text, reply_markup=get_monitoring_menu_keyboard())
+    await safe_answer_callback(callback)
 
