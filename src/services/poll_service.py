@@ -39,6 +39,13 @@ class PollService:
 
         groups = await self.group_repo.get_active_groups()
         tomorrow = date.today() + timedelta(days=1)
+        
+        # Логируем информацию о группах для диагностики
+        logger.info("Found %d active groups for poll creation", len(groups))
+        for group in groups:
+            slots_count = len(group.get_slots_config()) if not getattr(group, "is_night", False) else 0
+            logger.debug("Group %s: is_active=%s, slots=%d, topic_id=%s", 
+                        group.name, group.is_active, slots_count, getattr(group, "telegram_topic_id", None))
 
         created_count = 0
         errors: List[str] = []

@@ -35,6 +35,7 @@ class GroupService:
         telegram_chat_id: int,
         telegram_topic_id: Optional[int] = None,
         is_night: bool = False,
+        is_active: bool = True,
     ) -> Group:
         """Создать новую группу."""
         group = await self.group_repo.create(
@@ -42,6 +43,7 @@ class GroupService:
             telegram_chat_id=telegram_chat_id,
             telegram_topic_id=telegram_topic_id,
             is_night=is_night,
+            is_active=is_active,
         )
         # Делаем flush, чтобы группа была доступна в текущей сессии для последующих запросов
         await self.session.flush()
