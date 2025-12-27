@@ -218,12 +218,32 @@ async def process_verification_name(
     if verified_user:
         full_name_display = verified_user.get_full_name()
         
+        # Восстанавливаем права пользователя во всех группах
+        try:
+            from aiogram import Bot
+            bot = Bot.get_current(no_error=True)
+            if bot:
+                restored_count, failed_count, skipped_count = await user_service.restore_user_permissions(
+                    bot=bot,
+                    user_id=user_id,
+                    state=state,
+                )
+                logger.info(
+                    "Restored permissions for user %s: %d restored, %d failed, %d skipped",
+                    user_id,
+                    restored_count,
+                    failed_count,
+                    skipped_count
+                )
+        except Exception as e:
+            logger.error("Error restoring permissions for user %s: %s", user_id, e, exc_info=True)
+        
         # Отправляем подтверждение
         await message.answer(
             f"✅ <b>Пользователь верифицирован!</b>\n\n"
             f"Фамилия: <b>{last_name}</b>\n"
             f"Имя: <b>{first_name}</b>\n\n"
-            f"Теперь пользователь может участвовать в опросах."
+            f"Теперь пользователь может участвовать в опросах и писать в группах."
         )
         
         # Обновляем список неверифицированных пользователей
@@ -286,6 +306,22 @@ async def callback_verify_page(
     verified_count = await user_repo.verify_users_batch(user_ids)
     
     if verified_count > 0:
+        # Восстанавливаем права для всех верифицированных пользователей
+        try:
+            from aiogram import Bot
+            bot = Bot.get_current(no_error=True)
+            if bot:
+                for user_id in user_ids:
+                    try:
+                        await user_service.restore_user_permissions(
+                            bot=bot,
+                            user_id=user_id,
+                        )
+                    except Exception as e:
+                        logger.warning("Failed to restore permissions for user %s: %s", user_id, e)
+        except Exception as e:
+            logger.error("Error restoring permissions during batch verification: %s", e, exc_info=True)
+        
         # DatabaseMiddleware автоматически сделает commit после успешного выполнения handler
         await callback.answer(f"✅ Верифицировано {verified_count} пользователей", show_alert=True)
         
@@ -358,13 +394,32 @@ async def callback_verify_all(
     verified_count = await user_repo.verify_users_batch(user_ids)
     
     if verified_count > 0:
+        # Восстанавливаем права для всех верифицированных пользователей
+        try:
+            from aiogram import Bot
+            bot = Bot.get_current(no_error=True)
+            if bot:
+                restored_total = 0
+                for user_id in user_ids:
+                    try:
+                        restored_count, failed_count, skipped_count = await user_service.restore_user_permissions(
+                            bot=bot,
+                            user_id=user_id,
+                        )
+                        restored_total += restored_count
+                    except Exception as e:
+                        logger.warning("Failed to restore permissions for user %s: %s", user_id, e)
+                logger.info("Restored permissions for %d users (total groups: %d)", len(user_ids), restored_total)
+        except Exception as e:
+            logger.error("Error restoring permissions during mass verification: %s", e, exc_info=True)
+        
         # DatabaseMiddleware автоматически сделает commit после успешного выполнения handler
         await callback.answer(f"✅ Верифицировано {verified_count} пользователей", show_alert=True)
         
         text = (
             f"✅ <b>Массовая верификация завершена!</b>\n\n"
             f"Верифицировано пользователей: <b>{verified_count}</b>\n\n"
-            f"Теперь все пользователи могут участвовать в опросах."
+            f"Теперь все пользователи могут участвовать в опросах и писать в группах."
         )
         keyboard = InlineKeyboardMarkup(inline_keyboard=[
             [InlineKeyboardButton(text="◀️ Назад", callback_data="admin:verification_menu")],
