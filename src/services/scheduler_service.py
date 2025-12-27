@@ -2,6 +2,7 @@ import logging
 from datetime import datetime
 from typing import Optional, Any
 
+import pytz
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from apscheduler.triggers.cron import CronTrigger
 from aiogram import Bot
@@ -22,7 +23,9 @@ class SchedulerService:
         poll_service: Optional[PollService],
         notification_service: NotificationService,
     ) -> None:
-        self.scheduler = AsyncIOScheduler()
+        # Инициализируем scheduler с правильным часовым поясом
+        self.timezone = pytz.timezone(settings.TIMEZONE)
+        self.scheduler = AsyncIOScheduler(timezone=self.timezone)
         self.bot = bot
         self.poll_service = poll_service
         self.notification_service = notification_service
@@ -30,7 +33,7 @@ class SchedulerService:
 
     async def start(self) -> None:
         """Запуск планировщика."""
-        logger.info("Starting scheduler...")
+        logger.info("Starting scheduler with timezone: %s", settings.TIMEZONE)
 
         # Создание опросов в 09:00 (в существующей теме "отметки на слот")
         self.scheduler.add_job(
@@ -38,6 +41,7 @@ class SchedulerService:
             CronTrigger(
                 hour=settings.POLL_CREATION_HOUR,
                 minute=settings.POLL_CREATION_MINUTE,
+                timezone=self.timezone,
             ),
             id="create_polls",
             misfire_grace_time=3600,  # Прощаем задержки до 1 часа (на случай перезапуска бота)
@@ -49,6 +53,7 @@ class SchedulerService:
             CronTrigger(
                 hour=settings.POLL_CLOSING_HOUR,
                 minute=settings.POLL_CLOSING_MINUTE,
+                timezone=self.timezone,
             ),
             id="close_polls",
         )
@@ -62,6 +67,7 @@ class SchedulerService:
                 CronTrigger(
                     hour=settings.POLL_CLOSING_HOUR,
                     minute=minute,
+                    timezone=self.timezone,
                 ),
                 id=f"close_polls_check_{minute}",
             )
@@ -69,14 +75,14 @@ class SchedulerService:
         # Также проверяем в 20:00 на случай, если что-то пропустили
         self.scheduler.add_job(
             self._close_polls_job,
-            CronTrigger(hour=20, minute=0),
+            CronTrigger(hour=20, minute=0, timezone=self.timezone),
             id="close_polls_final_check",
         )
 
         # Напоминание в 18:00 (один раз)
         self.scheduler.add_job(
             self._hourly_reminder_job,
-            CronTrigger(hour=18, minute=0),
+            CronTrigger(hour=18, minute=0, timezone=self.timezone),
             id="reminder_18_00",
         )
         
@@ -84,14 +90,31 @@ class SchedulerService:
 
         self.scheduler.add_job(
             self._health_check_job,
-            CronTrigger(minute=30),
+            CronTrigger(minute=30, timezone=self.timezone),
             id="health_check",
             misfire_grace_time=3600,  # Прощаем задержки до 1 часа (на случай длительных перезагрузок)
         )
         
 
         self.scheduler.start()
-        logger.info("Scheduler started")
+        logger.info("Scheduler started with timezone: %s", settings.TIMEZONE)
+        
+        # Логируем следующее время выполнения задач для диагностики
+        create_polls_job = self.scheduler.get_job("create_polls")
+        if create_polls_job and create_polls_job.next_run_time:
+            logger.info(
+                "Next polls creation scheduled at: %s (%s)",
+                create_polls_job.next_run_time.strftime("%Y-%m-%d %H:%M:%S %Z"),
+                create_polls_job.next_run_time.astimezone(self.timezone).strftime("%H:%M:%S %Z")
+            )
+        
+        close_polls_job = self.scheduler.get_job("close_polls")
+        if close_polls_job and close_polls_job.next_run_time:
+            logger.info(
+                "Next polls closing scheduled at: %s (%s)",
+                close_polls_job.next_run_time.strftime("%Y-%m-%d %H:%M:%S %Z"),
+                close_polls_job.next_run_time.astimezone(self.timezone).strftime("%H:%M:%S %Z")
+            )
         
         # Проверяем и закрываем опросы при старте, если время закрытия уже прошло
         # Это нужно на случай, если бот был перезапущен после времени закрытия
@@ -156,7 +179,7 @@ class SchedulerService:
                 )
 
     async def _close_polls_job(self) -> None:
-        logger.info("Running close_polls job at %s", datetime.now().strftime("%H:%M:%S"))
+        logger.info("Running close_polls job at %s", datetime.now(self.timezone).strftime("%H:%M:%S"))
         try:
             from src.models.database import AsyncSessionLocal
             from src.repositories.group_repository import GroupRepository
@@ -372,7 +395,8 @@ class SchedulerService:
             await asyncio.sleep(5)
             
             from datetime import time
-            now = datetime.now()
+            # Используем локальное время с учетом часового пояса
+            now = datetime.now(self.timezone)
             current_time = now.time()
             closing_time = time(settings.POLL_CLOSING_HOUR, settings.POLL_CLOSING_MINUTE)
             
@@ -437,7 +461,8 @@ class SchedulerService:
             await asyncio.sleep(5)
             
             from datetime import time
-            now = datetime.now()
+            # Используем локальное время с учетом часового пояса
+            now = datetime.now(self.timezone)
             current_time = now.time()
             creation_time = time(settings.POLL_CREATION_HOUR, settings.POLL_CREATION_MINUTE)
             

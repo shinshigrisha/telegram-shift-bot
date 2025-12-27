@@ -37,6 +37,7 @@ class Settings(BaseSettings):
     POLL_CLOSING_HOUR: int = 19
     POLL_CLOSING_MINUTE: int = 0
     REMINDER_HOURS: List[int] = [10, 12, 14, 16, 18]
+    TIMEZONE: str = "Europe/Moscow"  # Часовой пояс для планировщика (по умолчанию Москва)
 
     # Paths
     BASE_DIR: Path = Path(__file__).resolve().parent.parent
