@@ -1,0 +1,55 @@
+services:
+  postgres:
+    image: postgres:15
+    container_name: telegram-shift-postgres
+    environment:
+      POSTGRES_DB: shift_bot
+      POSTGRES_USER: bot_user
+      POSTGRES_PASSWORD: MySecureDbPass123
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./backups:/backups:ro
+    ports:
+      - "5432:5432"
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U bot_user"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  redis:
+    image: redis:7-alpine
+    container_name: telegram-shift-redis
+    command: redis-server --requirepass redis_secure_pass_456
+    volumes:
+      - redis_data:/data
+      - ./backups:/backups:ro
+    ports:
+      - "6379:6379"
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "redis-cli", "--raw", "incr", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+
+  bot:
+    build: .
+    container_name: telegram-shift-bot
+    env_file:
+      - .env
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    volumes:
+      - ./logs:/app/logs
+      - ./backups:/app/backups
+    restart: unless-stopped
+    command: ["python", "src/main.py"]
+
+volumes:
+  postgres_data:
+  redis_data:
