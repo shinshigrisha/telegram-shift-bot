@@ -1,0 +1,80 @@
+from typing import Optional
+
+from aiogram import Router
+from aiogram.filters import Command
+from aiogram.types import Message
+
+from config.settings import settings
+from src.services.user_service import UserService
+from src.utils.auth import is_curator
+
+
+router = Router()
+
+
+# Экспортируем функции для использования в других модулях
+__all__ = ["get_user_commands", "get_admin_commands"]
+
+
+def get_user_commands() -> str:
+    """Получить краткую информацию о пользовательских командах."""
+    return """📋 <b>Пользовательские команды:</b>
+
+🚀 <b>/start</b> - Начать работу с ботом
+❓ <b>/help</b> - Справка по боту
+
+💡 <b>Как это работает:</b>
+• Ежедневно в 09:00 бот создает опросы на следующий день
+• Голосуйте в опросах до 19:00
+• В 19:00 опросы автоматически закрываются"""
+
+
+def get_admin_commands() -> str:
+    """Получить краткую информацию об админских командах."""
+    return """👑 <b>Админские команды:</b>
+
+🎛️ <b>/admin</b> - <b>Админ-панель</b> (основной способ управления)
+   Все функции управления доступны через удобный интерфейс с кнопками.
+
+💡 <b>Рекомендация:</b> Используйте <b>/admin</b> для управления ботом!"""
+
+
+@router.message(Command("help"))
+async def cmd_help(message: Message) -> None:
+    """Помощь пользователю."""
+    user_id = message.from_user.id
+    is_admin = user_id in settings.ADMIN_IDS
+    
+    help_text = (
+        "ℹ️ <b>Справка по боту</b>\n\n"
+        f"{get_user_commands()}\n\n"
+    )
+    
+    if is_admin:
+        help_text += f"{get_admin_commands()}\n\n"
+    
+    help_text += (
+        "⏰ <b>Автоматический рабочий цикл:</b>\n"
+        "• <b>09:00</b> - Создание опросов на следующий день\n"
+        "• <b>18:00</b> - Напоминание о закрытии записи\n"
+        "• <b>19:00</b> - Автоматическое закрытие опросов\n\n"
+    )
+    
+    if is_admin:
+        help_text += (
+            "🎛️ <b>Управление:</b>\n"
+            "Используйте команду <b>/admin</b> для доступа к админ-панели\n"
+            "со всеми функциями управления через удобный интерфейс.\n\n"
+        )
+    
+    help_text += (
+        "💡 <b>Примечание:</b>\n"
+        "Для участия в опросах просто голосуйте в опросах,\n"
+        "которые бот отправляет в ваши группы."
+    )
+    
+    await message.answer(help_text)
+
+
+
+

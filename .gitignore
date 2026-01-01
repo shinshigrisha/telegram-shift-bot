@@ -36,7 +36,6 @@ venv.bak/
 *.swo
 *~
 .DS_Store
-.cursor/
 
 # Environment variables
 .env
@@ -76,27 +75,10 @@ htmlcov/
 # Temporary files
 *.tmp
 *.temp
+.cursor/
 debug.log
 
 # OS files
 Thumbs.db
 .DS_Store
 
-# SSH keys and sensitive files
-*.pem
-*.key
-*_rsa
-*_dsa
-*_ecdsa
-*_ed25519
-id_rsa*
-id_dsa*
-id_ecdsa*
-id_ed25519*
-*.pub
-*private*
-*secret*
-eval*
-
-# Strange files (pip logs, etc)
-=*
