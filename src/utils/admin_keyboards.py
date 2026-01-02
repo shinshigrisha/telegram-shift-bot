@@ -284,7 +284,7 @@ def get_slots_count_keyboard() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(inline_keyboard=keyboard)
 
 
-def get_hours_keyboard(callback_prefix: str, back_callback: str) -> InlineKeyboardMarkup:
+def get_hours_keyboard(callback_prefix: str, back_callback: str = "admin:settings:slots") -> InlineKeyboardMarkup:
     """Клавиатура для выбора часа (0-23)."""
     keyboard = []
     # Создаем кнопки по 4 в ряд
@@ -300,7 +300,7 @@ def get_hours_keyboard(callback_prefix: str, back_callback: str) -> InlineKeyboa
     return InlineKeyboardMarkup(inline_keyboard=keyboard)
 
 
-def get_minutes_keyboard(callback_prefix: str, back_callback: str) -> InlineKeyboardMarkup:
+def get_minutes_keyboard(callback_prefix: str, back_callback: str = "admin:settings:slots") -> InlineKeyboardMarkup:
     """Клавиатура для выбора минут (только 00 и 30)."""
     keyboard = [
         [
@@ -312,7 +312,7 @@ def get_minutes_keyboard(callback_prefix: str, back_callback: str) -> InlineKeyb
     return InlineKeyboardMarkup(inline_keyboard=keyboard)
 
 
-def get_courier_limit_keyboard(back_callback: str) -> InlineKeyboardMarkup:
+def get_courier_limit_keyboard(back_callback: str = "admin:settings:slots") -> InlineKeyboardMarkup:
     """Клавиатура для выбора количества курьеров (1-10)."""
     keyboard = []
     # Создаем кнопки по 5 в ряд
