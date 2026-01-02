@@ -75,6 +75,54 @@ rsync -avz --exclude 'venv' --exclude '__pycache__' --exclude '.git' \
 
 ---
 
+## Шаг 2.5: Настройка SSH для GitHub (опционально)
+
+Если вы хотите использовать `git pull` на сервере для обновления кода, настройте SSH-ключи:
+
+### На сервере:
+
+```bash
+# 1. Проверьте, есть ли уже SSH-ключ
+ls -la ~/.ssh/id_*.pub
+
+# 2. Если ключа нет, создайте новый (без пароля для сервера)
+ssh-keygen -t ed25519 -C "server@telegram-shift-bot" -f ~/.ssh/id_ed25519 -N ""
+
+# 3. Покажите публичный ключ
+cat ~/.ssh/id_ed25519.pub
+```
+
+### Добавьте ключ в GitHub:
+
+1. Скопируйте публичный ключ с сервера
+2. Откройте: https://github.com/settings/keys
+3. Нажмите "New SSH key"
+4. Title: например, "Production Server"
+5. Key: вставьте скопированный ключ
+6. Нажмите "Add SSH key"
+
+### Настройте remote URL на сервере:
+
+```bash
+cd /opt/telegram-shift-bot
+
+# Проверьте текущий URL
+git remote -v
+
+# Измените на SSH
+git remote set-url origin git@github.com:shinshigrisha/telegram-shift-bot.git
+
+# Проверьте подключение
+ssh -T git@github.com
+
+# Теперь можно использовать git pull
+git pull
+```
+
+**Альтернатива:** Если не хотите настраивать SSH, используйте `rsync` для синхронизации изменений с локальной машины (см. Шаг 2).
+
+---
+
 ## Шаг 3: Настройка .env файла
 
 ### На сервере создайте .env файл
