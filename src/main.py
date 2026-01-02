@@ -24,9 +24,16 @@ from src.handlers import admin_settings
 from src.handlers import admin_polls
 from src.handlers import admin_broadcast
 from src.handlers import admin_monitoring
+from src.handlers import admin_scheduler
+from src.handlers import poll_handlers
 from src.handlers import courier_ai
 from src.handlers import user_handlers
 from src.utils.db_pool import get_db_pool, close_db_pool
+from src.services.scheduler_service import SchedulerService
+from src.services.poll_service import PollService
+from src.services.group_service import GroupService
+from src.repositories.poll_repository import PollRepository
+from src.repositories.group_repository import GroupRepository
 
 # Создаём директорию для логов перед настройкой логирования
 # Используем абсолютный путь для надежности
@@ -45,9 +52,14 @@ logging.basicConfig(
 
 logger = logging.getLogger(__name__)
 
+# Глобальная переменная для scheduler
+scheduler_service: SchedulerService | None = None
+
 
 async def main() -> None:
     """Главная функция для запуска бота."""
+    global scheduler_service
+    
     logger.info("Запуск Telegram бота...")
     
     # Проверяем наличие обязательных переменных
@@ -104,6 +116,8 @@ async def main() -> None:
     dp.include_router(admin_polls.router)
     dp.include_router(admin_broadcast.router)
     dp.include_router(admin_monitoring.router)
+    dp.include_router(admin_scheduler.router)
+    dp.include_router(poll_handlers.router)
     dp.include_router(admin_curator.router)
     dp.include_router(courier_ai.router)
     dp.include_router(user_handlers.router)
@@ -111,12 +125,39 @@ async def main() -> None:
     logger.info("Роутеры зарегистрированы")
     
     # Инициализируем пул соединений с БД
+    db_pool = None
     try:
-        await get_db_pool()
+        db_pool = await get_db_pool()
         logger.info("Пул соединений PostgreSQL инициализирован")
     except Exception as e:
         logger.error("Ошибка инициализации пула соединений PostgreSQL: %s", e, exc_info=True)
         # Не завершаем работу, так как некоторые функции могут работать без БД
+    
+    # Инициализируем планировщик
+    if db_pool:
+        try:
+            poll_repo = PollRepository(db_pool)
+            group_repo = GroupRepository(db_pool)
+            group_service = GroupService(db_pool)
+            poll_service = PollService(bot, poll_repo, group_repo)
+            
+            scheduler_service = SchedulerService(
+                bot=bot,
+                poll_service=poll_service,
+                group_service=group_service,
+            )
+            
+            # Сохраняем scheduler в контексте бота для доступа из handlers
+            bot["scheduler_service"] = scheduler_service
+            bot["poll_service"] = poll_service
+            bot["group_service"] = group_service
+            
+            # Запускаем планировщик
+            await scheduler_service.start()
+            logger.info("Планировщик задач инициализирован")
+            
+        except Exception as e:
+            logger.error("Ошибка инициализации планировщика: %s", e, exc_info=True)
     
     # Запускаем бота
     try:
@@ -125,6 +166,10 @@ async def main() -> None:
     except Exception as e:
         logger.error("Критическая ошибка при работе бота: %s", e, exc_info=True)
     finally:
+        # Останавливаем планировщик
+        if scheduler_service:
+            await scheduler_service.stop()
+        
         # Закрываем соединения
         await close_db_pool()
         await redis.close()

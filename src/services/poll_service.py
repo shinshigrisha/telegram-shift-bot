@@ -33,6 +33,65 @@ class PollService:
         self.poll_repo = poll_repo
         self.group_repo = group_repo
     
+    def _format_poll_question(self, group: Dict[str, Any], target_date: date) -> str:
+        """
+        Форматировать заголовок опроса.
+        
+        Args:
+            group: Данные группы
+            target_date: Дата опроса
+            
+        Returns:
+            Отформатированный заголовок
+        """
+        is_night = group.get('is_night', False)
+        date_str = target_date.strftime('%d.%m.%Y')
+        
+        if is_night:
+            return f"Смена в ночь сегодня ({date_str})"
+        else:
+            return f"Смена на завтра ({date_str})"
+    
+    def _format_poll_options(
+        self,
+        group: Dict[str, Any],
+        slots: List[Dict[str, Any]]
+    ) -> List[str]:
+        """
+        Форматировать варианты ответов для опроса.
+        
+        Args:
+            group: Данные группы
+            slots: Список слотов
+            
+        Returns:
+            Список вариантов ответов
+        """
+        is_night = group.get('is_night', False)
+        options = []
+        
+        if is_night:
+            # Для ночных групп: Выхожу, Помогаю до 00:00, Выходной
+            options = [
+                "Выхожу",
+                "Помогаю до 00:00",
+                "Выходной"
+            ]
+        else:
+            # Для дневных групп: слоты + Выходной
+            for slot in slots:
+                start = slot.get('start', '?')
+                end = slot.get('end', '?')
+                limit = slot.get('limit', 3)
+                # Формат: "С 7:30 до 19:30 - [0/3]"
+                option_text = f"С {start} до {end} - [0/{limit}]"
+                options.append(option_text)
+            
+            # Добавляем вариант "Выходной"
+            options.append("Выходной")
+        
+        return options
+    
     async def create_daily_polls(self, target_date: Optional[date] = None) -> Tuple[int, List[str]]:
         """
         Создать опросы на указанную дату для всех активных групп.
@@ -66,25 +125,23 @@ class PollService:
                     continue
                 
                 # Получаем слоты из настроек группы
-                settings = group.get('settings', {})
-                slots = settings.get('slots', [])
+                settings_data = group.get('settings', {})
+                slots = settings_data.get('slots', [])
                 
-                if not slots:
+                is_night = group.get('is_night', False)
+                
+                # Для дневных групп требуются слоты
+                if not is_night and not slots:
                     logger.warning(
-                        "Нет слотов для группы %s, пропускаем создание опроса",
+                        "Нет слотов для дневной группы %s, пропускаем создание опроса",
                         group['name']
                     )
                     errors.append(f"Группа {group['name']}: нет настроенных слотов")
                     continue
                 
                 # Формируем варианты ответов для опроса
-                options = []
-                for slot in slots:
-                    start = slot.get('start', '?')
-                    end = slot.get('end', '?')
-                    limit = slot.get('limit', 3)
-                    option_text = f"{start}-{end} (лимит: {limit})"
-                    options.append(option_text)
+                options = self._format_poll_options(group, slots)
+                question = self._format_poll_question(group, target_date)
                 
                 # Определяем topic_id для отправки опроса
                 topic_id = group.get('telegram_topic_id')
@@ -94,10 +151,10 @@ class PollService:
                 try:
                     poll_message = await self.bot.send_poll(
                         chat_id=chat_id,
-                        question=f"Запись на слоты на {target_date.strftime('%d.%m.%Y')}",
+                        question=question,
                         options=options,
                         is_anonymous=False,
-                        allows_multiple_answers=True,
+                        allows_multiple_answers=False,  # Один выбор
                         message_thread_id=topic_id,
                     )
                     
@@ -129,6 +186,74 @@ class PollService:
                 errors.append(error_msg)
         
         return created_count, errors
+    
+    async def create_poll_for_group(
+        self,
+        group_id: int,
+        target_date: Optional[date] = None
+    ) -> Optional[Dict[str, Any]]:
+        """
+        Создать опрос для конкретной группы.
+        
+        Args:
+            group_id: ID группы
+            target_date: Дата опроса (если None - завтра)
+            
+        Returns:
+            Данные созданного опроса или None при ошибке
+        """
+        if target_date is None:
+            target_date = date.today() + timedelta(days=1)
+        
+        group = await self.group_repo.get_by_id(group_id)
+        if not group:
+            logger.error("Группа %d не найдена", group_id)
+            return None
+        
+        # Проверяем, не существует ли уже опрос
+        existing = await self.poll_repo.get_by_group_and_date(group_id, target_date)
+        if existing:
+            logger.info("Опрос уже существует для группы %s на %s", group['name'], target_date)
+            return existing
+        
+        settings_data = group.get('settings', {})
+        slots = settings_data.get('slots', [])
+        is_night = group.get('is_night', False)
+        
+        if not is_night and not slots:
+            logger.error("Нет слотов для группы %s", group['name'])
+            return None
+        
+        options = self._format_poll_options(group, slots)
+        question = self._format_poll_question(group, target_date)
+        
+        topic_id = group.get('telegram_topic_id')
+        chat_id = group['telegram_chat_id']
+        
+        try:
+            poll_message = await self.bot.send_poll(
+                chat_id=chat_id,
+                question=question,
+                options=options,
+                is_anonymous=False,
+                allows_multiple_answers=False,
+                message_thread_id=topic_id,
+            )
+            
+            poll = await self.poll_repo.create(
+                group_id=group['id'],
+                poll_date=target_date,
+                telegram_poll_id=str(poll_message.poll.id),
+                telegram_message_id=poll_message.message_id,
+                telegram_topic_id=topic_id,
+                status="active",
+            )
+            
+            return poll
+            
+        except Exception as e:
+            logger.error("Ошибка создания опроса для группы %s: %s", group['name'], e, exc_info=True)
+            return None
     
     async def close_poll(self, poll_id: str) -> bool:
         """

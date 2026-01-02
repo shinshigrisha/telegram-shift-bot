@@ -1,7 +1,7 @@
 """
 Состояния FSM для админ-панели.
 """
-from aiogram.fsm.state import State, StatesGroup
+from aiogram.fsm.state import State, StatesGroup  # pyright: ignore[reportMissingImports]
 
 
 class AdminPanelStates(StatesGroup):
