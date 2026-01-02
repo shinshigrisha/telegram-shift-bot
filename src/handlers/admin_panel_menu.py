@@ -11,6 +11,8 @@ from aiogram.fsm.context import FSMContext
 from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup
 
 from src.states.admin_states import AdminPanelStates
+from src.services.group_service import GroupService
+import asyncpg
 
 router = Router()
 
@@ -253,14 +255,24 @@ async def process_group_topic_id(message: Message, state: FSMContext):
     group_name = data.get("group_name")
     chat_id = data.get("chat_id")
     
-    # TODO: Сохранить группу в БД
+    svc = GroupService()
+    try:
+        created = await svc.create_group(name=group_name, chat_id=chat_id, topic_id=topic_id if topic_id>0 else None)
+    except asyncpg.exceptions.UniqueViolationError:
+        await state.clear()
+        await message.reply("❌ Группа с таким Chat ID уже существует в базе")
+        return
+    except Exception as e:
+        await state.clear()
+        await message.reply(f"❌ Ошибка при сохранении группы: {e}")
+        return
+
     await state.clear()
-    
     await message.reply(
         f"✅ <b>Группа успешно создана!</b>\n\n"
-        f"<b>Название:</b> {group_name}\n"
-        f"<b>Chat ID:</b> <code>{chat_id}</code>\n"
-        f"<b>Topic ID:</b> {topic_id if topic_id > 0 else 'не установлен'}",
+        f"<b>Название:</b> {created.get('name')}\n"
+        f"<b>Chat ID:</b> <code>{created.get('chat_id')}</code>\n"
+        f"<b>Topic ID:</b> {created.get('topic_id') if created.get('topic_id') else 'не установлен'}",
         parse_mode="HTML"
     )
 
