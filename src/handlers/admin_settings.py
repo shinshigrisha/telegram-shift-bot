@@ -386,72 +386,30 @@ async def process_schedule_time(message: Message, state: FSMContext, group_servi
 @require_admin_callback
 async def callback_slots_menu(callback: CallbackQuery, state: FSMContext) -> None:
     """Меню настройки слотов."""
-    await state.set_state(AdminPanelStates.waiting_for_slot_group)
-    
     text = (
-        "⚙️ <b>Настройка слотов</b>\n\n"
+        "⚙️ <b>Настроить слоты</b>\n\n"
         "Выберите действие:"
     )
     
-    await safe_edit_message(callback.message, text, reply_markup=get_slot_action_keyboard())
+    await safe_edit_message(callback.message, text, reply_markup=get_slot_action_keyboard(), parse_mode="HTML")
     await safe_answer_callback(callback)
 
 
 @router.callback_query(lambda c: c.data and c.data.startswith("admin:slot:action:"))
 @require_admin_callback
 async def callback_slot_action(callback: CallbackQuery, state: FSMContext, group_service: GroupService) -> None:
-    """Обработка выбора действия со слотом."""
-    action = callback.data.split(":")[-1]  # add, edit, delete, view
+    """Обработка выбора действия со слотом (view или edit)."""
+    action = callback.data.split(":")[-1]  # view или edit
     
-    if action == "view":
-        # Просмотр слотов - показываем список групп
-        groups = await group_service.get_all_groups()
-        
-        if not groups:
-            await safe_edit_message(
-                callback.message,
-                "❌ Нет зарегистрированных групп.",
-                reply_markup=get_back_keyboard("admin:settings:slots")
-            )
-            await safe_answer_callback(callback)
-            return
-        
-        await state.update_data(slot_action="view")
-        await state.set_state(AdminPanelStates.waiting_for_slot_group)
-        
-        text = (
-            "📋 <b>Просмотр слотов</b>\n\n"
-            "Выберите группу:"
-        )
-        
-        # Создаем клавиатуру с модифицированными callback_data для слотов
-        from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
-        keyboard_buttons = []
-        for group in groups:
-            group_name = clean_group_name_for_display(group.get("name", f"Группа {group.get('id', '?')}"))
-            if len(group_name) > 30:
-                group_name = group_name[:27] + "..."
-            keyboard_buttons.append([
-                InlineKeyboardButton(
-                    text=group_name,
-                    callback_data=f"admin:slot_group:{group['id']}"
-                )
-            ])
-        keyboard_buttons.append([InlineKeyboardButton(text="◀️ Назад", callback_data="admin:settings:slots")])
-        keyboard = InlineKeyboardMarkup(inline_keyboard=keyboard_buttons)
-        
-        await safe_edit_message(callback.message, text, reply_markup=keyboard)
-        await safe_answer_callback(callback)
-        return
-    
-    # Для других действий также показываем список групп
+    # Получаем список групп
     groups = await group_service.get_all_groups()
     
     if not groups:
         await safe_edit_message(
             callback.message,
             "❌ Нет зарегистрированных групп.",
-            reply_markup=get_back_keyboard("admin:settings:slots")
+            reply_markup=get_back_keyboard("admin:settings:slots"),
+            parse_mode="HTML"
         )
         await safe_answer_callback(callback)
         return
@@ -459,20 +417,14 @@ async def callback_slot_action(callback: CallbackQuery, state: FSMContext, group
     await state.update_data(slot_action=action)
     await state.set_state(AdminPanelStates.waiting_for_slot_group)
     
-    action_names = {
-        "add": "Добавление слота",
-        "edit": "Изменение слота",
-        "delete": "Удаление слота",
-    }
-    
-    action_name = action_names.get(action, "действие")
+    action_text = "📋 Посмотреть слоты" if action == "view" else "✏️ Изменить слоты"
     
     text = (
-        f"⚙️ <b>Настройка слотов: {action_name}</b>\n\n"
+        f"{action_text}\n\n"
         "Выберите группу:"
     )
     
-    # Создаем клавиатуру с модифицированными callback_data для слотов
+    # Создаем клавиатуру со списком групп
     from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
     keyboard_buttons = []
     for group in groups:
@@ -482,13 +434,13 @@ async def callback_slot_action(callback: CallbackQuery, state: FSMContext, group
         keyboard_buttons.append([
             InlineKeyboardButton(
                 text=group_name,
-                callback_data=f"admin:slot_group:{group['id']}"
+                callback_data=f"admin:slot_group:{action}:{group['id']}"
             )
         ])
     keyboard_buttons.append([InlineKeyboardButton(text="◀️ Назад", callback_data="admin:settings:slots")])
     keyboard = InlineKeyboardMarkup(inline_keyboard=keyboard_buttons)
     
-    await safe_edit_message(callback.message, text, reply_markup=keyboard)
+    await safe_edit_message(callback.message, text, reply_markup=keyboard, parse_mode="HTML")
     await safe_answer_callback(callback)
 
 
@@ -497,107 +449,62 @@ async def callback_slot_action(callback: CallbackQuery, state: FSMContext, group
 @require_admin_callback
 async def callback_select_group_for_slots(callback: CallbackQuery, state: FSMContext, group_service: GroupService) -> None:
     """Обработка выбора группы для работы со слотами."""
-    group_id = int(callback.data.split(":")[-1])
-    
-    data = await state.get_data()
-    slot_action = data.get("slot_action")
+    parts = callback.data.split(":")
+    action = parts[2]  # view или edit
+    group_id = int(parts[3])
     
     group = await group_service.get_group_by_id(group_id)
     if not group:
         await safe_edit_message(
             callback.message,
             "❌ Группа не найдена.",
-            reply_markup=get_back_keyboard("admin:settings:slots")
+            reply_markup=get_back_keyboard("admin:settings:slots"),
+            parse_mode="HTML"
         )
         await safe_answer_callback(callback)
         return
     
-    await state.update_data(group_id=group_id)
+    await state.update_data(group_id=group_id, slot_action=action)
     
     # Получаем текущие слоты для отображения
     slots = group_service.get_slots_config(group)
-    slots_text = ""
-    if slots:
-        slots_text = f"\n📋 <b>Текущие слоты:</b>\n{format_slots_list(slots)}\n\n"
-    else:
-        slots_text = "\n⚠️ <b>Слоты еще не настроены для этой группы.</b>\n\n"
+    group_name = clean_group_name_for_display(group.get("name", "Без названия"))
     
-    if slot_action == "view":
-        # Показываем текущие слоты
+    if action == "view":
+        # Показываем текущие слоты с кнопками "Изменить" и "Назад"
+        slots_text = format_slots_list(slots) if slots else "⚠️ <b>Слоты еще не настроены для этой группы.</b>"
+        
         text = (
-            f"📋 <b>Слоты группы: {group.get('name')}</b>\n\n"
-            f"{format_slots_list(slots) if slots else '⚠️ <b>Слоты еще не настроены для этой группы.</b>'}"
+            f"📋 <b>Слоты группы: {group_name}</b>\n\n"
+            f"{slots_text}"
         )
         
-        await safe_edit_message(callback.message, text, reply_markup=get_back_keyboard("admin:settings:slots"))
+        from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
+        keyboard = InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text="✏️ Изменить", callback_data=f"admin:slot_group:edit:{group_id}")],
+            [InlineKeyboardButton(text="◀️ Назад", callback_data="admin:slot:action:view")],
+        ])
+        
+        await safe_edit_message(callback.message, text, reply_markup=keyboard, parse_mode="HTML")
         await safe_answer_callback(callback)
         await state.clear()
         return
     
-    elif slot_action == "add":
-        # Начинаем процесс добавления слота
-        await state.set_state(AdminPanelStates.waiting_for_slot_start_time)
+    elif action == "edit":
+        # Начинаем процесс изменения слотов - выбираем количество слотов
+        await state.set_state(AdminPanelStates.waiting_for_slots_count)
+        
+        slots_text = format_slots_list(slots) if slots else "⚠️ <b>Слоты еще не настроены для этой группы.</b>"
         
         text = (
-            f"➕ <b>Добавление слота</b>\n\n"
-            f"Группа: <b>{group.get('name')}</b>\n"
-            f"{slots_text}"
-            "Введите время начала слота в формате <code>ЧЧ:ММ</code>:\n"
-            "Пример: <code>08:00</code>\n\n"
-            "Для отмены введите: <code>отмена</code>"
+            f"✏️ <b>Изменение слотов</b>\n\n"
+            f"Группа: <b>{group_name}</b>\n\n"
+            f"{slots_text}\n\n"
+            "Выберите количество слотов (максимум 5):"
         )
         
-        await safe_edit_message(callback.message, text, reply_markup=get_back_keyboard("admin:settings:slots"))
-        await safe_answer_callback(callback)
-    
-    elif slot_action == "edit":
-        # Показываем список слотов для редактирования
-        if not slots:
-            await safe_edit_message(
-                callback.message,
-                f"❌ У группы <b>{group.get('name')}</b> нет настроенных слотов.\n\n"
-                f"Сначала добавьте слоты.",
-                reply_markup=get_back_keyboard("admin:settings:slots")
-            )
-            await safe_answer_callback(callback)
-            return
-        
-        await state.set_state(AdminPanelStates.waiting_for_slot_to_edit)
-        
-        text = (
-            f"✏️ <b>Изменение слота</b>\n\n"
-            f"Группа: <b>{group.get('name')}</b>\n"
-            f"{slots_text}"
-            "Выберите слот для редактирования:"
-        )
-        
-        keyboard = get_slots_list_keyboard(slots, group_id, "edit")
-        await safe_edit_message(callback.message, text, reply_markup=keyboard)
-        await safe_answer_callback(callback)
-    
-    elif slot_action == "delete":
-        # Показываем список слотов для удаления
-        if not slots:
-            await safe_edit_message(
-                callback.message,
-                f"❌ У группы <b>{group.get('name')}</b> нет настроенных слотов.\n\n"
-                f"Сначала добавьте слоты.",
-                reply_markup=get_back_keyboard("admin:settings:slots")
-            )
-            await safe_answer_callback(callback)
-            return
-        
-        await state.set_state(AdminPanelStates.waiting_for_slot_to_delete)
-        
-        text = (
-            f"🗑️ <b>Удаление слота</b>\n\n"
-            f"Группа: <b>{group.get('name')}</b>\n"
-            f"{slots_text}"
-            "Выберите слот для удаления:"
-        )
-        
-        keyboard = get_slots_list_keyboard(slots, group_id, "delete")
-        await safe_edit_message(callback.message, text, reply_markup=keyboard)
+        from src.utils.admin_keyboards import get_slots_count_keyboard
+        await safe_edit_message(callback.message, text, reply_markup=get_slots_count_keyboard(), parse_mode="HTML")
         await safe_answer_callback(callback)
 
 
@@ -930,6 +837,293 @@ async def callback_delete_slot(callback: CallbackQuery, group_service: GroupServ
         await safe_edit_message(
             callback.message,
             f"❌ Ошибка при удалении слота: {e}",
-            reply_markup=get_back_keyboard("admin:settings:slots")
+            reply_markup=get_back_keyboard("admin:settings:slots"),
+            parse_mode="HTML"
         )
         await safe_answer_callback(callback)
+
+
+# Новые обработчики для пошаговой настройки слотов
+@router.callback_query(lambda c: c.data and c.data.startswith("admin:slot:count:"))
+@require_admin_callback
+async def callback_slots_count(callback: CallbackQuery, state: FSMContext, group_service: GroupService) -> None:
+    """Обработка выбора количества слотов."""
+    slots_count = int(callback.data.split(":")[-1])
+    
+    data = await state.get_data()
+    group_id = data.get("group_id")
+    
+    group = await group_service.get_group_by_id(group_id)
+    if not group:
+        await safe_edit_message(
+            callback.message,
+            "❌ Группа не найдена.",
+            reply_markup=get_back_keyboard("admin:settings:slots"),
+            parse_mode="HTML"
+        )
+        await safe_answer_callback(callback)
+        return
+    
+    group_name = clean_group_name_for_display(group.get("name", "Без названия"))
+    
+    # Инициализируем список слотов
+    await state.update_data(
+        slots_count=slots_count,
+        current_slot_index=0,
+        slots=[]
+    )
+    
+    # Начинаем настройку первого слота
+    await state.set_state(AdminPanelStates.waiting_for_slot_start_hour)
+    
+    text = (
+        f"⚙️ <b>Настройка слотов</b>\n\n"
+        f"Группа: <b>{group_name}</b>\n"
+        f"Количество слотов: <b>{slots_count}</b>\n\n"
+        f"📋 <b>Слот 1 из {slots_count}</b>\n\n"
+        "Выберите час начала слота:"
+    )
+    
+    from src.utils.admin_keyboards import get_hours_keyboard
+    keyboard = get_hours_keyboard("admin:slot:start_hour", "admin:slot:count:1")
+    await safe_edit_message(callback.message, text, reply_markup=keyboard, parse_mode="HTML")
+    await safe_answer_callback(callback)
+
+
+@router.callback_query(lambda c: c.data and c.data.startswith("admin:slot:start_hour:"))
+@require_admin_callback
+async def callback_slot_start_hour(callback: CallbackQuery, state: FSMContext) -> None:
+    """Обработка выбора часа начала слота."""
+    hour = int(callback.data.split(":")[-1])
+    
+    await state.update_data(slot_start_hour=hour)
+    await state.set_state(AdminPanelStates.waiting_for_slot_start_minute)
+    
+    data = await state.get_data()
+    slots_count = data.get("slots_count", 1)
+    current_slot = data.get("current_slot_index", 0) + 1
+    
+    text = (
+        f"📋 <b>Слот {current_slot} из {slots_count}</b>\n\n"
+        f"Час начала: <b>{hour:02d}</b>\n\n"
+        "Выберите минуту начала слота:"
+    )
+    
+    from src.utils.admin_keyboards import get_minutes_keyboard
+    keyboard = get_minutes_keyboard("admin:slot:start_minute", f"admin:slot:start_hour:{hour}")
+    await safe_edit_message(callback.message, text, reply_markup=keyboard, parse_mode="HTML")
+    await safe_answer_callback(callback)
+
+
+@router.callback_query(lambda c: c.data and c.data.startswith("admin:slot:start_minute:"))
+@require_admin_callback
+async def callback_slot_start_minute(callback: CallbackQuery, state: FSMContext) -> None:
+    """Обработка выбора минуты начала слота."""
+    minute = callback.data.split(":")[-1]  # "00" или "30"
+    
+    data = await state.get_data()
+    hour = data.get("slot_start_hour", 0)
+    start_time = f"{hour:02d}:{minute}"
+    
+    await state.update_data(slot_start_time=start_time)
+    await state.set_state(AdminPanelStates.waiting_for_slot_end_hour)
+    
+    slots_count = data.get("slots_count", 1)
+    current_slot = data.get("current_slot_index", 0) + 1
+    
+    text = (
+        f"📋 <b>Слот {current_slot} из {slots_count}</b>\n\n"
+        f"Время начала: <b>{start_time}</b>\n\n"
+        "Выберите час окончания слота:"
+    )
+    
+    from src.utils.admin_keyboards import get_hours_keyboard
+    keyboard = get_hours_keyboard("admin:slot:end_hour", f"admin:slot:start_minute:{minute}")
+    await safe_edit_message(callback.message, text, reply_markup=keyboard, parse_mode="HTML")
+    await safe_answer_callback(callback)
+
+
+@router.callback_query(lambda c: c.data and c.data.startswith("admin:slot:end_hour:"))
+@require_admin_callback
+async def callback_slot_end_hour(callback: CallbackQuery, state: FSMContext) -> None:
+    """Обработка выбора часа окончания слота."""
+    hour = int(callback.data.split(":")[-1])
+    
+    await state.update_data(slot_end_hour=hour)
+    await state.set_state(AdminPanelStates.waiting_for_slot_end_minute)
+    
+    data = await state.get_data()
+    start_time = data.get("slot_start_time", "00:00")
+    slots_count = data.get("slots_count", 1)
+    current_slot = data.get("current_slot_index", 0) + 1
+    
+    text = (
+        f"📋 <b>Слот {current_slot} из {slots_count}</b>\n\n"
+        f"Время начала: <b>{start_time}</b>\n"
+        f"Час окончания: <b>{hour:02d}</b>\n\n"
+        "Выберите минуту окончания слота:"
+    )
+    
+    from src.utils.admin_keyboards import get_minutes_keyboard
+    keyboard = get_minutes_keyboard("admin:slot:end_minute", f"admin:slot:end_hour:{hour}")
+    await safe_edit_message(callback.message, text, reply_markup=keyboard, parse_mode="HTML")
+    await safe_answer_callback(callback)
+
+
+@router.callback_query(lambda c: c.data and c.data.startswith("admin:slot:end_minute:"))
+@require_admin_callback
+async def callback_slot_end_minute(callback: CallbackQuery, state: FSMContext) -> None:
+    """Обработка выбора минуты окончания слота."""
+    minute = callback.data.split(":")[-1]  # "00" или "30"
+    
+    data = await state.get_data()
+    hour = data.get("slot_end_hour", 0)
+    end_time = f"{hour:02d}:{minute}"
+    start_time = data.get("slot_start_time", "00:00")
+    
+    await state.update_data(slot_end_time=end_time)
+    await state.set_state(AdminPanelStates.waiting_for_slot_courier_limit)
+    
+    slots_count = data.get("slots_count", 1)
+    current_slot = data.get("current_slot_index", 0) + 1
+    
+    text = (
+        f"📋 <b>Слот {current_slot} из {slots_count}</b>\n\n"
+        f"Время: <b>{start_time}</b> - <b>{end_time}</b>\n\n"
+        "Выберите количество курьеров:"
+    )
+    
+    from src.utils.admin_keyboards import get_courier_limit_keyboard
+    keyboard = get_courier_limit_keyboard(f"admin:slot:end_minute:{minute}")
+    await safe_edit_message(callback.message, text, reply_markup=keyboard, parse_mode="HTML")
+    await safe_answer_callback(callback)
+
+
+@router.callback_query(lambda c: c.data and c.data.startswith("admin:slot:limit:"))
+@require_admin_callback
+async def callback_slot_limit(callback: CallbackQuery, state: FSMContext, group_service: GroupService) -> None:
+    """Обработка выбора количества курьеров для слота."""
+    limit = int(callback.data.split(":")[-1])
+    
+    data = await state.get_data()
+    start_time = data.get("slot_start_time", "00:00")
+    end_time = data.get("slot_end_time", "00:00")
+    slots_count = data.get("slots_count", 1)
+    current_slot_index = data.get("current_slot_index", 0)
+    slots = data.get("slots", [])
+    
+    # Добавляем текущий слот
+    new_slot = {
+        "start": start_time,
+        "end": end_time,
+        "limit": limit
+    }
+    slots.append(new_slot)
+    
+    current_slot_index += 1
+    
+    if current_slot_index < slots_count:
+        # Еще есть слоты для настройки
+        await state.update_data(
+            slots=slots,
+            current_slot_index=current_slot_index,
+            slot_start_time=None,
+            slot_end_time=None
+        )
+        await state.set_state(AdminPanelStates.waiting_for_slot_start_hour)
+        
+        text = (
+            f"✅ <b>Слот {current_slot_index} настроен!</b>\n\n"
+            f"Время: <b>{start_time}</b> - <b>{end_time}</b>\n"
+            f"Курьеров: <b>{limit}</b>\n\n"
+            f"📋 <b>Слот {current_slot_index + 1} из {slots_count}</b>\n\n"
+            "Выберите час начала слота:"
+        )
+        
+        from src.utils.admin_keyboards import get_hours_keyboard
+        keyboard = get_hours_keyboard("admin:slot:start_hour", f"admin:slot:limit:{limit}")
+        await safe_edit_message(callback.message, text, reply_markup=keyboard, parse_mode="HTML")
+        await safe_answer_callback(callback)
+    else:
+        # Все слоты настроены - показываем подтверждение
+        await state.update_data(slots=slots)
+        
+        # Формируем текст с информацией о всех слотах
+        slots_text = ""
+        for i, slot in enumerate(slots, 1):
+            slots_text += f"{i}. <b>{slot['start']}</b> - <b>{slot['end']}</b> (лимит: {slot['limit']})\n"
+        
+        group_id = data.get("group_id")
+        group = await group_service.get_group_by_id(group_id)
+        group_name = clean_group_name_for_display(group.get("name", "Без названия")) if group else "Без названия"
+        
+        text = (
+            f"✅ <b>Все слоты настроены!</b>\n\n"
+            f"Группа: <b>{group_name}</b>\n\n"
+            f"📋 <b>Настроенные слоты:</b>\n{slots_text}\n"
+            "Подтвердите сохранение настроек:"
+        )
+        
+        from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
+        keyboard = InlineKeyboardMarkup(inline_keyboard=[
+            [
+                InlineKeyboardButton(text="✅ Подтвердить", callback_data="admin:slot:confirm"),
+                InlineKeyboardButton(text="❌ Отмена", callback_data="admin:settings:slots"),
+            ]
+        ])
+        
+        await safe_edit_message(callback.message, text, reply_markup=keyboard, parse_mode="HTML")
+        await safe_answer_callback(callback)
+
+
+@router.callback_query(lambda c: c.data == "admin:slot:confirm")
+@require_admin_callback
+async def callback_slot_confirm(callback: CallbackQuery, state: FSMContext, group_service: GroupService) -> None:
+    """Подтверждение и сохранение настроек слотов."""
+    data = await state.get_data()
+    group_id = data.get("group_id")
+    slots = data.get("slots", [])
+    
+    if not slots:
+        await safe_edit_message(
+            callback.message,
+            "❌ Ошибка: нет слотов для сохранения.",
+            reply_markup=get_back_keyboard("admin:settings:slots"),
+            parse_mode="HTML"
+        )
+        await safe_answer_callback(callback)
+        await state.clear()
+        return
+    
+    try:
+        # Сохраняем слоты
+        await group_service.update_slots(group_id, slots)
+        
+        group = await group_service.get_group_by_id(group_id)
+        group_name = clean_group_name_for_display(group.get("name", "Без названия")) if group else "Без названия"
+        
+        # Формируем текст с информацией о сохраненных слотах
+        slots_text = ""
+        for i, slot in enumerate(slots, 1):
+            slots_text += f"{i}. <b>{slot['start']}</b> - <b>{slot['end']}</b> (лимит: {slot['limit']})\n"
+        
+        text = (
+            f"✅ <b>Слоты успешно сохранены!</b>\n\n"
+            f"Группа: <b>{group_name}</b>\n\n"
+            f"📋 <b>Сохраненные слоты:</b>\n{slots_text}"
+        )
+        
+        await safe_edit_message(callback.message, text, reply_markup=get_back_keyboard("admin:settings:slots"), parse_mode="HTML")
+        await safe_answer_callback(callback)
+        await state.clear()
+        
+    except Exception as e:
+        logger.error("Ошибка при сохранении слотов: %s", e, exc_info=True)
+        await safe_edit_message(
+            callback.message,
+            f"❌ Ошибка при сохранении слотов: {e}",
+            reply_markup=get_back_keyboard("admin:settings:slots"),
+            parse_mode="HTML"
+        )
+        await safe_answer_callback(callback)
+        await state.clear()

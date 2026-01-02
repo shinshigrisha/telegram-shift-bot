@@ -34,6 +34,14 @@ class AdminPanelStates(StatesGroup):
     waiting_for_slot_to_edit = State()  # Выбор слота для редактирования
     waiting_for_slot_to_delete = State()  # Выбор слота для удаления
     
+    # Новые состояния для пошаговой настройки слотов
+    waiting_for_slots_count = State()  # Выбор количества слотов (1-5)
+    waiting_for_slot_start_hour = State()  # Выбор часа начала слота
+    waiting_for_slot_start_minute = State()  # Выбор минуты начала слота (00 или 30)
+    waiting_for_slot_end_hour = State()  # Выбор часа окончания слота
+    waiting_for_slot_end_minute = State()  # Выбор минуты окончания слота (00 или 30)
+    waiting_for_slot_courier_limit = State()  # Ввод количества курьеров для слота
+    
     # Рассылка
     waiting_for_broadcast_topic = State()  # Выбор темы для рассылки
     waiting_for_broadcast_message = State()  # Ожидание текста или фото для рассылки

@@ -266,12 +266,65 @@ def get_schedule_scope_keyboard() -> InlineKeyboardMarkup:
 def get_slot_action_keyboard() -> InlineKeyboardMarkup:
     """Клавиатура для выбора действия со слотом."""
     keyboard = [
-        [InlineKeyboardButton(text="➕ Добавить слот", callback_data="admin:slot:action:add")],
-        [InlineKeyboardButton(text="✏️ Изменить слот", callback_data="admin:slot:action:edit")],
-        [InlineKeyboardButton(text="🗑️ Удалить слот", callback_data="admin:slot:action:delete")],
-        [InlineKeyboardButton(text="📋 Просмотреть слоты", callback_data="admin:slot:action:view")],
+        [InlineKeyboardButton(text="📋 Посмотреть слоты", callback_data="admin:slot:action:view")],
+        [InlineKeyboardButton(text="✏️ Изменить слоты", callback_data="admin:slot:action:edit")],
         [InlineKeyboardButton(text="◀️ Назад", callback_data="admin:settings_menu")],
     ]
+    return InlineKeyboardMarkup(inline_keyboard=keyboard)
+
+
+def get_slots_count_keyboard() -> InlineKeyboardMarkup:
+    """Клавиатура для выбора количества слотов (1-5)."""
+    keyboard = []
+    for i in range(1, 6):
+        keyboard.append([
+            InlineKeyboardButton(text=str(i), callback_data=f"admin:slot:count:{i}")
+        ])
+    keyboard.append([InlineKeyboardButton(text="◀️ Назад", callback_data="admin:settings:slots")])
+    return InlineKeyboardMarkup(inline_keyboard=keyboard)
+
+
+def get_hours_keyboard(callback_prefix: str, back_callback: str) -> InlineKeyboardMarkup:
+    """Клавиатура для выбора часа (0-23)."""
+    keyboard = []
+    # Создаем кнопки по 4 в ряд
+    row = []
+    for hour in range(24):
+        row.append(InlineKeyboardButton(text=f"{hour:02d}", callback_data=f"{callback_prefix}:{hour}"))
+        if len(row) == 4:
+            keyboard.append(row)
+            row = []
+    if row:
+        keyboard.append(row)
+    keyboard.append([InlineKeyboardButton(text="◀️ Назад", callback_data=back_callback)])
+    return InlineKeyboardMarkup(inline_keyboard=keyboard)
+
+
+def get_minutes_keyboard(callback_prefix: str, back_callback: str) -> InlineKeyboardMarkup:
+    """Клавиатура для выбора минут (только 00 и 30)."""
+    keyboard = [
+        [
+            InlineKeyboardButton(text="00", callback_data=f"{callback_prefix}:00"),
+            InlineKeyboardButton(text="30", callback_data=f"{callback_prefix}:30"),
+        ],
+        [InlineKeyboardButton(text="◀️ Назад", callback_data=back_callback)],
+    ]
+    return InlineKeyboardMarkup(inline_keyboard=keyboard)
+
+
+def get_courier_limit_keyboard(back_callback: str) -> InlineKeyboardMarkup:
+    """Клавиатура для выбора количества курьеров (1-10)."""
+    keyboard = []
+    # Создаем кнопки по 5 в ряд
+    row = []
+    for limit in range(1, 11):
+        row.append(InlineKeyboardButton(text=str(limit), callback_data=f"admin:slot:limit:{limit}"))
+        if len(row) == 5:
+            keyboard.append(row)
+            row = []
+    if row:
+        keyboard.append(row)
+    keyboard.append([InlineKeyboardButton(text="◀️ Назад", callback_data=back_callback)])
     return InlineKeyboardMarkup(inline_keyboard=keyboard)
 
 
