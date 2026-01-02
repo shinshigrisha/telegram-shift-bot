@@ -33,3 +33,11 @@ class AdminPanelStates(StatesGroup):
     waiting_for_slot_limit = State()  # Ввод лимита курьеров для слота
     waiting_for_slot_to_edit = State()  # Выбор слота для редактирования
     waiting_for_slot_to_delete = State()  # Выбор слота для удаления
+    
+    # Рассылка
+    waiting_for_broadcast_topic = State()  # Выбор темы для рассылки
+    waiting_for_broadcast_message = State()  # Ожидание текста или фото для рассылки
+    
+    # Верификация пользователей
+    waiting_for_user_name = State()  # Ожидание ввода имени и фамилии для верификации
+    waiting_for_user_rename = State()  # Ожидание нового имени и фамилии для переименования

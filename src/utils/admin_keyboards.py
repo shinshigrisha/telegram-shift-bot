@@ -58,10 +58,109 @@ def get_monitoring_menu_keyboard() -> InlineKeyboardMarkup:
     """Меню мониторинга."""
     keyboard = [
         [InlineKeyboardButton(text="📊 Статистика", callback_data="admin:monitoring:stats")],
-        [InlineKeyboardButton(text="📝 Логи", callback_data="admin:monitoring:logs")],
-        [InlineKeyboardButton(text="✅ Верификация", callback_data="admin:monitoring:verification")],
+        [InlineKeyboardButton(text="🔍 Статус системы", callback_data="admin:monitoring:system")],
+        [InlineKeyboardButton(text="📜 Логи", callback_data="admin:monitoring:logs")],
+        [InlineKeyboardButton(text="👤 Верификация", callback_data="admin:monitoring:verification")],
         [InlineKeyboardButton(text="◀️ Назад", callback_data="admin:back_to_main")],
     ]
+    return InlineKeyboardMarkup(inline_keyboard=keyboard)
+
+
+def get_broadcast_topic_keyboard() -> InlineKeyboardMarkup:
+    """Клавиатура для выбора темы для рассылки."""
+    keyboard = [
+        [InlineKeyboardButton(text="📊 Отметки на слот", callback_data="admin:broadcast:topic:poll")],
+        [InlineKeyboardButton(text="🚪 Приход/уход", callback_data="admin:broadcast:topic:arrival")],
+        [InlineKeyboardButton(text="💬 Общий чат", callback_data="admin:broadcast:topic:general")],
+        [InlineKeyboardButton(text="📢 Важная информация", callback_data="admin:broadcast:topic:important")],
+        [InlineKeyboardButton(text="◀️ Назад", callback_data="admin:back_to_main")],
+    ]
+    return InlineKeyboardMarkup(inline_keyboard=keyboard)
+
+
+def get_verification_menu_keyboard() -> InlineKeyboardMarkup:
+    """Меню верификации пользователей."""
+    keyboard = [
+        [InlineKeyboardButton(text="📋 Список неверифицированных", callback_data="admin:verification:unverified")],
+        [InlineKeyboardButton(text="✅ Список верифицированных", callback_data="admin:verification:verified")],
+        [InlineKeyboardButton(text="✅ Верифицировать всех", callback_data="admin:verification:verify_all")],
+        [InlineKeyboardButton(text="◀️ Назад", callback_data="admin:monitoring_menu")],
+    ]
+    return InlineKeyboardMarkup(inline_keyboard=keyboard)
+
+
+def get_user_actions_keyboard(user_id: int) -> InlineKeyboardMarkup:
+    """Клавиатура действий с пользователем."""
+    keyboard = [
+        [InlineKeyboardButton(text="✏️ Переименовать", callback_data=f"admin:user:rename:{user_id}")],
+        [InlineKeyboardButton(text="🗑️ Удалить", callback_data=f"admin:user:delete:{user_id}")],
+        [InlineKeyboardButton(text="◀️ Назад", callback_data="admin:verification:verified")],
+    ]
+    return InlineKeyboardMarkup(inline_keyboard=keyboard)
+
+
+def get_users_list_keyboard(
+    users: List[Dict[str, Any]],
+    action: str = "verify",
+    page: int = 0,
+    per_page: int = 10,
+) -> InlineKeyboardMarkup:
+    """
+    Клавиатура со списком пользователей для выбора.
+    
+    Args:
+        users: Список пользователей
+        action: Действие (verify, edit, delete)
+        page: Номер страницы (для пагинации)
+        per_page: Количество пользователей на странице
+        
+    Returns:
+        InlineKeyboardMarkup с кнопками пользователей
+    """
+    keyboard = []
+    
+    start_idx = page * per_page
+    end_idx = start_idx + per_page
+    page_users = users[start_idx:end_idx]
+    
+    for user in page_users:
+        user_id = user.get("id")
+        first_name = user.get("first_name", "")
+        last_name = user.get("last_name", "")
+        telegram_id = user.get("telegram_user_id", 0)
+        
+        # Формируем текст кнопки
+        if first_name or last_name:
+            display_name = f"{first_name} {last_name}".strip()
+        else:
+            display_name = f"ID: {telegram_id}"
+        
+        # Ограничиваем длину
+        if len(display_name) > 30:
+            display_name = display_name[:27] + "..."
+        
+        callback_data = f"admin:user:{action}:{user_id}"
+        keyboard.append([
+            InlineKeyboardButton(text=display_name, callback_data=callback_data)
+        ])
+    
+    # Кнопки пагинации
+    nav_buttons = []
+    if page > 0:
+        nav_buttons.append(InlineKeyboardButton(
+            text="◀️",
+            callback_data=f"admin:verification:{action}:page:{page-1}"
+        ))
+    if end_idx < len(users):
+        nav_buttons.append(InlineKeyboardButton(
+            text="▶️",
+            callback_data=f"admin:verification:{action}:page:{page+1}"
+        ))
+    if nav_buttons:
+        keyboard.append(nav_buttons)
+    
+    keyboard.append([InlineKeyboardButton(text="◀️ Назад", callback_data="admin:monitoring:verification")])
+    
     return InlineKeyboardMarkup(inline_keyboard=keyboard)
 
 

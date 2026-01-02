@@ -100,6 +100,20 @@ async def callback_polls_menu(callback: CallbackQuery) -> None:
     await safe_answer_callback(callback)
 
 
+@router.callback_query(lambda c: c.data == "admin:broadcast_menu")
+@require_admin_callback
+async def callback_broadcast_menu(callback: CallbackQuery) -> None:
+    """Меню рассылки."""
+    from src.utils.admin_keyboards import get_broadcast_topic_keyboard
+    
+    text = (
+        "📢 <b>Рассылка</b>\n\n"
+        "Выберите тему для рассылки:"
+    )
+    await safe_edit_message(callback.message, text, reply_markup=get_broadcast_topic_keyboard())
+    await safe_answer_callback(callback)
+
+
 @router.callback_query(lambda c: c.data == "admin:monitoring_menu")
 @require_admin_callback
 async def callback_monitoring_menu(callback: CallbackQuery) -> None:
