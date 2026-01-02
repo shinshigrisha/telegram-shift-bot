@@ -3,11 +3,64 @@
 Загружает переменные окружения из .env файла.
 """
 import os
-from typing import List
+from typing import List, Optional
 from dotenv import load_dotenv
 
 # Загружаем переменные окружения из .env
 load_dotenv()
+
+
+def _build_database_url() -> str:
+    """
+    Построить URL для подключения к PostgreSQL.
+    
+    Если DATABASE_URL или DB_URL заданы напрямую, использует их.
+    Иначе собирает URL из отдельных компонентов.
+    """
+    # Сначала проверяем готовый URL
+    if os.getenv("DATABASE_URL"):
+        return os.getenv("DATABASE_URL", "")
+    if os.getenv("DB_URL"):
+        return os.getenv("DB_URL", "")
+    
+    # Собираем из компонентов
+    user = os.getenv("DB_USER", "bot_user")
+    password = os.getenv("DB_PASSWORD", "")
+    host = os.getenv("DB_HOST", "localhost")
+    port = os.getenv("DB_PORT", "5432")
+    db_name = os.getenv("DB_NAME", "shift_bot")
+    
+    # Если пароль есть, добавляем его с двоеточием
+    if password:
+        credentials = f"{user}:{password}"
+    else:
+        credentials = user
+    
+    return f"postgresql://{credentials}@{host}:{port}/{db_name}"
+
+
+def _build_redis_url() -> str:
+    """
+    Построить URL для подключения к Redis.
+    
+    Если REDIS_URL задан напрямую, использует его.
+    Иначе собирает URL из отдельных компонентов.
+    """
+    # Сначала проверяем готовый URL
+    if os.getenv("REDIS_URL"):
+        return os.getenv("REDIS_URL", "")
+    
+    # Собираем из компонентов
+    password = os.getenv("REDIS_PASSWORD", "")
+    host = os.getenv("REDIS_HOST", "localhost")
+    port = os.getenv("REDIS_PORT", "6379")
+    db = os.getenv("REDIS_DB", "0")
+    
+    # Если пароль есть, добавляем его
+    if password:
+        return f"redis://:{password}@{host}:{port}/{db}"
+    else:
+        return f"redis://{host}:{port}/{db}"
 
 
 class Settings:
@@ -21,20 +74,20 @@ class Settings:
         if admin_id.strip().isdigit()
     ]
     
-    # База данных
-    DATABASE_URL: str = os.getenv(
-        "DATABASE_URL",
-        os.getenv(
-            "DB_URL",
-            f"postgresql://{os.getenv('DB_USER', 'bot_user')}:{os.getenv('DB_PASSWORD', '')}@{os.getenv('DB_HOST', 'localhost')}:{os.getenv('DB_PORT', '5432')}/{os.getenv('DB_NAME', 'shift_bot')}"
-        )
-    )
+    # База данных (компоненты для удобства доступа)
+    DB_USER: str = os.getenv("DB_USER", "bot_user")
+    DB_PASSWORD: str = os.getenv("DB_PASSWORD", "")
+    DB_HOST: str = os.getenv("DB_HOST", "localhost")
+    DB_PORT: str = os.getenv("DB_PORT", "5432")
+    DB_NAME: str = os.getenv("DB_NAME", "shift_bot")
+    DATABASE_URL: str = _build_database_url()
     
-    # Redis
-    REDIS_URL: str = os.getenv(
-        "REDIS_URL",
-        f"redis://:{os.getenv('REDIS_PASSWORD', '')}@{os.getenv('REDIS_HOST', 'localhost')}:{os.getenv('REDIS_PORT', '6379')}/{os.getenv('REDIS_DB', '0')}"
-    )
+    # Redis (компоненты для удобства доступа)
+    REDIS_PASSWORD: str = os.getenv("REDIS_PASSWORD", "")
+    REDIS_HOST: str = os.getenv("REDIS_HOST", "localhost")
+    REDIS_PORT: str = os.getenv("REDIS_PORT", "6379")
+    REDIS_DB: str = os.getenv("REDIS_DB", "0")
+    REDIS_URL: str = _build_redis_url()
     
     # AI-куратор
     GROQ_API_KEY: str = os.getenv("GROQ_API_KEY", "")
