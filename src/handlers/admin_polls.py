@@ -263,8 +263,10 @@ async def callback_select_group_for_polls(callback: CallbackQuery, state: FSMCon
                 f"Создайте опрос, чтобы увидеть результаты."
             )
         else:
-            # Получаем результаты опроса
-            results = poll.get('results', {})
+            # Получаем результаты опроса из Telegram API
+            chat_id = group['telegram_chat_id']
+            topic_id = poll.get('telegram_topic_id')
+            message_id = poll.get('telegram_message_id')
             
             # Формируем текст с результатами
             text = (
@@ -272,12 +274,72 @@ async def callback_select_group_for_polls(callback: CallbackQuery, state: FSMCon
                 f"Дата: {tomorrow.strftime('%d.%m.%Y')}\n\n"
             )
             
-            if results:
-                # TODO: Реализовать форматирование результатов из Telegram API
-                text += "📋 <b>Результаты:</b>\n"
-                text += "⚠️ Просмотр результатов будет реализован после интеграции с Telegram API"
-            else:
-                text += "⚠️ Результаты еще не получены."
+            # Получаем слоты группы для форматирования
+            try:
+                slots = group_service.get_slots_config(group)
+                
+                if slots:
+                    text += "📋 <b>Результаты по слотам:</b>\n\n"
+                    # Формируем структуру результатов
+                    results = poll.get('results', {})
+                    
+                    if results and isinstance(results, dict) and results:
+                        # Если результаты есть в БД, форматируем их
+                        for i, slot in enumerate(slots):
+                            slot_start = slot.get('start', '?')
+                            slot_end = slot.get('end', '?')
+                            slot_limit = slot.get('limit', 3)
+                            
+                            # Получаем данные о голосах для этого слота (если есть)
+                            slot_key = f"slot_{i}" or f"{slot_start}-{slot_end}"
+                            slot_results = results.get(slot_key, {})
+                            
+                            voters = slot_results.get('voters', []) if isinstance(slot_results, dict) else []
+                            voters_count = len(voters) if isinstance(voters, list) else 0
+                            
+                            text += (
+                                f"<b>Слот {i+1}:</b> {slot_start} - {slot_end} "
+                                f"({voters_count}/{slot_limit})\n"
+                            )
+                            
+                            if voters and isinstance(voters, list):
+                                for voter in voters[:slot_limit]:
+                                    voter_name = voter.get('name', 'Неизвестный') if isinstance(voter, dict) else str(voter)
+                                    text += f"✅ {voter_name}\n"
+                            
+                            if voters_count < slot_limit:
+                                free_slots = slot_limit - voters_count
+                                text += f"   Свободно мест: {free_slots}\n"
+                            
+                            text += "\n"
+                        
+                        # Выходной
+                        day_off = results.get('day_off', [])
+                        if day_off:
+                            day_off_count = len(day_off) if isinstance(day_off, list) else 0
+                            text += f"<b>Выходной:</b> {day_off_count} человек(а)\n"
+                            if isinstance(day_off, list):
+                                for person in day_off[:10]:  # Показываем первые 10
+                                    person_name = person.get('name', 'Неизвестный') if isinstance(person, dict) else str(person)
+                                    text += f"• {person_name}\n"
+                                if len(day_off) > 10:
+                                    text += f"... и еще {len(day_off) - 10} человек\n"
+                    else:
+                        # Если результатов нет, показываем структуру слотов
+                        text += "⚠️ <b>Результаты еще не получены.</b>\n\n"
+                        text += "💡 <b>Примечание:</b> Результаты опроса будут доступны после его закрытия или при получении обновлений от Telegram.\n\n"
+                        text += "📋 <b>Настроенные слоты:</b>\n"
+                        for i, slot in enumerate(slots):
+                            slot_start = slot.get('start', '?')
+                            slot_end = slot.get('end', '?')
+                            slot_limit = slot.get('limit', 3)
+                            text += f"• Слот {i+1}: {slot_start} - {slot_end} (лимит: {slot_limit})\n"
+                else:
+                    text += "⚠️ У группы не настроены слоты."
+                    
+            except Exception as e:
+                logger.error("Ошибка при получении результатов опроса: %s", e, exc_info=True)
+                text += f"⚠️ Ошибка при получении результатов: {e}"
         
         await safe_edit_message(callback.message, text, reply_markup=get_back_keyboard("admin:polls_menu"))
         await safe_answer_callback(callback)

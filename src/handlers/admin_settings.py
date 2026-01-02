@@ -500,14 +500,19 @@ async def callback_select_group_for_slots(callback: CallbackQuery, state: FSMCon
     
     await state.update_data(group_id=group_id)
     
+    # Получаем текущие слоты для отображения
+    slots = group_service.get_slots_config(group)
+    slots_text = ""
+    if slots:
+        slots_text = f"\n📋 <b>Текущие слоты:</b>\n{format_slots_list(slots)}\n\n"
+    else:
+        slots_text = "\n⚠️ <b>Слоты еще не настроены для этой группы.</b>\n\n"
+    
     if slot_action == "view":
         # Показываем текущие слоты
-        slots = group_service.get_slots_config(group)
-        slots_text = format_slots_list(slots) if slots else "⚠️ <b>Слоты еще не настроены для этой группы.</b>"
-        
         text = (
             f"📋 <b>Слоты группы: {group.get('name')}</b>\n\n"
-            f"{slots_text}"
+            f"{format_slots_list(slots) if slots else '⚠️ <b>Слоты еще не настроены для этой группы.</b>'}"
         )
         
         await safe_edit_message(callback.message, text, reply_markup=get_back_keyboard("admin:settings:slots"))
@@ -521,7 +526,8 @@ async def callback_select_group_for_slots(callback: CallbackQuery, state: FSMCon
         
         text = (
             f"➕ <b>Добавление слота</b>\n\n"
-            f"Группа: <b>{group.get('name')}</b>\n\n"
+            f"Группа: <b>{group.get('name')}</b>\n"
+            f"{slots_text}"
             "Введите время начала слота в формате <code>ЧЧ:ММ</code>:\n"
             "Пример: <code>08:00</code>\n\n"
             "Для отмены введите: <code>отмена</code>"
@@ -532,12 +538,11 @@ async def callback_select_group_for_slots(callback: CallbackQuery, state: FSMCon
     
     elif slot_action == "edit":
         # Показываем список слотов для редактирования
-        slots = group_service.get_slots_config(group)
-        
         if not slots:
             await safe_edit_message(
                 callback.message,
-                f"❌ У группы <b>{group.get('name')}</b> нет настроенных слотов.",
+                f"❌ У группы <b>{group.get('name')}</b> нет настроенных слотов.\n\n"
+                f"Сначала добавьте слоты.",
                 reply_markup=get_back_keyboard("admin:settings:slots")
             )
             await safe_answer_callback(callback)
@@ -547,7 +552,8 @@ async def callback_select_group_for_slots(callback: CallbackQuery, state: FSMCon
         
         text = (
             f"✏️ <b>Изменение слота</b>\n\n"
-            f"Группа: <b>{group.get('name')}</b>\n\n"
+            f"Группа: <b>{group.get('name')}</b>\n"
+            f"{slots_text}"
             "Выберите слот для редактирования:"
         )
         
@@ -557,12 +563,11 @@ async def callback_select_group_for_slots(callback: CallbackQuery, state: FSMCon
     
     elif slot_action == "delete":
         # Показываем список слотов для удаления
-        slots = group_service.get_slots_config(group)
-        
         if not slots:
             await safe_edit_message(
                 callback.message,
-                f"❌ У группы <b>{group.get('name')}</b> нет настроенных слотов.",
+                f"❌ У группы <b>{group.get('name')}</b> нет настроенных слотов.\n\n"
+                f"Сначала добавьте слоты.",
                 reply_markup=get_back_keyboard("admin:settings:slots")
             )
             await safe_answer_callback(callback)
@@ -572,7 +577,8 @@ async def callback_select_group_for_slots(callback: CallbackQuery, state: FSMCon
         
         text = (
             f"🗑️ <b>Удаление слота</b>\n\n"
-            f"Группа: <b>{group.get('name')}</b>\n\n"
+            f"Группа: <b>{group.get('name')}</b>\n"
+            f"{slots_text}"
             "Выберите слот для удаления:"
         )
         
@@ -623,43 +629,21 @@ async def process_slot_end_time(message: Message, state: FSMContext, group_servi
     
     await state.update_data(slot_end_time=time_text)
     
-    # Если slot_index есть, значит это редактирование - пропускаем лимит (используем старый)
+    # Если slot_index есть, значит это редактирование - запрашиваем лимит
     if slot_index is not None:
-        # Обновляем слот сразу
-        group_id = data.get("group_id")
-        start_time = data.get("slot_start_time")
-        limit = data.get("slot_limit", 3)
+        await state.set_state(AdminPanelStates.waiting_for_slot_limit)
         
-        try:
-            group = await group_service.get_group_by_id(group_id)
-            if not group:
-                await message.answer("❌ Группа не найдена.")
-                await state.clear()
-                return
-            
-            slots = group_service.get_slots_config(group)
-            if slot_index >= len(slots):
-                await message.answer("❌ Слот не найден.")
-                await state.clear()
-                return
-            
-            # Обновляем слот
-            slots[slot_index] = {
-                "start": start_time,
-                "end": time_text,
-                "limit": limit,
-            }
-            
-            await group_service.update_slots(group_id, slots)
-            
-            await message.answer(
-                f"✅ Слот успешно обновлен!\n\n"
-                f"Время: <code>{start_time}</code> - <code>{time_text}</code>\n"
-                f"Лимит курьеров: {limit}"
-            )
-            
-            await state.clear()
-            return
+        current_limit = data.get("slot_limit", 3)
+        
+        await message.answer(
+            f"✅ Новое время окончания: <code>{time_text}</code>\n\n"
+            f"Текущий лимит: {current_limit}\n\n"
+            "Введите новый лимит курьеров (число от 1 до 10):\n"
+            "Или отправьте <code>по умолчанию</code> для лимита 3\n"
+            "Или отправьте <code>не менять</code> чтобы оставить текущий лимит\n\n"
+            "Для отмены введите: <code>отмена</code>"
+        )
+        return
             
         except Exception as e:
             logger.error("Ошибка при обновлении слота: %s", e, exc_info=True)
@@ -670,39 +654,53 @@ async def process_slot_end_time(message: Message, state: FSMContext, group_servi
     # Это добавление нового слота
     await state.set_state(AdminPanelStates.waiting_for_slot_limit)
     
-    await message.answer(
-        f"✅ Время окончания: <code>{time_text}</code>\n\n"
-        "Введите лимит курьеров для этого слота (число от 1 до 20):\n"
-        "Или отправьте <code>по умолчанию</code> для лимита 3\n\n"
-        "Для отмены введите: <code>отмена</code>"
-    )
+        await message.answer(
+            f"✅ Время окончания: <code>{time_text}</code>\n\n"
+            "Введите лимит курьеров для этого слота (число от 1 до 10):\n"
+            "Или отправьте <code>по умолчанию</code> для лимита 3\n\n"
+            "Для отмены введите: <code>отмена</code>"
+        )
 
 
 @router.message(AdminPanelStates.waiting_for_slot_limit)
 async def process_slot_limit(message: Message, state: FSMContext, group_service: GroupService) -> None:
     """Обработка ввода лимита курьеров для слота."""
     if message.text and message.text.lower() == "отмена":
+        data = await state.get_data()
         await state.clear()
-        await message.answer("❌ Добавление слота отменено")
+        if data.get("slot_index") is not None:
+            await message.answer("❌ Редактирование слота отменено")
+        else:
+            await message.answer("❌ Добавление слота отменено")
         return
     
     limit_text = message.text.strip() if message.text else ""
+    data = await state.get_data()
+    slot_index = data.get("slot_index")
     
+    # Определяем лимит
     if limit_text.lower() in ["по умолчанию", "default", "3"]:
         limit = 3
+    elif limit_text.lower() in ["не менять", "оставить", "skip"]:
+        # При редактировании - используем текущий лимит
+        if slot_index is not None:
+            limit = data.get("slot_limit", 3)
+        else:
+            limit = 3
     else:
         try:
             limit = int(limit_text)
-            if limit < 1 or limit > 20:
-                raise ValueError("Лимит должен быть от 1 до 20")
+            if limit < 1 or limit > 10:
+                raise ValueError("Лимит должен быть от 1 до 10")
         except ValueError:
             await message.answer(
-                "❌ Лимит должен быть числом от 1 до 20.\n"
+                "❌ Лимит должен быть числом от 1 до 10.\n"
+                "Или отправьте <code>по умолчанию</code> для лимита 3\n"
+                "Или <code>не менять</code> чтобы оставить текущий (при редактировании)\n\n"
                 "Попробуйте еще раз или введите <code>отмена</code>."
             )
             return
     
-    data = await state.get_data()
     group_id = data.get("group_id")
     start_time = data.get("slot_start_time")
     end_time = data.get("slot_end_time")
@@ -717,28 +715,50 @@ async def process_slot_limit(message: Message, state: FSMContext, group_service:
         
         slots = group_service.get_slots_config(group)
         
-        # Добавляем новый слот
-        new_slot = {
-            "start": start_time,
-            "end": end_time,
-            "limit": limit,
-        }
-        slots.append(new_slot)
-        
-        # Сохраняем обновленные слоты
-        await group_service.update_slots(group_id, slots)
-        
-        await message.answer(
-            f"✅ Слот успешно добавлен!\n\n"
-            f"Время: <code>{start_time}</code> - <code>{end_time}</code>\n"
-            f"Лимит курьеров: {limit}"
-        )
+        if slot_index is not None:
+            # Редактирование существующего слота
+            if slot_index >= len(slots):
+                await message.answer("❌ Слот не найден.")
+                await state.clear()
+                return
+            
+            # Обновляем слот
+            slots[slot_index] = {
+                "start": start_time,
+                "end": end_time,
+                "limit": limit,
+            }
+            
+            await group_service.update_slots(group_id, slots)
+            
+            await message.answer(
+                f"✅ Слот успешно обновлен!\n\n"
+                f"Время: <code>{start_time}</code> - <code>{end_time}</code>\n"
+                f"Лимит курьеров: {limit}"
+            )
+        else:
+            # Добавление нового слота
+            new_slot = {
+                "start": start_time,
+                "end": end_time,
+                "limit": limit,
+            }
+            slots.append(new_slot)
+            
+            # Сохраняем обновленные слоты
+            await group_service.update_slots(group_id, slots)
+            
+            await message.answer(
+                f"✅ Слот успешно добавлен!\n\n"
+                f"Время: <code>{start_time}</code> - <code>{end_time}</code>\n"
+                f"Лимит курьеров: {limit}"
+            )
         
         await state.clear()
         
     except Exception as e:
-        logger.error("Ошибка при добавлении слота: %s", e, exc_info=True)
-        await message.answer(f"❌ Ошибка при добавлении слота: {e}")
+        logger.error("Ошибка при сохранении слота: %s", e, exc_info=True)
+        await message.answer(f"❌ Ошибка при сохранении слота: {e}")
         await state.clear()
 
 
