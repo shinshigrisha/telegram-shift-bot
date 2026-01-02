@@ -40,10 +40,21 @@ def format_group_info(group: Dict[str, Any]) -> str:
     
     # Получаем количество слотов из settings
     settings = group.get("settings")
+    
+    # Обрабатываем settings: может быть None, dict, или строка JSON
     if settings is None:
         settings = {}
+    elif isinstance(settings, str):
+        # Если settings - строка (JSON), пытаемся распарсить
+        try:
+            import json
+            settings = json.loads(settings)
+            if not isinstance(settings, dict):
+                settings = {}
+        except (json.JSONDecodeError, TypeError):
+            settings = {}
     elif not isinstance(settings, dict):
-        # Если settings не словарь (например, строка JSON), пытаемся обработать
+        # Если settings не словарь и не строка, сбрасываем
         settings = {}
     
     slots = settings.get("slots", []) if isinstance(settings, dict) else []

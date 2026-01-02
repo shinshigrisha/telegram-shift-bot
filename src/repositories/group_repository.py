@@ -10,6 +10,28 @@ import json
 logger = logging.getLogger(__name__)
 
 
+def _normalize_group_dict(group_dict: Dict[str, Any]) -> Dict[str, Any]:
+    """
+    Нормализует словарь группы, обрабатывая JSONB поля.
+    
+    Args:
+        group_dict: Словарь с данными группы из БД
+        
+    Returns:
+        Нормализованный словарь с обработанными JSONB полями
+    """
+    if 'settings' in group_dict:
+        settings = group_dict['settings']
+        if isinstance(settings, str):
+            try:
+                group_dict['settings'] = json.loads(settings)
+            except (json.JSONDecodeError, TypeError):
+                group_dict['settings'] = {}
+        elif settings is None:
+            group_dict['settings'] = {}
+    return group_dict
+
+
 class GroupRepository:
     """
     Репозиторий для работы с группами в PostgreSQL.
@@ -75,7 +97,7 @@ class GroupRepository:
             )
             
             logger.info("Создана группа: id=%d, name=%s", row['id'], name)
-            return dict(row)
+            return _normalize_group_dict(dict(row))
     
     async def get_by_id(self, group_id: int) -> Optional[Dict[str, Any]]:
         """
@@ -92,7 +114,7 @@ class GroupRepository:
                 "SELECT * FROM groups WHERE id = $1",
                 group_id
             )
-            return dict(row) if row else None
+            return _normalize_group_dict(dict(row)) if row else None
     
     async def get_by_name(self, name: str) -> Optional[Dict[str, Any]]:
         """
@@ -109,7 +131,7 @@ class GroupRepository:
                 "SELECT * FROM groups WHERE name = $1",
                 name
             )
-            return dict(row) if row else None
+            return _normalize_group_dict(dict(row)) if row else None
     
     async def get_by_chat_id(self, chat_id: int) -> Optional[Dict[str, Any]]:
         """
@@ -126,7 +148,7 @@ class GroupRepository:
                 "SELECT * FROM groups WHERE telegram_chat_id = $1",
                 chat_id
             )
-            return dict(row) if row else None
+            return _normalize_group_dict(dict(row)) if row else None
     
     async def get_all(self, active_only: bool = False) -> List[Dict[str, Any]]:
         """
@@ -147,7 +169,8 @@ class GroupRepository:
                 rows = await conn.fetch(
                     "SELECT * FROM groups ORDER BY name"
                 )
-            return [dict(row) for row in rows]
+            # Преобразуем строки в словари и обрабатываем JSONB поля
+            return [_normalize_group_dict(dict(row)) for row in rows]
     
     async def update(
         self,
