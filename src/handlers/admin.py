@@ -647,6 +647,18 @@ async def _set_topic_for_field(
         except Exception as e:
             logger.error("Error setting topic: %s", e, exc_info=True)
             await message.answer(f"❌ Ошибка при установке topic ID: {e}")
+    else:
+        # Обрабатываем случай, когда field_name не найден в topic_type_map
+        logger.error(
+            "Неизвестный field_name в _set_topic_for_field: %s. "
+            "Доступные поля: %s",
+            field_name,
+            ", ".join(topic_type_map.keys())
+        )
+        await message.answer(
+            f"❌ Внутренняя ошибка: неизвестный тип поля '{field_name}'\n"
+            f"Пожалуйста, сообщите администратору об этой ошибке."
+        )
 
 
 @router.message(Command("get_topic_id"))
