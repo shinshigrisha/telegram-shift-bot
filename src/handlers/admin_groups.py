@@ -201,7 +201,27 @@ async def callback_groups_list(callback: CallbackQuery, group_service: GroupServ
         return
     
     text = format_groups_list(groups)
-    keyboard = get_groups_list_keyboard(groups)
+    keyboard = get_groups_list_keyboard(groups, page=0)
+    
+    await safe_edit_message(callback.message, text, reply_markup=keyboard)
+    await safe_answer_callback(callback)
+
+
+@router.callback_query(lambda c: c.data and c.data.startswith("admin:groups:list:page:"))
+@require_admin_callback
+async def callback_groups_list_page(callback: CallbackQuery, group_service: GroupService) -> None:
+    """Пагинация списка групп."""
+    page = int(callback.data.split(":")[-1])
+    groups = await group_service.get_all_groups()
+    
+    if not groups:
+        text = "📭 Нет зарегистрированных групп"
+        await safe_edit_message(callback.message, text, reply_markup=get_back_keyboard("admin:groups_menu"))
+        await safe_answer_callback(callback)
+        return
+    
+    text = format_groups_list(groups)
+    keyboard = get_groups_list_keyboard(groups, page=page)
     
     await safe_edit_message(callback.message, text, reply_markup=keyboard)
     await safe_answer_callback(callback)
@@ -387,19 +407,52 @@ async def callback_rename_group_start(callback: CallbackQuery, state: FSMContext
         "Выберите группу для переименования:"
     )
     
-    keyboard = get_groups_list_keyboard(groups)
+    keyboard = get_groups_list_keyboard(groups, page=0, action="rename", back_callback="admin:groups_menu")
     await safe_edit_message(callback.message, text, reply_markup=keyboard)
     await safe_answer_callback(callback)
 
 
-@router.callback_query(lambda c: c.data and c.data.startswith("admin:group_select:") and not c.data.startswith("admin:group_select:slots"))
+@router.callback_query(lambda c: c.data and c.data.startswith("admin:groups:rename:page:"))
+@require_admin_callback
+async def callback_rename_group_page(callback: CallbackQuery, state: FSMContext, group_service: GroupService) -> None:
+    """Пагинация списка групп для переименования."""
+    page = int(callback.data.split(":")[-1])
+    groups = await group_service.get_all_groups()
+    
+    if not groups:
+        await safe_edit_message(
+            callback.message,
+            "❌ Нет зарегистрированных групп.",
+            reply_markup=get_back_keyboard("admin:groups_menu")
+        )
+        await safe_answer_callback(callback)
+        return
+    
+    text = (
+        "✏️ <b>Переименование группы</b>\n\n"
+        "Выберите группу для переименования:"
+    )
+    
+    keyboard = get_groups_list_keyboard(groups, page=page, action="rename", back_callback="admin:groups_menu")
+    await safe_edit_message(callback.message, text, reply_markup=keyboard)
+    await safe_answer_callback(callback)
+
+
+@router.callback_query(lambda c: c.data and (c.data.startswith("admin:group_select:") or c.data.startswith("admin:group_rename:") or c.data.startswith("admin:group_delete:")) and not c.data.startswith("admin:group_select:slots"))
 @require_admin_callback
 async def callback_select_group(callback: CallbackQuery, state: FSMContext, group_service: GroupService) -> None:
     """Обработка выбора группы (для переименования или удаления)."""
-    group_id = int(callback.data.split(":")[-1])
+    parts = callback.data.split(":")
+    group_id = int(parts[-1])
     
-    data = await state.get_data()
-    action = data.get("action")
+    # Определяем действие из callback_data или из state
+    if "rename" in callback.data:
+        action = "rename_group"
+    elif "delete" in callback.data:
+        action = "delete_group"
+    else:
+        data = await state.get_data()
+        action = data.get("action")
     
     if action == "rename_group":
         group = await group_service.get_group_by_id(group_id)
@@ -522,7 +575,35 @@ async def callback_delete_group_start(callback: CallbackQuery, state: FSMContext
         "Выберите группу для удаления:"
     )
     
-    keyboard = get_groups_list_keyboard(groups)
+    keyboard = get_groups_list_keyboard(groups, page=0, action="delete", back_callback="admin:groups_menu")
+    await safe_edit_message(callback.message, text, reply_markup=keyboard)
+    await safe_answer_callback(callback)
+
+
+@router.callback_query(lambda c: c.data and c.data.startswith("admin:groups:delete:page:"))
+@require_admin_callback
+async def callback_delete_group_page(callback: CallbackQuery, state: FSMContext, group_service: GroupService) -> None:
+    """Пагинация списка групп для удаления."""
+    page = int(callback.data.split(":")[-1])
+    groups = await group_service.get_all_groups()
+    
+    if not groups:
+        await safe_edit_message(
+            callback.message,
+            "❌ Нет зарегистрированных групп.",
+            reply_markup=get_back_keyboard("admin:groups_menu")
+        )
+        await safe_answer_callback(callback)
+        return
+    
+    text = (
+        "🗑️ <b>Удаление группы</b>\n\n"
+        "⚠️ <b>Внимание!</b> Удаление группы необратимо!\n"
+        "Все данные (опросы, голоса) останутся в базе, но группа будет удалена.\n\n"
+        "Выберите группу для удаления:"
+    )
+    
+    keyboard = get_groups_list_keyboard(groups, page=page, action="delete", back_callback="admin:groups_menu")
     await safe_edit_message(callback.message, text, reply_markup=keyboard)
     await safe_answer_callback(callback)
 

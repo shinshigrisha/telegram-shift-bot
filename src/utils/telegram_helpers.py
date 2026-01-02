@@ -14,7 +14,7 @@ async def safe_edit_message(
     message: Optional[Message],
     text: str,
     reply_markup: Optional[InlineKeyboardMarkup] = None,
-    parse_mode: Optional[str] = None,
+    parse_mode: Optional[str] = "HTML",
 ) -> bool:
     """
     Безопасное редактирование сообщения с обработкой ошибок.
@@ -23,7 +23,7 @@ async def safe_edit_message(
         message: Сообщение для редактирования
         text: Новый текст сообщения
         reply_markup: Новая клавиатура (опционально)
-        parse_mode: Режим парсинга (опционально)
+        parse_mode: Режим парсинга (по умолчанию HTML)
         
     Returns:
         True если редактирование успешно, False иначе

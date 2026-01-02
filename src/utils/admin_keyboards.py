@@ -176,7 +176,13 @@ def get_topic_type_keyboard() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(inline_keyboard=keyboard)
 
 
-def get_groups_list_keyboard(groups: List[Dict[str, Any]], page: int = 0, per_page: int = 10) -> InlineKeyboardMarkup:
+def get_groups_list_keyboard(
+    groups: List[Dict[str, Any]], 
+    page: int = 0, 
+    per_page: int = 10,
+    action: str = "select",
+    back_callback: str = "admin:groups_menu"
+) -> InlineKeyboardMarkup:
     """
     Клавиатура со списком групп для выбора.
     
@@ -184,6 +190,8 @@ def get_groups_list_keyboard(groups: List[Dict[str, Any]], page: int = 0, per_pa
         groups: Список групп
         page: Номер страницы (для пагинации)
         per_page: Количество групп на странице
+        action: Действие (select, delete, rename, slots)
+        back_callback: Callback для кнопки "Назад"
         
     Returns:
         InlineKeyboardMarkup с кнопками групп
@@ -207,20 +215,20 @@ def get_groups_list_keyboard(groups: List[Dict[str, Any]], page: int = 0, per_pa
         keyboard.append([
             InlineKeyboardButton(
                 text=display_name,
-                callback_data=f"admin:group_select:{group_id}"
+                callback_data=f"admin:group_{action}:{group_id}"
             )
         ])
     
     # Кнопки пагинации
     nav_buttons = []
     if page > 0:
-        nav_buttons.append(InlineKeyboardButton(text="◀️", callback_data=f"admin:groups:list:page:{page-1}"))
+        nav_buttons.append(InlineKeyboardButton(text="◀️", callback_data=f"admin:groups:{action}:page:{page-1}"))
     if end_idx < len(groups):
-        nav_buttons.append(InlineKeyboardButton(text="▶️", callback_data=f"admin:groups:list:page:{page+1}"))
+        nav_buttons.append(InlineKeyboardButton(text="▶️", callback_data=f"admin:groups:{action}:page:{page+1}"))
     if nav_buttons:
         keyboard.append(nav_buttons)
     
-    keyboard.append([InlineKeyboardButton(text="◀️ Назад", callback_data="admin:groups_menu")])
+    keyboard.append([InlineKeyboardButton(text="◀️ Назад", callback_data=back_callback)])
     
     return InlineKeyboardMarkup(inline_keyboard=keyboard)
 
