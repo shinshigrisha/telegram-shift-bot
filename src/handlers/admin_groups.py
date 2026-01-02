@@ -286,55 +286,67 @@ async def callback_set_topic_start(callback: CallbackQuery, state: FSMContext) -
 @require_admin_callback
 async def callback_select_topic_type(callback: CallbackQuery, state: FSMContext, group_service: GroupService) -> None:
     """Обработка выбора типа темы."""
-    topic_type = callback.data.split(":")[-1]  # poll, arrival, general, important
-    
-    topic_names = {
-        "poll": "Отметки на слот",
-        "arrival": "Приход/уход",
-        "general": "Общий чат",
-        "important": "Важная информация",
-    }
-    
-    topic_name = topic_names.get(topic_type, "тема")
-    
-    await state.update_data(topic_type=topic_type, topic_name=topic_name)
-    await state.set_state(AdminPanelStates.waiting_for_group_selection_for_topic)
-    
-    # Получаем список групп
-    groups = await group_service.get_all_groups()
-    
-    if not groups:
+    try:
+        topic_type = callback.data.split(":")[-1]  # poll, arrival, general, important
+        
+        topic_names = {
+            "poll": "Отметки на слот",
+            "arrival": "Приход/уход",
+            "general": "Общий чат",
+            "important": "Важная информация",
+        }
+        
+        topic_name = topic_names.get(topic_type, "тема")
+        
+        await state.update_data(topic_type=topic_type, topic_name=topic_name)
+        await state.set_state(AdminPanelStates.waiting_for_group_selection_for_topic)
+        
+        # Получаем список групп
+        groups = await group_service.get_all_groups()
+        logger.info(f"Получено групп для установки темы '{topic_name}': {len(groups) if groups else 0}")
+        
+        if not groups:
+            await safe_edit_message(
+                callback.message,
+                "❌ Нет зарегистрированных групп.\nСначала создайте группу.",
+                reply_markup=get_back_keyboard("admin:groups_menu"),
+                parse_mode="HTML"
+            )
+            await safe_answer_callback(callback)
+            return
+        
+        text = (
+            f"📌 <b>Установка темы: {topic_name}</b>\n\n"
+            "Выберите группу:"
+        )
+        
+        # Создаем клавиатуру с модифицированными callback_data
+        from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
+        keyboard_buttons = []
+        for group in groups:
+            group_name = clean_group_name_for_display(group.get("name", f"Группа {group.get('id', '?')}"))
+            if len(group_name) > 30:
+                group_name = group_name[:27] + "..."
+            keyboard_buttons.append([
+                InlineKeyboardButton(
+                    text=group_name,
+                    callback_data=f"admin:topic_group:{topic_type}:{group['id']}"
+                )
+            ])
+        keyboard_buttons.append([InlineKeyboardButton(text="◀️ Назад", callback_data="admin:groups:set_topic")])
+        keyboard = InlineKeyboardMarkup(inline_keyboard=keyboard_buttons)
+        
+        await safe_edit_message(callback.message, text, reply_markup=keyboard, parse_mode="HTML")
+        await safe_answer_callback(callback)
+    except Exception as e:
+        logger.error(f"Ошибка при получении списка групп для установки темы: {e}", exc_info=True)
         await safe_edit_message(
             callback.message,
-            "❌ Нет зарегистрированных групп.\nСначала создайте группу.",
-            reply_markup=get_back_keyboard("admin:groups_menu")
+            f"❌ Ошибка при получении списка групп: {e}",
+            reply_markup=get_back_keyboard("admin:groups_menu"),
+            parse_mode="HTML"
         )
         await safe_answer_callback(callback)
-        return
-    
-    text = (
-        f"📌 <b>Установка темы: {topic_name}</b>\n\n"
-        "Выберите группу:"
-    )
-    
-    # Создаем клавиатуру с модифицированными callback_data
-    from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
-    keyboard_buttons = []
-    for group in groups:
-        group_name = clean_group_name_for_display(group.get("name", f"Группа {group.get('id', '?')}"))
-        if len(group_name) > 30:
-            group_name = group_name[:27] + "..."
-        keyboard_buttons.append([
-            InlineKeyboardButton(
-                text=group_name,
-                callback_data=f"admin:topic_group:{topic_type}:{group['id']}"
-            )
-        ])
-    keyboard_buttons.append([InlineKeyboardButton(text="◀️ Назад", callback_data="admin:groups:set_topic")])
-    keyboard = InlineKeyboardMarkup(inline_keyboard=keyboard_buttons)
-    
-    await safe_edit_message(callback.message, text, reply_markup=keyboard)
-    await safe_answer_callback(callback)
 
 
 @router.callback_query(lambda c: c.data and c.data.startswith("admin:topic_group:"))
@@ -432,54 +444,78 @@ async def process_topic_id_input(message: Message, state: FSMContext, group_serv
 @require_admin_callback
 async def callback_rename_group_start(callback: CallbackQuery, state: FSMContext, group_service: GroupService) -> None:
     """Начать процесс переименования группы."""
-    groups = await group_service.get_all_groups()
-    
-    if not groups:
+    try:
+        groups = await group_service.get_all_groups()
+        logger.info(f"Получено групп для переименования: {len(groups) if groups else 0}")
+        
+        if not groups:
+            await safe_edit_message(
+                callback.message,
+                "❌ Нет зарегистрированных групп.",
+                reply_markup=get_back_keyboard("admin:groups_menu"),
+                parse_mode="HTML"
+            )
+            await safe_answer_callback(callback)
+            return
+        
+        await state.set_state(AdminPanelStates.waiting_for_group_selection_for_topic)  # Переиспользуем состояние
+        await state.update_data(action="rename_group")
+        
+        text = (
+            "✏️ <b>Переименование группы</b>\n\n"
+            "Выберите группу для переименования:"
+        )
+        
+        keyboard = get_groups_list_keyboard(groups, page=0, action="rename", back_callback="admin:groups_menu")
+        await safe_edit_message(callback.message, text, reply_markup=keyboard, parse_mode="HTML")
+        await safe_answer_callback(callback)
+    except Exception as e:
+        logger.error(f"Ошибка при получении списка групп для переименования: {e}", exc_info=True)
         await safe_edit_message(
             callback.message,
-            "❌ Нет зарегистрированных групп.",
-            reply_markup=get_back_keyboard("admin:groups_menu")
+            f"❌ Ошибка при получении списка групп: {e}",
+            reply_markup=get_back_keyboard("admin:groups_menu"),
+            parse_mode="HTML"
         )
         await safe_answer_callback(callback)
-        return
-    
-    await state.set_state(AdminPanelStates.waiting_for_group_selection_for_topic)  # Переиспользуем состояние
-    await state.update_data(action="rename_group")
-    
-    text = (
-        "✏️ <b>Переименование группы</b>\n\n"
-        "Выберите группу для переименования:"
-    )
-    
-    keyboard = get_groups_list_keyboard(groups, page=0, action="rename", back_callback="admin:groups_menu")
-    await safe_edit_message(callback.message, text, reply_markup=keyboard)
-    await safe_answer_callback(callback)
 
 
 @router.callback_query(lambda c: c.data and c.data.startswith("admin:groups:rename:page:"))
 @require_admin_callback
 async def callback_rename_group_page(callback: CallbackQuery, state: FSMContext, group_service: GroupService) -> None:
     """Пагинация списка групп для переименования."""
-    page = int(callback.data.split(":")[-1])
-    groups = await group_service.get_all_groups()
-    
-    if not groups:
+    try:
+        page = int(callback.data.split(":")[-1])
+        groups = await group_service.get_all_groups()
+        logger.info(f"Получено групп для переименования (страница {page}): {len(groups) if groups else 0}")
+        
+        if not groups:
+            await safe_edit_message(
+                callback.message,
+                "❌ Нет зарегистрированных групп.",
+                reply_markup=get_back_keyboard("admin:groups_menu"),
+                parse_mode="HTML"
+            )
+            await safe_answer_callback(callback)
+            return
+        
+        text = (
+            "✏️ <b>Переименование группы</b>\n\n"
+            "Выберите группу для переименования:"
+        )
+        
+        keyboard = get_groups_list_keyboard(groups, page=page, action="rename", back_callback="admin:groups_menu")
+        await safe_edit_message(callback.message, text, reply_markup=keyboard, parse_mode="HTML")
+        await safe_answer_callback(callback)
+    except Exception as e:
+        logger.error(f"Ошибка при получении списка групп для переименования (страница {page}): {e}", exc_info=True)
         await safe_edit_message(
             callback.message,
-            "❌ Нет зарегистрированных групп.",
-            reply_markup=get_back_keyboard("admin:groups_menu")
+            f"❌ Ошибка при получении списка групп: {e}",
+            reply_markup=get_back_keyboard("admin:groups_menu"),
+            parse_mode="HTML"
         )
         await safe_answer_callback(callback)
-        return
-    
-    text = (
-        "✏️ <b>Переименование группы</b>\n\n"
-        "Выберите группу для переименования:"
-    )
-    
-    keyboard = get_groups_list_keyboard(groups, page=page, action="rename", back_callback="admin:groups_menu")
-    await safe_edit_message(callback.message, text, reply_markup=keyboard)
-    await safe_answer_callback(callback)
 
 
 @router.callback_query(lambda c: c.data and (c.data.startswith("admin:group_select:") or c.data.startswith("admin:group_rename:") or c.data.startswith("admin:group_delete:")) and not c.data.startswith("admin:group_select:slots"))
@@ -600,58 +636,82 @@ async def process_new_group_name(message: Message, state: FSMContext, group_serv
 @require_admin_callback
 async def callback_delete_group_start(callback: CallbackQuery, state: FSMContext, group_service: GroupService) -> None:
     """Начать процесс удаления группы."""
-    groups = await group_service.get_all_groups()
-    
-    if not groups:
+    try:
+        groups = await group_service.get_all_groups()
+        logger.info(f"Получено групп для удаления: {len(groups) if groups else 0}")
+        
+        if not groups:
+            await safe_edit_message(
+                callback.message,
+                "❌ Нет зарегистрированных групп.",
+                reply_markup=get_back_keyboard("admin:groups_menu"),
+                parse_mode="HTML"
+            )
+            await safe_answer_callback(callback)
+            return
+        
+        await state.set_state(AdminPanelStates.waiting_for_group_selection_for_topic)  # Переиспользуем состояние
+        await state.update_data(action="delete_group")
+        
+        text = (
+            "🗑️ <b>Удаление группы</b>\n\n"
+            "⚠️ <b>Внимание!</b> Удаление группы необратимо!\n"
+            "Все данные (опросы, голоса) останутся в базе, но группа будет удалена.\n\n"
+            "Выберите группу для удаления:"
+        )
+        
+        keyboard = get_groups_list_keyboard(groups, page=0, action="delete", back_callback="admin:groups_menu")
+        await safe_edit_message(callback.message, text, reply_markup=keyboard, parse_mode="HTML")
+        await safe_answer_callback(callback)
+    except Exception as e:
+        logger.error(f"Ошибка при получении списка групп для удаления: {e}", exc_info=True)
         await safe_edit_message(
             callback.message,
-            "❌ Нет зарегистрированных групп.",
-            reply_markup=get_back_keyboard("admin:groups_menu")
+            f"❌ Ошибка при получении списка групп: {e}",
+            reply_markup=get_back_keyboard("admin:groups_menu"),
+            parse_mode="HTML"
         )
         await safe_answer_callback(callback)
-        return
-    
-    await state.set_state(AdminPanelStates.waiting_for_group_selection_for_topic)  # Переиспользуем состояние
-    await state.update_data(action="delete_group")
-    
-    text = (
-        "🗑️ <b>Удаление группы</b>\n\n"
-        "⚠️ <b>Внимание!</b> Удаление группы необратимо!\n"
-        "Все данные (опросы, голоса) останутся в базе, но группа будет удалена.\n\n"
-        "Выберите группу для удаления:"
-    )
-    
-    keyboard = get_groups_list_keyboard(groups, page=0, action="delete", back_callback="admin:groups_menu")
-    await safe_edit_message(callback.message, text, reply_markup=keyboard)
-    await safe_answer_callback(callback)
 
 
 @router.callback_query(lambda c: c.data and c.data.startswith("admin:groups:delete:page:"))
 @require_admin_callback
 async def callback_delete_group_page(callback: CallbackQuery, state: FSMContext, group_service: GroupService) -> None:
     """Пагинация списка групп для удаления."""
-    page = int(callback.data.split(":")[-1])
-    groups = await group_service.get_all_groups()
-    
-    if not groups:
+    try:
+        page = int(callback.data.split(":")[-1])
+        groups = await group_service.get_all_groups()
+        logger.info(f"Получено групп для удаления (страница {page}): {len(groups) if groups else 0}")
+        
+        if not groups:
+            await safe_edit_message(
+                callback.message,
+                "❌ Нет зарегистрированных групп.",
+                reply_markup=get_back_keyboard("admin:groups_menu"),
+                parse_mode="HTML"
+            )
+            await safe_answer_callback(callback)
+            return
+        
+        text = (
+            "🗑️ <b>Удаление группы</b>\n\n"
+            "⚠️ <b>Внимание!</b> Удаление группы необратимо!\n"
+            "Все данные (опросы, голоса) останутся в базе, но группа будет удалена.\n\n"
+            "Выберите группу для удаления:"
+        )
+        
+        keyboard = get_groups_list_keyboard(groups, page=page, action="delete", back_callback="admin:groups_menu")
+        await safe_edit_message(callback.message, text, reply_markup=keyboard, parse_mode="HTML")
+        await safe_answer_callback(callback)
+    except Exception as e:
+        logger.error(f"Ошибка при получении списка групп для удаления (страница {page}): {e}", exc_info=True)
         await safe_edit_message(
             callback.message,
-            "❌ Нет зарегистрированных групп.",
-            reply_markup=get_back_keyboard("admin:groups_menu")
+            f"❌ Ошибка при получении списка групп: {e}",
+            reply_markup=get_back_keyboard("admin:groups_menu"),
+            parse_mode="HTML"
         )
         await safe_answer_callback(callback)
-        return
-    
-    text = (
-        "🗑️ <b>Удаление группы</b>\n\n"
-        "⚠️ <b>Внимание!</b> Удаление группы необратимо!\n"
-        "Все данные (опросы, голоса) останутся в базе, но группа будет удалена.\n\n"
-        "Выберите группу для удаления:"
-    )
-    
-    keyboard = get_groups_list_keyboard(groups, page=page, action="delete", back_callback="admin:groups_menu")
-    await safe_edit_message(callback.message, text, reply_markup=keyboard)
-    await safe_answer_callback(callback)
 
 
 @router.callback_query(lambda c: c.data and c.data.startswith("admin:delete_confirm:"))
