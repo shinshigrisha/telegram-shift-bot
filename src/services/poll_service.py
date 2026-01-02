@@ -106,6 +106,19 @@ class PollService:
             target_date = date.today() + timedelta(days=1)
         
         groups = await self.group_repo.get_all(active_only=True)
+        logger.info(
+            "Найдено активных групп для создания опросов: %d на дату %s",
+            len(groups),
+            target_date.strftime('%d.%m.%Y')
+        )
+        
+        # Логируем список найденных групп
+        if groups:
+            group_names = [g.get('name', f"ID:{g.get('id', '?')}") for g in groups]
+            logger.info("Группы: %s", ", ".join(group_names))
+        else:
+            logger.warning("⚠️ Не найдено активных групп для создания опросов!")
+        
         created_count = 0
         errors = []
         

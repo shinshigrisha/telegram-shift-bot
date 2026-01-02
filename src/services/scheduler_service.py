@@ -156,6 +156,24 @@ class SchedulerService:
         
         try:
             target_date = date.today() + timedelta(days=1)
+            logger.info("📅 Целевая дата для создания опросов: %s", target_date.strftime('%d.%m.%Y'))
+            
+            # Проверяем, что group_service доступен
+            if not self.group_service:
+                logger.error("❌ GroupService не инициализирован в планировщике!")
+                await self._notify_admins("❌ Ошибка: GroupService не инициализирован в планировщике")
+                return
+            
+            # Получаем список активных групп для проверки
+            try:
+                test_groups = await self.group_service.get_all_groups(active_only=True)
+                logger.info("🔍 Проверка: найдено активных групп в GroupService: %d", len(test_groups) if test_groups else 0)
+                if test_groups:
+                    group_names = [g.get('name', f"ID:{g.get('id', '?')}") for g in test_groups]
+                    logger.info("🔍 Активные группы: %s", ", ".join(group_names))
+            except Exception as e:
+                logger.error("Ошибка при проверке групп: %s", e, exc_info=True)
+            
             created_count, errors = await self.poll_service.create_daily_polls(target_date)
             
             # Формируем отчет
