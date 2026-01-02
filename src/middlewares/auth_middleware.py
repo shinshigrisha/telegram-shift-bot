@@ -1,8 +1,8 @@
-from typing import Callable, Dict, Any, Awaitable
+from typing import Callable, Dict, Any, Awaitable, Union
 import logging
 
 from aiogram import BaseMiddleware
-from aiogram.types import Message
+from aiogram.types import Message, CallbackQuery
 
 from config.settings import settings
 
@@ -13,11 +13,12 @@ logger = logging.getLogger(__name__)
 class AdminMiddleware(BaseMiddleware):
     async def __call__(
         self,
-        handler: Callable[[Message, Dict[str, Any]], Awaitable[Any]],
-        event: Message,
+        handler: Callable[[Union[Message, CallbackQuery], Dict[str, Any]], Awaitable[Any]],
+        event: Union[Message, CallbackQuery],
         data: Dict[str, Any],
     ) -> Any:
-        if event.text and event.text.startswith("/"):
+        # Проверяем только для Message с текстом (команды)
+        if isinstance(event, Message) and event.text and event.text.startswith("/"):
             command = event.text.split()[0]
 
             admin_commands = [
