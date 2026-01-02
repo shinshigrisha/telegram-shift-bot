@@ -359,18 +359,18 @@ async def process_user_name(
     user_id = data.get("verification_user_id")
     
     if not user_id:
-        await message.answer("❌ Ошибка: пользователь не выбран. Начните заново.")
+        await message.answer("❌ Ошибка: пользователь не выбран. Начните заново.", parse_mode="HTML")
         await state.clear()
         return
     
     # Проверка на отмену
     if message.text and message.text.lower() in ["отмена", "cancel"]:
         await state.clear()
-        await message.answer("❌ Верификация отменена")
+        await message.answer("❌ Верификация отменена", parse_mode="HTML")
         return
     
     if not message.text:
-        await message.answer("❌ Пожалуйста, введите имя и фамилию текстом.")
+        await message.answer("❌ Пожалуйста, введите имя и фамилию текстом.", parse_mode="HTML")
         return
     
     # Парсим имя и фамилию
@@ -378,7 +378,8 @@ async def process_user_name(
     if len(parts) < 2:
         await message.answer(
             "❌ Введите имя и фамилию в одной строке.\n"
-            "Пример: <code>Иван Иванов</code>"
+            "Пример: <code>Иван Иванов</code>",
+            parse_mode="HTML"
         )
         return
     
@@ -402,12 +403,12 @@ async def process_user_name(
         else:
             text = "❌ Ошибка при верификации пользователя."
         
-        await message.answer(text, reply_markup=get_back_keyboard("admin:monitoring:verification"))
+        await message.answer(text, reply_markup=get_back_keyboard("admin:monitoring:verification"), parse_mode="HTML")
         await state.clear()
         
     except Exception as e:
         logger.error("Ошибка при верификации пользователя: %s", e, exc_info=True)
-        await message.answer(f"❌ Ошибка: {e}")
+        await message.answer(f"❌ Ошибка: {e}", parse_mode="HTML")
         await state.clear()
 
 
@@ -500,18 +501,18 @@ async def process_user_rename(
     user_id = data.get("rename_user_id")
     
     if not user_id:
-        await message.answer("❌ Ошибка: пользователь не выбран. Начните заново.")
+        await message.answer("❌ Ошибка: пользователь не выбран. Начните заново.", parse_mode="HTML")
         await state.clear()
         return
     
     # Проверка на отмену
     if message.text and message.text.lower() in ["отмена", "cancel"]:
         await state.clear()
-        await message.answer("❌ Переименование отменено")
+        await message.answer("❌ Переименование отменено", parse_mode="HTML")
         return
     
     if not message.text:
-        await message.answer("❌ Пожалуйста, введите имя и фамилию текстом.")
+        await message.answer("❌ Пожалуйста, введите имя и фамилию текстом.", parse_mode="HTML")
         return
     
     # Парсим имя и фамилию
@@ -519,7 +520,8 @@ async def process_user_rename(
     if len(parts) < 2:
         await message.answer(
             "❌ Введите имя и фамилию в одной строке.\n"
-            "Пример: <code>Петр Петров</code>"
+            "Пример: <code>Петр Петров</code>",
+            parse_mode="HTML"
         )
         return
     
@@ -541,12 +543,12 @@ async def process_user_rename(
         else:
             text = "❌ Ошибка при обновлении имени."
         
-        await message.answer(text, reply_markup=get_back_keyboard("admin:monitoring:verification"))
+        await message.answer(text, reply_markup=get_back_keyboard("admin:monitoring:verification"), parse_mode="HTML")
         await state.clear()
         
     except Exception as e:
         logger.error("Ошибка при переименовании пользователя: %s", e, exc_info=True)
-        await message.answer(f"❌ Ошибка: {e}")
+        await message.answer(f"❌ Ошибка: {e}", parse_mode="HTML")
         await state.clear()
 
 

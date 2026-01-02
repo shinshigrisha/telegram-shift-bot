@@ -65,21 +65,21 @@ async def process_broadcast_message(
     topic_name = data.get("broadcast_topic_name", "тема")
     
     if not topic_type:
-        await message.answer("❌ Ошибка: тип темы не выбран. Начните заново.")
+        await message.answer("❌ Ошибка: тип темы не выбран. Начните заново.", parse_mode="HTML")
         await state.clear()
         return
     
     # Проверка на отмену
     if message.text and message.text.lower() in ["отмена", "cancel"]:
         await state.clear()
-        await message.answer("❌ Рассылка отменена")
+        await message.answer("❌ Рассылка отменена", parse_mode="HTML")
         return
     
     # Получаем все активные группы
     groups = await group_service.get_all_groups(active_only=True)
     
     if not groups:
-        await message.answer("❌ Нет активных групп для рассылки")
+        await message.answer("❌ Нет активных групп для рассылки", parse_mode="HTML")
         await state.clear()
         return
     
@@ -93,12 +93,12 @@ async def process_broadcast_message(
     
     topic_field = topic_field_map.get(topic_type)
     if not topic_field:
-        await message.answer(f"❌ Неизвестный тип темы: {topic_type}")
+        await message.answer(f"❌ Неизвестный тип темы: {topic_type}", parse_mode="HTML")
         await state.clear()
         return
     
     # Подготавливаем сообщение
-    await message.answer("⏳ Отправка сообщений...\n\nПожалуйста, подождите.")
+    await message.answer("⏳ Отправка сообщений...\n\nПожалуйста, подождите.", parse_mode="HTML")
     
     sent_count = 0
     skipped_count = 0
@@ -109,7 +109,7 @@ async def process_broadcast_message(
     text_content = message.caption if has_photo else message.text
     
     if not text_content and not has_photo:
-        await message.answer("❌ Сообщение пустое. Отправьте текст или фото с подписью.")
+        await message.answer("❌ Сообщение пустое. Отправьте текст или фото с подписью.", parse_mode="HTML")
         await state.clear()
         return
     
@@ -178,5 +178,5 @@ async def process_broadcast_message(
             error_text += f"\n... и еще {len(errors) - 10} ошибок"
         report_text += f"\n❌ <b>Ошибки:</b>\n{error_text}"
     
-    await message.answer(report_text, reply_markup=get_back_keyboard("admin:broadcast_menu"))
+    await message.answer(report_text, reply_markup=get_back_keyboard("admin:broadcast_menu"), parse_mode="HTML")
     await state.clear()

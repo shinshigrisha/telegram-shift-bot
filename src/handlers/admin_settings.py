@@ -203,7 +203,7 @@ async def process_schedule_time(message: Message, state: FSMContext, group_servi
     """Обработка ввода времени расписания."""
     if message.text and message.text.lower() == "отмена":
         await state.clear()
-        await message.answer("❌ Настройка расписания отменена")
+        await message.answer("❌ Настройка расписания отменена", parse_mode="HTML")
         return
     
     time_text = message.text.strip() if message.text else ""
@@ -222,7 +222,8 @@ async def process_schedule_time(message: Message, state: FSMContext, group_servi
                     "❌ Неверный формат времени.\n"
                     "Используйте формат <code>ЧЧ:ММ</code>.\n"
                     "Пример: <code>09:00</code>\n\n"
-                    "Попробуйте еще раз или введите <code>отмена</code>."
+                    "Попробуйте еще раз или введите <code>отмена</code>.",
+                    parse_mode="HTML"
                 )
                 return
             
@@ -233,7 +234,8 @@ async def process_schedule_time(message: Message, state: FSMContext, group_servi
                 f"✅ Время создания опросов: <code>{time_text}</code>\n\n"
                 "Введите время закрытия опросов в формате <code>ЧЧ:ММ</code>:\n"
                 "Пример: <code>19:00</code>\n\n"
-                "Для отмены введите: <code>отмена</code>"
+                "Для отмены введите: <code>отмена</code>",
+                parse_mode="HTML"
             )
             return
         
@@ -245,7 +247,8 @@ async def process_schedule_time(message: Message, state: FSMContext, group_servi
                     "❌ Неверный формат времени.\n"
                     "Используйте формат <code>ЧЧ:ММ</code>.\n"
                     "Пример: <code>19:00</code>\n\n"
-                    "Попробуйте еще раз или введите <code>отмена</code>."
+                    "Попробуйте еще раз или введите <code>отмена</code>.",
+                    parse_mode="HTML"
                 )
                 return
             
@@ -257,7 +260,8 @@ async def process_schedule_time(message: Message, state: FSMContext, group_servi
                 "Введите часы напоминаний через запятую:\n"
                 "Пример: <code>10,12,14,16,18</code>\n"
                 "Или <code>0</code> для отключения напоминаний\n\n"
-                "Для отмены введите: <code>отмена</code>"
+                "Для отмены введите: <code>отмена</code>",
+                parse_mode="HTML"
             )
             return
         
@@ -276,7 +280,8 @@ async def process_schedule_time(message: Message, state: FSMContext, group_servi
                         "❌ Неверный формат часов напоминаний.\n"
                         "Используйте формат: <code>10,12,14,16,18</code>\n"
                         "Или <code>0</code> для отключения\n\n"
-                        "Попробуйте еще раз или введите <code>отмена</code>."
+                        "Попробуйте еще раз или введите <code>отмена</code>.",
+                        parse_mode="HTML"
                     )
                     return
             
@@ -303,7 +308,9 @@ async def process_schedule_time(message: Message, state: FSMContext, group_servi
                 f"<code>POLL_CLOSING_HOUR={closing_hours}</code>\n"
                 f"<code>POLL_CLOSING_MINUTE={closing_minutes}</code>\n"
                 f"<code>REMINDER_HOURS=[{','.join(map(str, reminder_hours))}]</code>\n\n"
-                f"После обновления перезапустите бота."
+                f"После обновления перезапустите бота.",
+                parse_mode="HTML",
+                reply_markup=get_back_keyboard("admin:settings_menu")
             )
             
             await state.clear()
@@ -317,7 +324,8 @@ async def process_schedule_time(message: Message, state: FSMContext, group_servi
             "❌ Неверный формат времени.\n"
             "Используйте формат <code>ЧЧ:ММ</code> (24 часа).\n"
             "Пример: <code>09:00</code> или <code>19:00</code>\n\n"
-            "Попробуйте еще раз или введите <code>отмена</code>."
+            "Попробуйте еще раз или введите <code>отмена</code>.",
+            parse_mode="HTML"
         )
         return
     
@@ -343,29 +351,35 @@ async def process_schedule_time(message: Message, state: FSMContext, group_servi
                     group_settings["poll_creation_time"] = time_str
                     await group_service.update_group(group_id, settings=group_settings)
                     await message.answer(
-                        f"✅ Время создания опросов для группы установлено: <code>{time_text}</code>"
+                        f"✅ Время создания опросов для группы установлено: <code>{time_text}</code>",
+                        parse_mode="HTML",
+                        reply_markup=get_back_keyboard("admin:settings_menu")
                     )
                 else:
-                    await message.answer("❌ Группа не найдена.")
+                    await message.answer("❌ Группа не найдена.", parse_mode="HTML")
             elif schedule_type == "closing":
                 # Для закрытия опросов - обновляем poll_close_time
                 await group_service.update_group(group_id, poll_close_time=time_str)
                 await message.answer(
-                    f"✅ Время закрытия опросов для группы установлено: <code>{time_text}</code>"
+                    f"✅ Время закрытия опросов для группы установлено: <code>{time_text}</code>",
+                    parse_mode="HTML",
+                    reply_markup=get_back_keyboard("admin:settings_menu")
                 )
         else:
             # Глобальное расписание - сохраняем в настройках (через переменные окружения)
             # В реальном приложении это должно сохраняться в БД или конфиге
             await message.answer(
                 f"✅ Глобальное время {schedule_type_name.lower()} установлено: <code>{time_text}</code>\n\n"
-                f"💡 Для применения изменений перезапустите бота или обновите переменные окружения."
+                f"💡 Для применения изменений перезапустите бота или обновите переменные окружения.",
+                parse_mode="HTML",
+                reply_markup=get_back_keyboard("admin:settings_menu")
             )
         
         await state.clear()
         
     except Exception as e:
         logger.error("Ошибка при настройке расписания: %s", e, exc_info=True)
-        await message.answer(f"❌ Ошибка при настройке расписания: {e}")
+        await message.answer(f"❌ Ошибка при настройке расписания: {e}", parse_mode="HTML")
 
 
 @router.callback_query(lambda c: c.data == "admin:settings:slots")
@@ -594,9 +608,9 @@ async def process_slot_end_time(message: Message, state: FSMContext, group_servi
         data = await state.get_data()
         await state.clear()
         if data.get("slot_index") is not None:
-            await message.answer("❌ Редактирование слота отменено")
+            await message.answer("❌ Редактирование слота отменено", parse_mode="HTML")
         else:
-            await message.answer("❌ Добавление слота отменено")
+            await message.answer("❌ Добавление слота отменено", parse_mode="HTML")
         return
     
     time_text = message.text.strip() if message.text else ""
@@ -607,7 +621,8 @@ async def process_slot_end_time(message: Message, state: FSMContext, group_servi
             "❌ Неверный формат времени.\n"
             "Используйте формат <code>ЧЧ:ММ</code>.\n"
             "Пример: <code>14:00</code>\n\n"
-            "Попробуйте еще раз или введите <code>отмена</code>."
+            "Попробуйте еще раз или введите <code>отмена</code>.",
+            parse_mode="HTML"
         )
         return
     
@@ -624,7 +639,8 @@ async def process_slot_end_time(message: Message, state: FSMContext, group_servi
     if end_total <= start_total:
         await message.answer(
             "❌ Время окончания должно быть больше времени начала.\n"
-            "Попробуйте еще раз или введите <code>отмена</code>."
+            "Попробуйте еще раз или введите <code>отмена</code>.",
+            parse_mode="HTML"
         )
         return
     
@@ -645,7 +661,8 @@ async def process_slot_end_time(message: Message, state: FSMContext, group_servi
             "Введите новый лимит курьеров (число от 1 до 10):\n"
             "Или отправьте <code>по умолчанию</code> для лимита 3\n"
             "Или отправьте <code>не менять</code> чтобы оставить текущий лимит\n\n"
-            "Для отмены введите: <code>отмена</code>"
+            "Для отмены введите: <code>отмена</code>",
+            parse_mode="HTML"
         )
         return
     
@@ -656,7 +673,8 @@ async def process_slot_end_time(message: Message, state: FSMContext, group_servi
         f"✅ Время окончания: <code>{time_text}</code>\n\n"
         "Введите лимит курьеров для этого слота (число от 1 до 10):\n"
         "Или отправьте <code>по умолчанию</code> для лимита 3\n\n"
-        "Для отмены введите: <code>отмена</code>"
+        "Для отмены введите: <code>отмена</code>",
+        parse_mode="HTML"
     )
 
 
@@ -667,9 +685,9 @@ async def process_slot_limit(message: Message, state: FSMContext, group_service:
         data = await state.get_data()
         await state.clear()
         if data.get("slot_index") is not None:
-            await message.answer("❌ Редактирование слота отменено")
+            await message.answer("❌ Редактирование слота отменено", parse_mode="HTML")
         else:
-            await message.answer("❌ Добавление слота отменено")
+            await message.answer("❌ Добавление слота отменено", parse_mode="HTML")
         return
     
     limit_text = message.text.strip() if message.text else ""
@@ -695,7 +713,8 @@ async def process_slot_limit(message: Message, state: FSMContext, group_service:
                 "❌ Лимит должен быть числом от 1 до 10.\n"
                 "Или отправьте <code>по умолчанию</code> для лимита 3\n"
                 "Или <code>не менять</code> чтобы оставить текущий (при редактировании)\n\n"
-                "Попробуйте еще раз или введите <code>отмена</code>."
+                "Попробуйте еще раз или введите <code>отмена</code>.",
+                parse_mode="HTML"
             )
             return
     
@@ -707,7 +726,7 @@ async def process_slot_limit(message: Message, state: FSMContext, group_service:
         # Получаем текущие слоты группы
         group = await group_service.get_group_by_id(group_id)
         if not group:
-            await message.answer("❌ Группа не найдена.")
+            await message.answer("❌ Группа не найдена.", parse_mode="HTML")
             await state.clear()
             return
         
@@ -716,7 +735,7 @@ async def process_slot_limit(message: Message, state: FSMContext, group_service:
         if slot_index is not None:
             # Редактирование существующего слота
             if slot_index >= len(slots):
-                await message.answer("❌ Слот не найден.")
+                await message.answer("❌ Слот не найден.", parse_mode="HTML")
                 await state.clear()
                 return
             
@@ -732,7 +751,9 @@ async def process_slot_limit(message: Message, state: FSMContext, group_service:
             await message.answer(
                 f"✅ Слот успешно обновлен!\n\n"
                 f"Время: <code>{start_time}</code> - <code>{end_time}</code>\n"
-                f"Лимит курьеров: {limit}"
+                f"Лимит курьеров: {limit}",
+                parse_mode="HTML",
+                reply_markup=get_back_keyboard("admin:settings:slots")
             )
         else:
             # Добавление нового слота
@@ -749,14 +770,16 @@ async def process_slot_limit(message: Message, state: FSMContext, group_service:
             await message.answer(
                 f"✅ Слот успешно добавлен!\n\n"
                 f"Время: <code>{start_time}</code> - <code>{end_time}</code>\n"
-                f"Лимит курьеров: {limit}"
+                f"Лимит курьеров: {limit}",
+                parse_mode="HTML",
+                reply_markup=get_back_keyboard("admin:settings:slots")
             )
         
         await state.clear()
         
     except Exception as e:
         logger.error("Ошибка при сохранении слота: %s", e, exc_info=True)
-        await message.answer(f"❌ Ошибка при сохранении слота: {e}")
+        await message.answer(f"❌ Ошибка при сохранении слота: {e}", parse_mode="HTML")
         await state.clear()
 
 
@@ -768,9 +791,9 @@ async def process_slot_start_time(message: Message, state: FSMContext) -> None:
         data = await state.get_data()
         await state.clear()
         if data.get("slot_index") is not None:
-            await message.answer("❌ Редактирование слота отменено")
+            await message.answer("❌ Редактирование слота отменено", parse_mode="HTML")
         else:
-            await message.answer("❌ Добавление слота отменено")
+            await message.answer("❌ Добавление слота отменено", parse_mode="HTML")
         return
     
     time_text = message.text.strip() if message.text else ""
@@ -781,7 +804,8 @@ async def process_slot_start_time(message: Message, state: FSMContext) -> None:
             "❌ Неверный формат времени.\n"
             "Используйте формат <code>ЧЧ:ММ</code>.\n"
             "Пример: <code>08:00</code>\n\n"
-            "Попробуйте еще раз или введите <code>отмена</code>."
+            "Попробуйте еще раз или введите <code>отмена</code>.",
+            parse_mode="HTML"
         )
         return
     
@@ -796,14 +820,16 @@ async def process_slot_start_time(message: Message, state: FSMContext) -> None:
         await message.answer(
             f"✅ Новое время начала: <code>{time_text}</code>\n\n"
             "Введите новое время окончания слота в формате <code>ЧЧ:ММ</code>:\n"
-            "Для отмены введите: <code>отмена</code>"
+            "Для отмены введите: <code>отмена</code>",
+            parse_mode="HTML"
         )
     else:
         await message.answer(
             f"✅ Время начала: <code>{time_text}</code>\n\n"
             "Введите время окончания слота в формате <code>ЧЧ:ММ</code>:\n"
             "Пример: <code>14:00</code>\n\n"
-            "Для отмены введите: <code>отмена</code>"
+            "Для отмены введите: <code>отмена</code>",
+            parse_mode="HTML"
         )
 
 

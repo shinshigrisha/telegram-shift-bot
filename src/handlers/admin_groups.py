@@ -51,13 +51,13 @@ async def process_group_name(message: Message, state: FSMContext, group_service:
     """Обработка названия группы."""
     if message.text and message.text.lower() == "отмена":
         await state.clear()
-        await message.answer("❌ Создание группы отменено", reply_markup=get_back_keyboard("admin:groups_menu"))
+        await message.answer("❌ Создание группы отменено", reply_markup=get_back_keyboard("admin:groups_menu"), parse_mode="HTML")
         return
     
     group_name = message.text.strip() if message.text else ""
     
     if not group_name:
-        await message.answer("❌ Название группы не может быть пустым. Попробуйте еще раз.")
+        await message.answer("❌ Название группы не может быть пустым. Попробуйте еще раз.", parse_mode="HTML")
         return
     
     # Проверяем, не существует ли группа с таким именем
@@ -65,7 +65,8 @@ async def process_group_name(message: Message, state: FSMContext, group_service:
     if existing:
         await message.answer(
             f"❌ Группа с именем <b>{group_name}</b> уже существует.\n"
-            "Введите другое название или введите <code>отмена</code> для отмены."
+            "Введите другое название или введите <code>отмена</code> для отмены.",
+            parse_mode="HTML"
         )
         return
     
@@ -81,7 +82,8 @@ async def process_group_name(message: Message, state: FSMContext, group_service:
         "• Добавьте бота в группу и отправьте любое сообщение\n"
         "• Chat ID будет показан в логах\n"
         "• Или используйте бота @userinfobot\n\n"
-        "Для отмены введите: <code>отмена</code>"
+        "Для отмены введите: <code>отмена</code>",
+        parse_mode="HTML"
     )
 
 
@@ -90,7 +92,7 @@ async def process_chat_id(message: Message, state: FSMContext, group_service: Gr
     """Обработка Chat ID группы."""
     if message.text and message.text.lower() == "отмена":
         await state.clear()
-        await message.answer("❌ Создание группы отменено")
+        await message.answer("❌ Создание группы отменено", parse_mode="HTML")
         return
     
     chat_id_text = message.text.strip() if message.text else ""
@@ -102,7 +104,8 @@ async def process_chat_id(message: Message, state: FSMContext, group_service: Gr
         await message.answer(
             "❌ Chat ID должен быть числом.\n"
             "Пример: <code>-1001234567890</code>\n\n"
-            "Попробуйте еще раз или введите <code>отмена</code> для отмены."
+            "Попробуйте еще раз или введите <code>отмена</code> для отмены.",
+            parse_mode="HTML"
         )
         return
     
@@ -112,7 +115,8 @@ async def process_chat_id(message: Message, state: FSMContext, group_service: Gr
         await message.answer(
             f"❌ Группа с Chat ID <b>{chat_id}</b> уже существует.\n"
             f"Имя: <b>{existing.get('name', '?')}</b>\n\n"
-            "Введите другой Chat ID или введите <code>отмена</code> для отмены."
+            "Введите другой Chat ID или введите <code>отмена</code> для отмены.",
+            parse_mode="HTML"
         )
         return
     
@@ -132,7 +136,8 @@ async def process_chat_id(message: Message, state: FSMContext, group_service: Gr
         "• Откройте нужную тему в форум-группе\n"
         "• Используйте команду <code>/get_topic_id</code> прямо в теме\n"
         "• Или скопируйте ссылку на тему (последнее число)\n\n"
-        "Для отмены введите: <code>отмена</code>"
+        "Для отмены введите: <code>отмена</code>",
+        parse_mode="HTML"
     )
 
 
@@ -141,7 +146,7 @@ async def process_topic_id(message: Message, state: FSMContext, group_service: G
     """Обработка Topic ID группы."""
     if message.text and message.text.lower() == "отмена":
         await state.clear()
-        await message.answer("❌ Создание группы отменено")
+        await message.answer("❌ Создание группы отменено", parse_mode="HTML")
         return
     
     topic_id = None
@@ -153,7 +158,8 @@ async def process_topic_id(message: Message, state: FSMContext, group_service: G
         except ValueError:
             await message.answer(
                 "❌ Topic ID должен быть числом.\n"
-                "Попробуйте еще раз, введите <code>пропустить</code> или <code>отмена</code>."
+                "Попробуйте еще раз, введите <code>пропустить</code> или <code>отмена</code>.",
+                parse_mode="HTML"
             )
             return
     
@@ -176,16 +182,18 @@ async def process_topic_id(message: Message, state: FSMContext, group_service: G
             f"ID: {group['id']}\n"
             f"Chat ID: {chat_id}{topic_info}\n\n"
             f"Теперь можно настроить слоты через меню:\n"
-            f"⚙️ Настройки → ⚙️ Настроить слоты"
+            f"⚙️ Настройки → ⚙️ Настроить слоты",
+            parse_mode="HTML",
+            reply_markup=get_back_keyboard("admin:groups_menu")
         )
         
         await state.clear()
         
     except ValueError as e:
-        await message.answer(f"❌ Ошибка: {e}")
+        await message.answer(f"❌ Ошибка: {e}", parse_mode="HTML")
     except Exception as e:
         logger.error("Ошибка при создании группы: %s", e, exc_info=True)
-        await message.answer(f"❌ Ошибка при создании группы: {e}")
+        await message.answer(f"❌ Ошибка при создании группы: {e}", parse_mode="HTML")
 
 
 @router.callback_query(lambda c: c.data == "admin:groups:list")
@@ -331,7 +339,7 @@ async def process_topic_id_input(message: Message, state: FSMContext, group_serv
     """Обработка ввода Topic ID для темы."""
     if message.text and message.text.lower() == "отмена":
         await state.clear()
-        await message.answer("❌ Настройка темы отменена")
+        await message.answer("❌ Настройка темы отменена", parse_mode="HTML")
         return
     
     # Проверяем, есть ли Topic ID в контексте сообщения (если команда /get_topic_id была использована)
@@ -345,7 +353,8 @@ async def process_topic_id_input(message: Message, state: FSMContext, group_serv
         else:
             await message.answer(
                 "❌ Не удалось автоматически определить Topic ID.\n"
-                "Введите Topic ID вручную или используйте команду <code>/get_topic_id</code> в теме."
+                "Введите Topic ID вручную или используйте команду <code>/get_topic_id</code> в теме.",
+                parse_mode="HTML"
             )
             return
     else:
@@ -354,7 +363,8 @@ async def process_topic_id_input(message: Message, state: FSMContext, group_serv
         except ValueError:
             await message.answer(
                 "❌ Topic ID должен быть числом.\n"
-                "Попробуйте еще раз, введите <code>авто</code> или <code>отмена</code>."
+                "Попробуйте еще раз, введите <code>авто</code> или <code>отмена</code>.",
+                parse_mode="HTML"
             )
             return
     
@@ -370,18 +380,20 @@ async def process_topic_id_input(message: Message, state: FSMContext, group_serv
         if success:
             await message.answer(
                 f"✅ Topic ID для темы '{topic_name}' успешно установлен: <code>{topic_id}</code>\n\n"
-                f"Теперь опросы будут создаваться в указанной теме."
+                f"Теперь опросы будут создаваться в указанной теме.",
+                parse_mode="HTML",
+                reply_markup=get_back_keyboard("admin:groups_menu")
             )
         else:
-            await message.answer("❌ Ошибка при установке Topic ID. Группа не найдена.")
+            await message.answer("❌ Ошибка при установке Topic ID. Группа не найдена.", parse_mode="HTML")
         
         await state.clear()
         
     except ValueError as e:
-        await message.answer(f"❌ Ошибка: {e}")
+        await message.answer(f"❌ Ошибка: {e}", parse_mode="HTML")
     except Exception as e:
         logger.error("Ошибка при установке Topic ID: %s", e, exc_info=True)
-        await message.answer(f"❌ Ошибка при установке Topic ID: {e}")
+        await message.answer(f"❌ Ошибка при установке Topic ID: {e}", parse_mode="HTML")
 
 
 @router.callback_query(lambda c: c.data == "admin:groups:rename")
@@ -516,13 +528,13 @@ async def process_new_group_name(message: Message, state: FSMContext, group_serv
     """Обработка нового названия группы."""
     if message.text and message.text.lower() == "отмена":
         await state.clear()
-        await message.answer("❌ Переименование отменено")
+        await message.answer("❌ Переименование отменено", parse_mode="HTML")
         return
     
     new_name = message.text.strip() if message.text else ""
     
     if not new_name:
-        await message.answer("❌ Название группы не может быть пустым. Попробуйте еще раз.")
+        await message.answer("❌ Название группы не может быть пустым. Попробуйте еще раз.", parse_mode="HTML")
         return
     
     data = await state.get_data()
@@ -536,18 +548,20 @@ async def process_new_group_name(message: Message, state: FSMContext, group_serv
             await message.answer(
                 f"✅ Группа успешно переименована!\n\n"
                 f"Было: <b>{current_name}</b>\n"
-                f"Стало: <b>{new_name}</b>"
+                f"Стало: <b>{new_name}</b>",
+                parse_mode="HTML",
+                reply_markup=get_back_keyboard("admin:groups_menu")
             )
         else:
-            await message.answer("❌ Ошибка при переименовании группы.")
+            await message.answer("❌ Ошибка при переименовании группы.", parse_mode="HTML")
         
         await state.clear()
         
     except ValueError as e:
-        await message.answer(f"❌ Ошибка: {e}")
+        await message.answer(f"❌ Ошибка: {e}", parse_mode="HTML")
     except Exception as e:
         logger.error("Ошибка при переименовании группы: %s", e, exc_info=True)
-        await message.answer(f"❌ Ошибка при переименовании группы: {e}")
+        await message.answer(f"❌ Ошибка при переименовании группы: {e}", parse_mode="HTML")
 
 
 @router.callback_query(lambda c: c.data == "admin:groups:delete")
