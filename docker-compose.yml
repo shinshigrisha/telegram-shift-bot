@@ -1,3 +1,5 @@
+name: telegram-shift-bot
+
 services:
   postgres:
     image: postgres:15
