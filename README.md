@@ -1,95 +1,306 @@
 # 🤖 Telegram Shift Bot
 
-Telegram-бот для управления сменами курьеров с AI-куратором и автоматическими опросами.
+**Комплексная система управления сменами курьеров с AI-куратором и автоматическими опросами**
 
-## 📋 Содержание
+[![Python](https://img.shields.io/badge/Python-3.11+-blue.svg)](https://www.python.org/)
+[![aiogram](https://img.shields.io/badge/aiogram-3.3+-green.svg)](https://docs.aiogram.dev/)
+[![PostgreSQL](https://img.shields.io/badge/PostgreSQL-15+-blue.svg)](https://www.postgresql.org/)
+[![Redis](https://img.shields.io/badge/Redis-7+-red.svg)](https://redis.io/)
+[![License](https://img.shields.io/badge/License-Proprietary-red.svg)](LICENSE)
 
-- [Описание проекта](#описание-проекта)
-- [Основной функционал](#основной-функционал)
-- [Установка и настройка](#установка-и-настройка)
-- [Резервное копирование](#резервное-копирование)
-- [Деплой](#деплой)
-- [Обучение модели](#обучение-модели)
-- [Документация](#документация)
+---
+
+## 📑 Содержание
+
+- [Описание проекта](#-описание-проекта)
+- [Основные возможности](#-основные-возможности)
+- [Архитектура](#-архитектура)
+- [Технологический стек](#-технологический-стек)
+- [Быстрый старт](#-быстрый-старт)
+- [Установка и настройка](#-установка-и-настройка)
+- [Структура проекта](#-структура-проекта)
+- [Админ-панель](#-админ-панель)
+- [AI-куратор](#-ai-куратор)
+- [API и интерфейсы](#-api-и-интерфейсы)
+- [Миграции базы данных](#-миграции-базы-данных)
+- [Резервное копирование](#-резервное-копирование)
+- [Деплой](#-деплой)
+- [Разработка](#-разработка)
+- [Документация](#-документация)
+- [Troubleshooting](#-troubleshooting)
 
 ---
 
 ## 📖 Описание проекта
 
-Telegram Shift Bot — комплексное решение для управления сменами курьеров, включающее:
+**Telegram Shift Bot** — это полнофункциональная система для управления сменами курьеров через Telegram, включающая:
 
-- **Автоматические опросы** — создание и управление опросами для записи на смены
-- **AI-куратор** — виртуальный помощник с RAG (Retrieval-Augmented Generation) для ответов на вопросы курьеров
-- **Админ-панель** — полнофункциональная панель управления через Telegram
-- **Мониторинг и аналитика** — статистика, логи, отчеты
-- **Рассылки** — массовая отправка сообщений в группы
+- **Автоматические опросы** — создание и управление опросами для записи на смены по расписанию
+- **AI-куратор с RAG** — виртуальный помощник с использованием Retrieval-Augmented Generation для ответов на вопросы курьеров
+- **Админ-панель** — полнофункциональная панель управления через Telegram с навигацией и FSM
+- **Мониторинг и аналитика** — статистика, логи, отчеты, системный мониторинг
+- **Рассылки** — массовая отправка сообщений в группы по темам
+- **Верификация пользователей** — система управления доступом и верификации курьеров
 
-### Технологический стек
+### Ключевые особенности
 
-- **Python 3.11+** — основной язык разработки
-- **aiogram 3.x** — фреймворк для Telegram ботов
-- **PostgreSQL** — основная база данных
-- **Redis** — кэширование и хранение состояний (FSM)
-- **Groq API (LLaMA 3)** — генерация ответов AI-куратора
-  - **groq>=0.4.0** — Python-клиент для Groq API
-- **APScheduler** — планировщик задач для автоматических опросов
-- **asyncpg** — асинхронный драйвер для PostgreSQL
-- **python-dotenv** — загрузка переменных окружения из .env файла
+- ✅ **Асинхронная архитектура** — полная поддержка async/await для высокой производительности
+- ✅ **Модульная структура** — четкое разделение на handlers, services, repositories
+- ✅ **FSM (Finite State Machine)** — управление многошаговыми диалогами через Redis
+- ✅ **RAG через PostgreSQL** — эффективный поиск релевантных FAQ с использованием векторного поиска
+- ✅ **Docker-ready** — полная поддержка контейнеризации
+- ✅ **Миграции БД** — версионирование схемы базы данных
+- ✅ **Логирование** — подробное логирование всех операций
+- ✅ **Explainability** — объяснение решений AI-куратора
 
 ---
 
-## 🚀 Основной функционал
+## 🚀 Основные возможности
 
 ### 1. Управление опросами
 
-- ✅ Автоматическое создание опросов по расписанию
+- ✅ Автоматическое создание опросов по расписанию (настраиваемое время)
 - ✅ Ручное создание опросов через админ-панель
 - ✅ Закрытие опросов по расписанию или вручную
-- ✅ Просмотр результатов опросов
-- ✅ Статистика по опросам
+- ✅ Просмотр результатов опросов с детализацией по слотам
+- ✅ Статистика по опросам (активные, закрытые, голоса)
+- ✅ Пересоздание опросов с подтверждением
+- ✅ Поиск опросов на завтра
 
 ### 2. Управление группами
 
-- ✅ Создание и настройка групп
-- ✅ Поддержка форум-групп с темами
-- ✅ Настройка слотов (временных интервалов)
+- ✅ Создание и настройка групп (Telegram Chat ID, Topic ID)
+- ✅ Поддержка форум-групп с темами (4 типа тем)
+- ✅ Настройка слотов (временных интервалов) для каждой группы
 - ✅ Переименование и удаление групп
 - ✅ Активация/деактивация групп
+- ✅ Просмотр списка всех групп с детальной информацией
 
-### 3. AI-куратор (Виртуальный помощник)
+### 3. Настройки
 
-- ✅ RAG через PostgreSQL для поиска релевантных ответов
-- ✅ История диалогов в Redis
-- ✅ Классификация обращений по тегам
-- ✅ Explainability — объяснение решений
-- ✅ База знаний из 60+ кейсов
-- ✅ Автоматическое обучение на новых данных
+- ✅ **Расписание опросов:**
+  - Время создания опросов (по умолчанию 09:00)
+  - Время закрытия опросов (по умолчанию 19:00)
+  - Часы напоминаний (настраиваемые, по умолчанию 10, 12, 14, 16, 18)
+- ✅ **Слоты:**
+  - Добавление слотов (время начала, время окончания, лимит курьеров 1-10)
+  - Редактирование существующих слотов
+  - Удаление слотов
+  - Просмотр всех слотов группы
 
-**Подробнее:** [README_RAG.md](README_RAG.md), [CURATOR_USAGE.md](CURATOR_USAGE.md)
+### 4. AI-куратор (Виртуальный помощник)
 
-### 4. Админ-панель
+- ✅ **RAG через PostgreSQL:**
+  - Векторный поиск релевантных FAQ
+  - Контекстный поиск по категориям и тегам
+  - Ранжирование результатов по релевантности
+- ✅ **Генерация ответов:**
+  - Использование Groq API (LLaMA 3)
+  - Контекстные ответы на основе найденных FAQ
+  - История диалогов в Redis
+- ✅ **Rule-based ответы:**
+  - Быстрые ответы для типовых сценариев (терминал сломан, ДТП, повреждение товара)
+  - Must-match кейсы из конфигурации
+- ✅ **Классификация:**
+  - Автоматическое определение тегов обращений
+  - База знаний из 60+ кейсов
+- ✅ **Explainability:**
+  - Логирование объяснений решений
+  - JSON-логи для анализа
 
-- ✅ Управление группами
-- ✅ Настройка расписания и слотов
-- ✅ Управление опросами
-- ✅ Рассылки
-- ✅ Мониторинг и статистика
+### 5. Админ-панель
 
-**Подробнее:** [docs/ADMIN_PANEL_GUIDE.md](docs/ADMIN_PANEL_GUIDE.md)
+Полнофункциональная панель управления через Telegram с разделами:
 
-### 5. Мониторинг и аналитика
+- 📋 **Управление группами** — создание, настройка, темы, переименование, удаление
+- ⚙️ **Настройки** — расписание опросов, настройка слотов
+- 📊 **Опросы** — создание, управление, просмотр результатов, закрытие
+- 📢 **Рассылка** — отправка сообщений во все группы по темам (текст или фото)
+- 📈 **Мониторинг** — статистика, системный статус, логи, верификация пользователей
 
-- ✅ Логирование всех действий
-- ✅ Статистика по опросам
-- ✅ Explainability логи для AI-куратора
-- ✅ Генерация отчетов
-- ✅ Мониторинг производительности
+**Особенности:**
+- Навигация с кнопками "Назад"
+- FSM для многошаговых операций
+- Подтверждения для критических действий
+- Пагинация для больших списков
+
+### 6. Мониторинг и аналитика
+
+- ✅ **Статистика:**
+  - Общее количество групп (активных, дневных, ночных)
+  - Количество активных/закрытых опросов
+  - Статистика по голосам за сегодня
+- ✅ **Системный статус:**
+  - CPU, RAM, Disk usage (через psutil)
+  - Время работы системы (uptime)
+- ✅ **Логи:**
+  - Просмотр последних строк из `logs/bot.log`
+  - Логи explainability для AI-куратора
+- ✅ **Верификация пользователей:**
+  - Список неверифицированных пользователей
+  - Список верифицированных пользователей
+  - Верификация пользователей (ввод имени и фамилии)
+  - Переименование верифицированных пользователей
+  - Удаление (unverify) пользователей
+  - Массовая верификация всех пользователей
+
+### 7. Рассылки
+
+- ✅ Выбор темы для рассылки:
+  - 📊 Отметки на слот
+  - 🚪 Приход/уход
+  - 💬 Общий чат
+  - 📢 Важная информация
+- ✅ Отправка текстовых сообщений или фото с подписью
+- ✅ Отчет о результатах рассылки (отправлено, пропущено, ошибки)
 
 ---
 
-## 🛠️ Установка и настройка
+## 🏗️ Архитектура
 
-### Требования
+### Общая архитектура
+
+```
+┌─────────────────────────────────────────────────────────────┐
+│                    Telegram Bot API                           │
+└───────────────────────┬─────────────────────────────────────┘
+                        │
+        ┌───────────────┴───────────────┐
+        │                               │
+   ┌────▼────┐                    ┌─────▼─────┐
+   │ Handlers│                    │Middleware │
+   └────┬────┘                    └─────┬─────┘
+        │                               │
+   ┌────▼───────────────────────────────▼─────┐
+   │              Services Layer               │
+   │  (Business Logic)                         │
+   └────┬──────────────────────────────────────┘
+        │
+   ┌────▼──────────────────────────────────────┐
+   │         Repositories Layer                 │
+   │         (Data Access)                     │
+   └────┬───────────────────────────────────────┘
+        │
+   ┌────▼──────────┐      ┌──────────────┐
+   │  PostgreSQL   │      │    Redis     │
+   │  (Primary DB) │      │  (FSM/Cache) │
+   └───────────────┘      └──────────────┘
+```
+
+### Компоненты системы
+
+1. **Handlers** (`src/handlers/`) — обработчики событий Telegram
+   - `admin.py` — основные команды админа
+   - `admin_panel_navigation.py` — навигация по админ-панели
+   - `admin_groups.py` — управление группами
+   - `admin_settings.py` — настройки (расписание, слоты)
+   - `admin_polls.py` — управление опросами
+   - `admin_broadcast.py` — рассылки
+   - `admin_monitoring.py` — мониторинг и верификация
+   - `admin_curator.py` — управление AI-куратором
+   - `courier_ai.py` — обработка вопросов от курьеров
+   - `user_handlers.py` — обработчики для обычных пользователей
+
+2. **Services** (`src/services/`) — бизнес-логика
+   - `group_service.py` — логика работы с группами
+   - `poll_service.py` — логика работы с опросами
+   - `user_service.py` — логика работы с пользователями
+   - `curator_service.py` — логика AI-куратора (RAG, генерация)
+   - `ai_response_service.py` — rule-based ответы
+
+3. **Repositories** (`src/repositories/`) — доступ к данным
+   - `group_repository.py` — CRUD для групп
+   - `poll_repository.py` — CRUD для опросов
+   - `user_repository.py` — CRUD для пользователей
+   - `faq_repository.py` — работа с FAQ (RAG)
+
+4. **Middlewares** (`src/middlewares/`) — промежуточное ПО
+   - `auth_middleware.py` — проверка прав администратора
+   - `database_middleware.py` — инъекция репозиториев и сервисов
+   - `verification_middleware.py` — проверка верификации пользователей
+
+5. **States** (`src/states/`) — FSM состояния
+   - `admin_panel_states.py` — состояния админ-панели
+   - `verification_states.py` — состояния верификации
+   - `setup_states.py` — состояния настройки
+
+6. **Utils** (`src/utils/`) — утилиты
+   - `admin_keyboards.py` — клавиатуры для админ-панели
+   - `auth.py` — функции авторизации
+   - `db_pool.py` — пул соединений PostgreSQL
+   - `group_formatters.py` — форматирование данных групп
+   - `telegram_helpers.py` — вспомогательные функции для Telegram
+
+### Поток данных
+
+**Обработка команды админа:**
+```
+User → Telegram → Handler → Middleware (Auth) → Middleware (DB) → Service → Repository → PostgreSQL
+                                                                                    ↓
+                                                                              Response
+                                                                                    ↓
+User ← Telegram ← Handler ← Formatter ← Service ← Repository ← PostgreSQL
+```
+
+**Обработка вопроса курьера:**
+```
+Courier → Telegram → Handler → AI Service → FAQ Repository (RAG) → PostgreSQL
+                                                      ↓
+                                              Relevant FAQ
+                                                      ↓
+                                              Groq API (LLaMA 3)
+                                                      ↓
+                                              Response + Explanation
+                                                      ↓
+Courier ← Telegram ← Handler ← Formatter
+```
+
+---
+
+## 🛠️ Технологический стек
+
+### Основные технологии
+
+- **Python 3.11+** — основной язык разработки
+- **aiogram 3.3+** — фреймворк для Telegram ботов
+  - FSM (Finite State Machine) для управления состояниями
+  - Middleware для обработки запросов
+  - Router для организации handlers
+- **PostgreSQL 15+** — основная база данных
+  - Хранение групп, опросов, пользователей, FAQ
+  - RAG через полнотекстовый поиск
+  - Миграции через SQL файлы
+- **Redis 7+** — кэширование и FSM storage
+  - Хранение состояний FSM
+  - История диалогов AI-куратора
+  - Кэширование часто используемых данных
+- **Groq API (LLaMA 3)** — генерация ответов AI-куратора
+  - `groq>=0.4.0` — Python-клиент для Groq API
+- **APScheduler 3.10+** — планировщик задач
+  - Автоматическое создание опросов по расписанию
+  - Автоматическое закрытие опросов
+  - Напоминания
+- **psutil 5.9+** — системный мониторинг
+  - CPU, RAM, Disk usage
+  - System uptime
+
+### Вспомогательные библиотеки
+
+- **asyncpg 0.29+** — асинхронный драйвер для PostgreSQL
+- **python-dotenv 1.0+** — загрузка переменных окружения из .env
+- **redis 5.0+** — Python-клиент для Redis
+
+### Инфраструктура
+
+- **Docker** — контейнеризация
+- **Docker Compose** — оркестрация контейнеров
+- **Git** — версионный контроль
+
+---
+
+## ⚡ Быстрый старт
+
+### Минимальные требования
 
 - Python 3.11+
 - PostgreSQL 12+
@@ -97,64 +308,34 @@ Telegram Shift Bot — комплексное решение для управл
 - Telegram Bot Token
 - Groq API Key (для AI-куратора)
 
-### Шаг 1: Клонирование репозитория
+### Запуск за 5 минут
 
 ```bash
+# 1. Клонируйте репозиторий
 git clone <repository-url>
 cd telegram-shift-bot
-```
 
-### Шаг 2: Создание виртуального окружения
-
-```bash
+# 2. Создайте виртуальное окружение
 python3 -m venv venv
 source venv/bin/activate  # Linux/Mac
 # или
 venv\Scripts\activate  # Windows
-```
 
-### Шаг 3: Установка зависимостей
-
-```bash
+# 3. Установите зависимости
 pip install -r requirements.txt
-```
 
-### Шаг 4: Настройка переменных окружения
+# 4. Настройте .env файл
+cp .env.example .env
+nano .env  # Заполните BOT_TOKEN, DATABASE_URL, REDIS_URL, GROQ_API_KEY, ADMIN_IDS
 
-Создайте файл `.env` в корне проекта:
+# 5. Запустите PostgreSQL и Redis
+docker compose up -d postgres redis
 
-```env
-# Telegram Bot
-BOT_TOKEN=your_telegram_bot_token
-ADMIN_IDS=123456789,987654321
-
-# База данных
-DATABASE_URL=postgresql://user:password@localhost:5432/dbname
-
-# Redis
-REDIS_URL=redis://localhost:6379/0
-
-# AI-куратор
-GROQ_API_KEY=your_groq_api_key
-
-# Настройки
-TIMEZONE=Europe/Moscow
-LOG_LEVEL=INFO
-```
-
-### Шаг 5: Инициализация базы данных
-
-```bash
-# Создание таблиц и начальных данных
+# 6. Инициализируйте базу данных
 python scripts/init_faq_database.py
+docker compose run --rm bot python scripts/run_migration_users.py
 
-# Импорт ML-кейсов (опционально)
-python scripts/import_ml_cases_jsonl.py ml_cases.jsonl
-```
-
-### Шаг 6: Запуск бота
-
-```bash
+# 7. Запустите бота
 python src/main.py
 ```
 
@@ -162,635 +343,479 @@ python src/main.py
 
 ---
 
-## 💾 Резервное копирование
+## 🔧 Установка и настройка
 
-### PostgreSQL
+### Подробная установка
 
-#### Автоматический бекап
+См. [docs/DEPLOYMENT_GUIDE.md](docs/DEPLOYMENT_GUIDE.md)
 
-Создайте скрипт `scripts/backup_postgres.sh`:
+### Переменные окружения
 
-```bash
-#!/bin/bash
+Создайте файл `.env` в корне проекта:
+
+```env
+# Telegram Bot
+BOT_TOKEN=your_telegram_bot_token
+ADMIN_IDS=123456789,987654321,111222333
+
+# База данных PostgreSQL
+DATABASE_URL=postgresql://user:password@localhost:5432/shift_bot
+# Или отдельные параметры:
+DB_HOST=localhost
+DB_PORT=5432
+DB_NAME=shift_bot
+DB_USER=bot_user
+DB_PASSWORD=your_password
+
+# Redis
+REDIS_URL=redis://:password@localhost:6379/0
+# Или отдельные параметры:
+REDIS_HOST=localhost
+REDIS_PORT=6379
+REDIS_PASSWORD=your_redis_password
+REDIS_DB=0
+
+# AI-куратор (Groq API)
+GROQ_API_KEY=your_groq_api_key
 
 # Настройки
-DB_NAME="your_database_name"
-DB_USER="your_database_user"
-BACKUP_DIR="./backups"
-DATE=$(date +%Y%m%d_%H%M%S)
-BACKUP_FILE="$BACKUP_DIR/postgres_backup_$DATE.sql"
+TZ=Europe/Moscow
+LOG_LEVEL=INFO
 
-# Создаем директорию для бекапов
-mkdir -p $BACKUP_DIR
+# Опциональные настройки
+ENABLE_VERIFICATION=False
+ENABLE_ADMIN_NOTIFICATIONS=False
+ENABLE_COURIER_WARNINGS=False
+ENABLE_GROUP_REMINDERS=True
+ENABLE_POLL_CREATION_NOTIFICATIONS=True
+ENABLE_HEALTH_CHECK_NOTIFICATIONS=False
 
-# Создаем бекап
-pg_dump -U $DB_USER -d $DB_NAME -F c -f "$BACKUP_FILE.dump"
+# Расписание опросов (по умолчанию)
+POLL_CREATION_HOUR=9
+POLL_CREATION_MINUTE=0
+POLL_CLOSING_HOUR=19
+POLL_CLOSING_MINUTE=0
+REMINDER_HOURS=[10,12,14,16,18]
 
-# Или в SQL формате
-pg_dump -U $DB_USER -d $DB_NAME > "$BACKUP_FILE"
-
-# Сжимаем (опционально)
-gzip "$BACKUP_FILE"
-
-echo "✅ Бекап создан: $BACKUP_FILE.gz"
-
-# Удаляем старые бекапы (старше 30 дней)
-find $BACKUP_DIR -name "postgres_backup_*.sql.gz" -mtime +30 -delete
+# Шифрование (если используется)
+ENCRYPTION_KEY=your_encryption_key_base64
 ```
 
-**Настройка cron для автоматических бекапов:**
+### Инициализация базы данных
+
+```bash
+# Основные таблицы и FAQ
+python scripts/init_faq_database.py
+
+# Таблица users
+docker compose run --rm bot python scripts/run_migration_users.py
+# Или напрямую через PostgreSQL:
+docker compose exec -T postgres psql -U bot_user -d shift_bot < migrations/005_create_users_table.sql
+
+# Импорт ML-кейсов (опционально)
+python scripts/import_ml_cases_jsonl.py ml_cases.jsonl
+```
+
+---
+
+## 📁 Структура проекта
+
+```
+telegram-shift-bot/
+├── config/                 # Конфигурация
+│   ├── __init__.py
+│   └── settings.py         # Настройки приложения
+│
+├── src/                    # Исходный код
+│   ├── handlers/          # Обработчики событий Telegram
+│   │   ├── admin.py              # Основные команды админа
+│   │   ├── admin_panel_navigation.py  # Навигация админ-панели
+│   │   ├── admin_groups.py       # Управление группами
+│   │   ├── admin_settings.py     # Настройки
+│   │   ├── admin_polls.py        # Управление опросами
+│   │   ├── admin_broadcast.py    # Рассылки
+│   │   ├── admin_monitoring.py   # Мониторинг
+│   │   ├── admin_curator.py      # Управление AI-куратором
+│   │   ├── courier_ai.py         # Обработка вопросов курьеров
+│   │   ├── user_handlers.py      # Обработчики для пользователей
+│   │   └── curator_helpers.py   # Вспомогательные функции куратора
+│   │
+│   ├── services/          # Бизнес-логика
+│   │   ├── group_service.py      # Логика работы с группами
+│   │   ├── poll_service.py       # Логика работы с опросами
+│   │   ├── user_service.py       # Логика работы с пользователями
+│   │   ├── curator_service.py    # Логика AI-куратора
+│   │   └── ai_response_service.py # Rule-based ответы
+│   │
+│   ├── repositories/      # Доступ к данным
+│   │   ├── group_repository.py   # CRUD для групп
+│   │   ├── poll_repository.py    # CRUD для опросов
+│   │   ├── user_repository.py    # CRUD для пользователей
+│   │   └── faq_repository.py     # CRUD для FAQ (RAG)
+│   │
+│   ├── middlewares/       # Middleware
+│   │   ├── auth_middleware.py         # Проверка прав админа
+│   │   ├── database_middleware.py     # Инъекция репозиториев
+│   │   └── verification_middleware.py # Проверка верификации
+│   │
+│   ├── states/            # FSM состояния
+│   │   ├── admin_panel_states.py  # Состояния админ-панели
+│   │   ├── verification_states.py # Состояния верификации
+│   │   └── setup_states.py        # Состояния настройки
+│   │
+│   ├── utils/             # Утилиты
+│   │   ├── admin_keyboards.py     # Клавиатуры админ-панели
+│   │   ├── auth.py                # Функции авторизации
+│   │   ├── db_pool.py             # Пул соединений PostgreSQL
+│   │   ├── group_formatters.py    # Форматирование данных групп
+│   │   ├── telegram_helpers.py   # Вспомогательные функции Telegram
+│   │   └── config_loader.py       # Загрузка конфигурации
+│   │
+│   ├── ai/                # AI-куратор
+│   │   ├── curator.py            # Основной класс куратора
+│   │   └── delivery_curator_config.json  # Конфигурация куратора
+│   │
+│   └── main.py            # Точка входа
+│
+├── migrations/             # Миграции базы данных
+│   ├── 001_create_faq_ai_table.sql
+│   ├── 002_insert_initial_faq_data.sql
+│   ├── 003_insert_extended_cases.sql
+│   ├── 004_create_ml_cases_table.sql
+│   ├── 005_create_users_table.sql
+│   └── 006_fix_users_table.sql
+│
+├── scripts/               # Скрипты
+│   ├── init_faq_database.py          # Инициализация FAQ БД
+│   ├── run_migration_users.py        # Миграция users
+│   ├── migrate_users_direct.sh       # Прямая миграция через PostgreSQL
+│   ├── fix_users_table.sh            # Исправление структуры users
+│   ├── import_ml_cases_jsonl.py      # Импорт ML-кейсов
+│   ├── train_classifier.py           # Обучение классификатора
+│   ├── backup_postgres.sh            # Бекап PostgreSQL
+│   ├── backup_redis.sh               # Бекап Redis
+│   ├── backup_all.sh                 # Комплексный бекап
+│   ├── deploy_update.sh              # Скрипт обновления на сервере
+│   └── setup_server.sh               # Настройка сервера
+│
+├── docs/                  # Документация
+│   ├── DEPLOYMENT_GUIDE.md      # Руководство по деплою
+│   ├── ADMIN_PANEL_GUIDE.md      # Руководство по админ-панели
+│   └── INTEGRATION_GUIDE.md     # Руководство по интеграции
+│
+├── examples/              # Примеры использования
+│   ├── curator_usage.py          # Примеры использования куратора
+│   └── curator_usage_examples.py # Дополнительные примеры
+│
+├── logs/                  # Логи
+│   ├── bot.log                   # Основной лог бота
+│   └── explainability/           # Логи explainability
+│
+├── backups/               # Резервные копии
+│   ├── postgres_backup_*.sql
+│   └── redis_backup_*.rdb
+│
+├── reports/               # Отчеты (генерируемые)
+│
+├── tests/                 # Тесты
+│
+├── docker-compose.yml     # Docker Compose конфигурация
+├── Dockerfile             # Docker образ бота
+├── requirements.txt       # Python зависимости
+├── .env                   # Переменные окружения (не в git)
+│
+├── README.md              # Этот файл
+├── QUICK_START.md         # Быстрый старт
+├── QUICK_START_RAG.md     # Быстрый старт RAG
+├── CURATOR_USAGE.md       # Использование AI-куратора
+├── README_RAG.md          # Документация RAG
+├── README_ML_CASES.md     # Документация ML-кейсов
+├── MIGRATION_USERS.md     # Миграция users
+└── DEPLOY_INSTRUCTIONS.md # Инструкции по обновлению на сервере
+```
+
+---
+
+## 🎛️ Админ-панель
+
+Полнофункциональная админ-панель доступна через команду `/admin` в Telegram.
+
+### Основные разделы
+
+1. **📋 Управление группами**
+   - Создание групп (название, Chat ID, Topic ID)
+   - Просмотр списка групп
+   - Настройка тем для форум-групп (4 типа)
+   - Переименование групп
+   - Удаление групп
+
+2. **⚙️ Настройки**
+   - Расписание опросов (время создания, закрытия, напоминания)
+   - Настройка слотов (добавление, редактирование, удаление)
+
+3. **📊 Опросы**
+   - Создание опросов вручную
+   - Пересоздание опросов
+   - Просмотр результатов опросов
+   - Закрытие опросов (одиночное и массовое)
+   - Поиск опросов на завтра
+
+4. **📢 Рассылка**
+   - Выбор темы для рассылки
+   - Отправка текстовых сообщений или фото
+   - Отчет о результатах
+
+5. **📈 Мониторинг**
+   - Статистика системы
+   - Статус системы (CPU, RAM, Disk)
+   - Просмотр логов
+   - Верификация пользователей
+
+**Подробное руководство:** [docs/ADMIN_PANEL_GUIDE.md](docs/ADMIN_PANEL_GUIDE.md)
+
+---
+
+## 🤖 AI-куратор
+
+AI-куратор использует **RAG (Retrieval-Augmented Generation)** для ответов на вопросы курьеров.
+
+### Архитектура AI-куратора
+
+```
+Вопрос курьера
+    ↓
+Rule-based проверка (ai_response_service)
+    ↓ (если не найден)
+RAG поиск в PostgreSQL (faq_repository)
+    ↓
+Релевантные FAQ
+    ↓
+Groq API (LLaMA 3) с контекстом
+    ↓
+Ответ + Explanation
+    ↓
+Сохранение в Redis (история)
+```
+
+### Основные возможности
+
+- **RAG через PostgreSQL:**
+  - Векторный поиск релевантных FAQ
+  - Контекстный поиск по категориям и тегам
+  - Ранжирование результатов
+
+- **Генерация ответов:**
+  - Использование Groq API (LLaMA 3)
+  - Контекстные ответы на основе FAQ
+  - История диалогов в Redis
+
+- **Rule-based ответы:**
+  - Быстрые ответы для типовых сценариев
+  - Must-match кейсы
+
+- **Explainability:**
+  - Логирование объяснений решений
+  - JSON-логи в `logs/explainability/`
+
+**Подробная документация:**
+- [CURATOR_USAGE.md](CURATOR_USAGE.md) — использование AI-куратора
+- [README_RAG.md](README_RAG.md) — документация RAG
+- [QUICK_START_RAG.md](QUICK_START_RAG.md) — быстрый старт RAG
+
+---
+
+## 🔌 API и интерфейсы
+
+### Telegram Bot API
+
+Бот использует aiogram 3.x для работы с Telegram Bot API.
+
+**Основные команды:**
+- `/start` — начало работы с ботом
+- `/admin` — открытие админ-панели (только для админов)
+
+**Callback handlers:**
+- `admin:*` — все callback'и админ-панели
+- `admin:groups:*` — управление группами
+- `admin:settings:*` — настройки
+- `admin:polls:*` — управление опросами
+- `admin:broadcast:*` — рассылки
+- `admin:monitoring:*` — мониторинг
+
+### База данных (PostgreSQL)
+
+**Основные таблицы:**
+- `groups` — группы для опросов
+- `daily_polls` — опросы
+- `users` — пользователи (верификация)
+- `faq_ai` — FAQ для AI-куратора
+- `ml_cases` — ML-кейсы для обучения
+
+**Схема БД:** см. файлы в `migrations/`
+
+### Redis
+
+**Использование:**
+- FSM states (ключи вида `fsm:{user_id}:{state}`)
+- История диалогов AI-куратора
+- Кэширование
+
+---
+
+## 🗄️ Миграции базы данных
+
+### Выполнение миграций
+
+```bash
+# Через Python скрипт
+docker compose run --rm bot python scripts/run_migration_users.py
+
+# Напрямую через PostgreSQL
+docker compose exec -T postgres psql -U bot_user -d shift_bot < migrations/005_create_users_table.sql
+
+# Исправление структуры таблицы
+bash scripts/fix_users_table.sh
+```
+
+### Список миграций
+
+1. `001_create_faq_ai_table.sql` — создание таблицы FAQ
+2. `002_insert_initial_faq_data.sql` — начальные данные FAQ
+3. `003_insert_extended_cases.sql` — расширенные кейсы
+4. `004_create_ml_cases_table.sql` — таблица ML-кейсов
+5. `005_create_users_table.sql` — таблица пользователей
+6. `006_fix_users_table.sql` — исправление структуры users
+
+**Подробнее:** [MIGRATION_USERS.md](MIGRATION_USERS.md)
+
+---
+
+## 💾 Резервное копирование
+
+### Автоматические бекапы
+
+```bash
+# PostgreSQL
+bash scripts/backup_postgres.sh
+
+# Redis
+bash scripts/backup_redis.sh
+
+# Комплексный бекап
+bash scripts/backup_all.sh
+```
+
+### Настройка cron
 
 ```bash
 # Редактируем crontab
 crontab -e
 
-# Добавляем задачу (каждый день в 2:00)
+# Добавляем задачи
 0 2 * * * /path/to/telegram-shift-bot/scripts/backup_postgres.sh >> /var/log/postgres_backup.log 2>&1
-```
-
-#### Ручной бекап
-
-```bash
-# SQL формат
-pg_dump -U username -d database_name > backup.sql
-
-# Custom формат (сжатый)
-pg_dump -U username -d database_name -F c -f backup.dump
-
-# Только схема
-pg_dump -U username -d database_name -s > schema.sql
-
-# Только данные
-pg_dump -U username -d database_name -a > data.sql
-```
-
-#### Восстановление из бекапа
-
-```bash
-# Из SQL файла
-psql -U username -d database_name < backup.sql
-
-# Из custom формата
-pg_restore -U username -d database_name backup.dump
-
-# Создание новой БД и восстановление
-createdb -U username new_database
-pg_restore -U username -d new_database backup.dump
-```
-
-### Redis
-
-#### Автоматический бекап
-
-Создайте скрипт `scripts/backup_redis.sh`:
-
-```bash
-#!/bin/bash
-
-# Настройки
-REDIS_HOST="localhost"
-REDIS_PORT="6379"
-BACKUP_DIR="./backups"
-DATE=$(date +%Y%m%d_%H%M%S)
-BACKUP_FILE="$BACKUP_DIR/redis_backup_$DATE.rdb"
-
-# Создаем директорию для бекапов
-mkdir -p $BACKUP_DIR
-
-# Сохраняем данные Redis
-redis-cli --rdb "$BACKUP_FILE"
-
-# Или через BGSAVE (асинхронно)
-redis-cli BGSAVE
-
-# Копируем RDB файл (обычно находится в /var/lib/redis/dump.rdb)
-# cp /var/lib/redis/dump.rdb "$BACKUP_FILE"
-
-echo "✅ Бекап Redis создан: $BACKUP_FILE"
-
-# Удаляем старые бекапы (старше 30 дней)
-find $BACKUP_DIR -name "redis_backup_*.rdb" -mtime +30 -delete
-```
-
-**Настройка cron:**
-
-```bash
-# Каждый день в 3:00
 0 3 * * * /path/to/telegram-shift-bot/scripts/backup_redis.sh >> /var/log/redis_backup.log 2>&1
 ```
 
-#### Ручной бекап
+### Восстановление из бекапа
 
 ```bash
-# Сохранение через redis-cli
-redis-cli --rdb backup.rdb
-
-# Или через BGSAVE
-redis-cli BGSAVE
-
-# Копирование RDB файла
-cp /var/lib/redis/dump.rdb ./backups/redis_backup_$(date +%Y%m%d_%H%M%S).rdb
-```
-
-#### Восстановление из бекапа
-
-```bash
-# Останавливаем Redis
-sudo systemctl stop redis
-
-# Копируем бекап
-cp backup.rdb /var/lib/redis/dump.rdb
-
-# Устанавливаем права
-chown redis:redis /var/lib/redis/dump.rdb
-
-# Запускаем Redis
-sudo systemctl start redis
-```
-
-### Комплексный скрипт бекапа
-
-Создайте `scripts/backup_all.sh`:
-
-```bash
-#!/bin/bash
-
-BACKUP_DIR="./backups"
-DATE=$(date +%Y%m%d_%H%M%S)
-BACKUP_DIR_DATE="$BACKUP_DIR/backup_$DATE"
-
-mkdir -p "$BACKUP_DIR_DATE"
-
-echo "🔄 Начинаю резервное копирование..."
-
 # PostgreSQL
-echo "📊 Бекап PostgreSQL..."
-pg_dump -U $DB_USER -d $DB_NAME > "$BACKUP_DIR_DATE/postgres_backup.sql"
-gzip "$BACKUP_DIR_DATE/postgres_backup.sql"
+docker compose exec -T postgres psql -U bot_user -d shift_bot < backups/postgres_backup_YYYYMMDD_HHMMSS.sql
 
 # Redis
-echo "💾 Бекап Redis..."
-redis-cli --rdb "$BACKUP_DIR_DATE/redis_backup.rdb"
-
-# Логи (опционально)
-echo "📝 Бекап логов..."
-tar -czf "$BACKUP_DIR_DATE/logs.tar.gz" logs/
-
-# Конфигурация
-echo "⚙️ Бекап конфигурации..."
-cp .env "$BACKUP_DIR_DATE/.env"
-cp -r config/ "$BACKUP_DIR_DATE/config/"
-
-echo "✅ Все бекапы созданы в: $BACKUP_DIR_DATE"
-
-# Удаляем старые бекапы (старше 7 дней)
-find $BACKUP_DIR -name "backup_*" -type d -mtime +7 -exec rm -rf {} \;
+docker compose stop redis
+docker cp backups/redis_backup_YYYYMMDD_HHMMSS.rdb $(docker compose ps -q redis):/data/dump.rdb
+docker compose start redis
 ```
 
 ---
 
 ## 🚀 Деплой
 
-### Локальный деплой
-
-#### Использование systemd (Linux)
-
-Создайте файл `/etc/systemd/system/telegram-shift-bot.service`:
-
-```ini
-[Unit]
-Description=Telegram Shift Bot
-After=network.target postgresql.service redis.service
-
-[Service]
-Type=simple
-User=your_user
-WorkingDirectory=/path/to/telegram-shift-bot
-Environment="PATH=/path/to/telegram-shift-bot/venv/bin"
-ExecStart=/path/to/telegram-shift-bot/venv/bin/python src/main.py
-Restart=always
-RestartSec=10
-
-[Install]
-WantedBy=multi-user.target
-```
-
-**Команды:**
-
-```bash
-# Перезагружаем systemd
-sudo systemctl daemon-reload
-
-# Запускаем сервис
-sudo systemctl start telegram-shift-bot
-
-# Включаем автозапуск
-sudo systemctl enable telegram-shift-bot
-
-# Проверяем статус
-sudo systemctl status telegram-shift-bot
-
-# Просмотр логов
-sudo journalctl -u telegram-shift-bot -f
-```
-
-### Docker деплой
-
-Создайте `Dockerfile`:
-
-```dockerfile
-FROM python:3.11-slim
-
-WORKDIR /app
-
-# Устанавливаем зависимости
-COPY requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt
-
-# Копируем код
-COPY . .
-
-# Запускаем бота
-CMD ["python", "src/main.py"]
-```
-
-Создайте `docker-compose.yml`:
-
-```yaml
-version: '3.8'
-
-services:
-  bot:
-    build: .
-    container_name: telegram-shift-bot
-    restart: always
-    environment:
-      - BOT_TOKEN=${BOT_TOKEN}
-      - DATABASE_URL=${DATABASE_URL}
-      - REDIS_URL=${REDIS_URL}
-      - GROQ_API_KEY=${GROQ_API_KEY}
-    volumes:
-      - ./logs:/app/logs
-      - ./backups:/app/backups
-    depends_on:
-      - postgres
-      - redis
-
-  postgres:
-    image: postgres:15
-    container_name: telegram-shift-postgres
-    environment:
-      - POSTGRES_DB=${DB_NAME}
-      - POSTGRES_USER=${DB_USER}
-      - POSTGRES_PASSWORD=${DB_PASSWORD}
-    volumes:
-      - postgres_data:/var/lib/postgresql/data
-      - ./backups:/backups
-    ports:
-      - "5432:5432"
-
-  redis:
-    image: redis:7-alpine
-    container_name: telegram-shift-redis
-    volumes:
-      - redis_data:/data
-    ports:
-      - "6379:6379"
-
-volumes:
-  postgres_data:
-  redis_data:
-```
-
-**Запуск:**
+### Docker Compose (рекомендуется)
 
 ```bash
 # Запуск всех сервисов
-docker-compose up -d
+docker compose up -d
 
 # Просмотр логов
-docker-compose logs -f bot
+docker compose logs -f bot
 
 # Остановка
-docker-compose down
+docker compose down
 ```
 
-### Деплой на сервер
-
-#### Подготовка сервера
+### Обновление на сервере
 
 ```bash
-# Обновляем систему
-sudo apt update && sudo apt upgrade -y
+# Автоматическое обновление
+cd /opt/telegram-shift-bot
+bash scripts/deploy_update.sh
 
-# Устанавливаем зависимости
-sudo apt install -y python3.11 python3.11-venv postgresql redis-server git
-
-# Создаем пользователя для бота
-sudo useradd -m -s /bin/bash botuser
-sudo su - botuser
-
-# Клонируем репозиторий
-git clone <repository-url> telegram-shift-bot
-cd telegram-shift-bot
+# Или вручную:
+git pull
+docker compose build --no-cache bot
+docker compose run --rm bot python scripts/run_migration_users.py
+docker compose restart bot
 ```
 
-#### Настройка PostgreSQL
-
-```bash
-# Создаем базу данных
-sudo -u postgres psql
-CREATE DATABASE telegram_shift_bot;
-CREATE USER botuser WITH PASSWORD 'your_password';
-GRANT ALL PRIVILEGES ON DATABASE telegram_shift_bot TO botuser;
-\q
-```
-
-#### Настройка Redis
-
-```bash
-# Проверяем статус
-sudo systemctl status redis
-
-# Настраиваем персистентность (если нужно)
-sudo nano /etc/redis/redis.conf
-# Убедитесь, что:
-# save 900 1
-# save 300 10
-# save 60 10000
-
-sudo systemctl restart redis
-```
-
-#### Настройка бота
-
-```bash
-# Создаем виртуальное окружение
-python3.11 -m venv venv
-source venv/bin/activate
-
-# Устанавливаем зависимости
-pip install -r requirements.txt
-
-# Настраиваем .env
-cp .env.example .env
-nano .env
-
-# Инициализируем базу данных
-python scripts/init_faq_database.py
-```
-
-#### Настройка systemd
-
-См. раздел "Локальный деплой" выше.
+**Подробнее:**
+- [docs/DEPLOYMENT_GUIDE.md](docs/DEPLOYMENT_GUIDE.md) — полное руководство по деплою
+- [DEPLOY_INSTRUCTIONS.md](DEPLOY_INSTRUCTIONS.md) — инструкции по обновлению
 
 ---
 
-## 🧠 Обучение модели
+## 👨‍💻 Разработка
 
-### Подготовка данных
+### Структура кода
 
-#### 1. Сбор данных
+- **Handlers** — только обработка событий Telegram, минимум логики
+- **Services** — вся бизнес-логика
+- **Repositories** — только доступ к данным, без логики
+- **Middlewares** — инъекция зависимостей, проверка прав
 
-Данные для обучения собираются автоматически:
-- Вопросы курьеров → `ml_cases` таблица
-- Ответы AI-куратора → `explainability` логи
-- Результаты классификации → теги и решения
+### Добавление нового функционала
 
-#### 2. Импорт данных
+1. Создайте handler в `src/handlers/`
+2. Добавьте service в `src/services/` (если нужна бизнес-логика)
+3. Добавьте repository в `src/repositories/` (если нужен доступ к БД)
+4. Зарегистрируйте router в `src/main.py`
+5. Добавьте клавиатуры в `src/utils/admin_keyboards.py` (если нужно)
+6. Добавьте состояния в `src/states/` (если нужен FSM)
 
-```bash
-# Импорт ML-кейсов из JSONL
-python scripts/import_ml_cases_jsonl.py ml_cases.jsonl
-
-# Или добавление через API
-python examples/curator_usage.py
-```
-
-#### 3. Проверка данных
-
-```sql
--- Статистика по меткам
-SELECT label, COUNT(*) as cnt
-FROM ml_cases
-GROUP BY label
-ORDER BY cnt DESC;
-
--- Проверка качества данных
-SELECT 
-    COUNT(*) as total,
-    COUNT(DISTINCT label) as unique_labels,
-    AVG(LENGTH(input)) as avg_input_length,
-    AVG(LENGTH(explanation)) as avg_explanation_length
-FROM ml_cases;
-```
-
-### Обучение классификатора
-
-#### Вариант 1: Традиционный ML (scikit-learn)
-
-Создайте `scripts/train_classifier.py`:
-
-```python
-#!/usr/bin/env python3
-"""
-Обучение классификатора для AI-куратора.
-"""
-import asyncio
-import asyncpg
-import pickle
-from sklearn.feature_extraction.text import TfidfVectorizer
-from sklearn.ensemble import RandomForestClassifier
-from sklearn.model_selection import train_test_split
-from sklearn.metrics import classification_report, accuracy_score
-import os
-from dotenv import load_dotenv
-
-load_dotenv()
-
-async def train_classifier():
-    """Обучение классификатора на данных из ml_cases."""
-    
-    # Подключаемся к БД
-    conn = await asyncpg.connect(os.getenv('DATABASE_URL'))
-    
-    # Получаем данные
-    rows = await conn.fetch(
-        "SELECT input, label FROM ml_cases WHERE label IS NOT NULL"
-    )
-    
-    X = [row['input'] for row in rows]
-    y = [row['label'] for row in rows]
-    
-    print(f"📊 Загружено {len(X)} примеров")
-    print(f"📋 Уникальных меток: {len(set(y))}")
-    
-    # Разделяем на train/test
-    X_train, X_test, y_train, y_test = train_test_split(
-        X, y, test_size=0.2, random_state=42, stratify=y
-    )
-    
-    # Векторизация
-    vectorizer = TfidfVectorizer(max_features=5000, ngram_range=(1, 2))
-    X_train_vec = vectorizer.fit_transform(X_train)
-    X_test_vec = vectorizer.transform(X_test)
-    
-    # Обучение
-    print("🔄 Обучение модели...")
-    classifier = RandomForestClassifier(n_estimators=100, random_state=42)
-    classifier.fit(X_train_vec, y_train)
-    
-    # Оценка
-    y_pred = classifier.predict(X_test_vec)
-    accuracy = accuracy_score(y_test, y_pred)
-    
-    print(f"\n✅ Точность модели: {accuracy:.2%}")
-    print("\n📊 Отчет по классификации:")
-    print(classification_report(y_test, y_pred))
-    
-    # Сохранение модели
-    model_dir = "models"
-    os.makedirs(model_dir, exist_ok=True)
-    
-    with open(f"{model_dir}/classifier.pkl", "wb") as f:
-        pickle.dump(classifier, f)
-    
-    with open(f"{model_dir}/vectorizer.pkl", "wb") as f:
-        pickle.dump(vectorizer, f)
-    
-    print(f"\n💾 Модель сохранена в {model_dir}/")
-    
-    await conn.close()
-
-if __name__ == "__main__":
-    asyncio.run(train_classifier())
-```
-
-**Запуск:**
+### Тестирование
 
 ```bash
-python scripts/train_classifier.py
-```
+# Запуск тестов (когда будут добавлены)
+pytest tests/
 
-#### Вариант 2: Fine-tuning LLM (Groq/LLaMA)
-
-Для fine-tuning LLaMA через Groq используйте их API или локальную установку:
-
-```python
-# Пример использования обученной модели
-import pickle
-
-# Загрузка модели
-with open("models/classifier.pkl", "rb") as f:
-    classifier = pickle.load(f)
-
-with open("models/vectorizer.pkl", "rb") as f:
-    vectorizer = pickle.load(f)
-
-# Предсказание
-text = "Яйца разбиты, пакет целый"
-text_vec = vectorizer.transform([text])
-prediction = classifier.predict(text_vec)[0]
-probability = classifier.predict_proba(text_vec)[0]
-
-print(f"Предсказание: {prediction}")
-print(f"Вероятность: {max(probability):.2%}")
-```
-
-### Обновление базы знаний
-
-#### Добавление новых FAQ
-
-```python
-from src.services.curator_service import CuratorService
-from src.utils.db_pool import get_db_pool
-from src.repositories.faq_repository import FAQRepository
-from redis.asyncio import Redis
-
-async def add_new_faq():
-    db_pool = await get_db_pool()
-    faq_repo = FAQRepository(db_pool)
-    redis = Redis.from_url("redis://localhost:6379/0")
-    service = CuratorService(faq_repo, redis)
-    
-    # Добавляем новый FAQ
-    faq_id = await service.add_faq_to_knowledge_base(
-        question="Новый вопрос",
-        answer="Новый ответ",
-        category="Категория",
-        tag="Тег"
-    )
-    
-    print(f"✅ FAQ добавлен с ID: {faq_id}")
-
-# Запуск
-import asyncio
-asyncio.run(add_new_faq())
-```
-
-### Мониторинг качества модели
-
-Создайте `scripts/evaluate_model.py`:
-
-```python
-#!/usr/bin/env python3
-"""
-Оценка качества модели на тестовых данных.
-"""
-import asyncio
-import asyncpg
-import pickle
-from sklearn.metrics import classification_report, confusion_matrix
-import os
-from dotenv import load_dotenv
-
-load_dotenv()
-
-async def evaluate_model():
-    """Оценка модели на новых данных."""
-    
-    # Загружаем модель
-    with open("models/classifier.pkl", "rb") as f:
-        classifier = pickle.load(f)
-    
-    with open("models/vectorizer.pkl", "rb") as f:
-        vectorizer = pickle.load(f)
-    
-    # Получаем тестовые данные
-    conn = await asyncpg.connect(os.getenv('DATABASE_URL'))
-    rows = await conn.fetch(
-        "SELECT input, label FROM ml_cases WHERE created_at > NOW() - INTERVAL '7 days'"
-    )
-    
-    X = [row['input'] for row in rows]
-    y_true = [row['label'] for row in rows]
-    
-    # Предсказания
-    X_vec = vectorizer.transform(X)
-    y_pred = classifier.predict(X_vec)
-    
-    # Метрики
-    print("📊 Отчет по классификации:")
-    print(classification_report(y_true, y_pred))
-    
-    print("\n📈 Матрица ошибок:")
-    print(confusion_matrix(y_true, y_pred))
-    
-    await conn.close()
-
-if __name__ == "__main__":
-    asyncio.run(evaluate_model())
+# Проверка синтаксиса
+python -m py_compile src/**/*.py
 ```
 
 ---
 
 ## 📚 Документация
 
-- [Быстрый старт](QUICK_START.md) — начальная настройка
-- [Админ-панель](docs/ADMIN_PANEL_GUIDE.md) — руководство по админ-панели
-- [RAG и AI-куратор](README_RAG.md) — документация по RAG
-- [Использование AI-куратора](CURATOR_USAGE.md) — примеры использования
-- [ML-кейсы](README_ML_CASES.md) — работа с ML-кейсами
+### Основные документы
+
+- [README.md](README.md) — этот файл (обзор проекта)
+- [QUICK_START.md](QUICK_START.md) — быстрый старт
+- [docs/DEPLOYMENT_GUIDE.md](docs/DEPLOYMENT_GUIDE.md) — руководство по деплою
+- [docs/ADMIN_PANEL_GUIDE.md](docs/ADMIN_PANEL_GUIDE.md) — руководство по админ-панели
+- [docs/INTEGRATION_GUIDE.md](docs/INTEGRATION_GUIDE.md) — руководство по интеграции
+
+### AI-куратор
+
+- [CURATOR_USAGE.md](CURATOR_USAGE.md) — использование AI-куратора
+- [README_RAG.md](README_RAG.md) — документация RAG
+- [QUICK_START_RAG.md](QUICK_START_RAG.md) — быстрый старт RAG
+- [README_ML_CASES.md](README_ML_CASES.md) — работа с ML-кейсами
+
+### Миграции и обновления
+
+- [MIGRATION_USERS.md](MIGRATION_USERS.md) — миграция users
+- [DEPLOY_INSTRUCTIONS.md](DEPLOY_INSTRUCTIONS.md) — инструкции по обновлению
 
 ---
 
@@ -800,52 +825,64 @@ if __name__ == "__main__":
 
 ```bash
 # Проверка подключения
-psql -U username -d database_name -c "SELECT 1;"
+docker compose exec postgres psql -U bot_user -d shift_bot -c "SELECT 1;"
 
 # Проверка таблиц
-psql -U username -d database_name -c "\dt"
+docker compose exec postgres psql -U bot_user -d shift_bot -c "\dt"
 
 # Восстановление из бекапа
-psql -U username -d database_name < backup.sql
+docker compose exec -T postgres psql -U bot_user -d shift_bot < backups/backup.sql
 ```
 
 ### Проблемы с Redis
 
 ```bash
 # Проверка подключения
-redis-cli ping
+docker compose exec redis redis-cli ping
 
 # Просмотр данных
-redis-cli KEYS "*"
+docker compose exec redis redis-cli KEYS "*"
 
 # Очистка (осторожно!)
-redis-cli FLUSHALL
+docker compose exec redis redis-cli FLUSHALL
 ```
 
 ### Проблемы с ботом
 
 ```bash
 # Просмотр логов
+docker compose logs -f bot
+# Или
 tail -f logs/bot.log
 
-# Проверка статуса (systemd)
-sudo systemctl status telegram-shift-bot
+# Проверка статуса
+docker compose ps
 
 # Перезапуск
-sudo systemctl restart telegram-shift-bot
+docker compose restart bot
+```
+
+### Проблемы с миграциями
+
+```bash
+# Выполнение миграции напрямую
+docker compose exec -T postgres psql -U bot_user -d shift_bot < migrations/005_create_users_table.sql
+
+# Исправление структуры таблицы
+bash scripts/fix_users_table.sh
 ```
 
 ---
 
 ## 📝 Лицензия
 
-[Укажите лицензию]
+Proprietary — все права защищены
 
 ---
 
 ## 👥 Авторы
 
-[Укажите авторов]
+Разработано для управления сменами курьеров
 
 ---
 
@@ -853,7 +890,7 @@ sudo systemctl restart telegram-shift-bot
 
 Для вопросов и поддержки:
 - Создайте issue в репозитории
-- Напишите на email: [указать email]
+- Проверьте документацию в папке `docs/`
 
 ---
 
