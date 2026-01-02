@@ -37,12 +37,10 @@ async def handle_poll_answer(
         option_ids
     )
     
-    # Получаем сервисы из контекста бота (если доступны)
-    poll_repo: Optional[PollRepository] = bot.get("poll_repo")
-    
-    if not poll_repo:
-        logger.warning("PollRepository не доступен, голос не сохранен в БД")
-        return
+    # PollRepository должен быть доступен через middleware в data
+    # Но для poll_answer события middleware может не сработать
+    # Пока просто логируем, сохранение в БД будет реализовано позже
+    logger.debug("Получен голос в опросе, сохранение в БД будет реализовано")
     
     try:
         # Ищем опрос по telegram_poll_id

@@ -21,6 +21,7 @@ from src.utils.auth import require_admin, require_admin_callback
 from src.services.scheduler_service import SchedulerService
 from src.services.poll_service import PollService
 from src.services.group_service import GroupService
+from src.services.service_registry import get_scheduler_service, get_poll_service
 from config.settings import settings
 
 logger = logging.getLogger(__name__)
@@ -42,8 +43,8 @@ async def cmd_force_poll(
         /force_poll ЗИЗ-1 - создать опрос только для ЗИЗ-1
         /force_poll 2024-01-15 - создать опросы на указанную дату
     """
-    # Получаем scheduler из контекста бота
-    scheduler_service: Optional[SchedulerService] = bot.get("scheduler_service")
+    # Получаем scheduler из глобального реестра
+    scheduler_service: Optional[SchedulerService] = get_scheduler_service()
     
     if not scheduler_service:
         await message.answer("❌ Планировщик не инициализирован")
@@ -107,7 +108,7 @@ async def cmd_manual_close(
         /manual_close ЗИЗ-1 - закрыть опрос только для ЗИЗ-1
         /manual_close 2024-01-15 - закрыть опросы на указанную дату
     """
-    scheduler_service: Optional[SchedulerService] = bot.get("scheduler_service")
+    scheduler_service: Optional[SchedulerService] = main_module.scheduler_service
     
     if not scheduler_service:
         await message.answer("❌ Планировщик не инициализирован")
@@ -225,7 +226,7 @@ async def cmd_stats(
     """
     Показать статистику по всем ЗИЗам.
     """
-    poll_service: Optional[PollService] = bot.get("poll_service")
+    poll_service: Optional[PollService] = get_poll_service()
     
     try:
         # Статистика по группам
@@ -438,7 +439,7 @@ async def cmd_scheduler_status(message: Message, bot: Bot) -> None:
     """
     Показать статус планировщика.
     """
-    scheduler_service: Optional[SchedulerService] = bot.get("scheduler_service")
+    scheduler_service: Optional[SchedulerService] = main_module.scheduler_service
     
     if not scheduler_service:
         await message.answer("❌ Планировщик не инициализирован")

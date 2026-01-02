@@ -32,6 +32,7 @@ from src.utils.db_pool import get_db_pool, close_db_pool
 from src.services.scheduler_service import SchedulerService
 from src.services.poll_service import PollService
 from src.services.group_service import GroupService
+from src.services.service_registry import set_scheduler_service, set_poll_service
 from src.repositories.poll_repository import PollRepository
 from src.repositories.group_repository import GroupRepository
 
@@ -52,14 +53,9 @@ logging.basicConfig(
 
 logger = logging.getLogger(__name__)
 
-# Глобальная переменная для scheduler
-scheduler_service: SchedulerService | None = None
-
 
 async def main() -> None:
     """Главная функция для запуска бота."""
-    global scheduler_service
-    
     logger.info("Запуск Telegram бота...")
     
     # Проверяем наличие обязательных переменных
@@ -147,10 +143,9 @@ async def main() -> None:
                 group_service=group_service,
             )
             
-            # Сохраняем scheduler в контексте бота для доступа из handlers
-            bot["scheduler_service"] = scheduler_service
-            bot["poll_service"] = poll_service
-            bot["group_service"] = group_service
+            # Сохраняем в глобальный реестр для доступа из handlers
+            set_scheduler_service(scheduler_service)
+            set_poll_service(poll_service)
             
             # Запускаем планировщик
             await scheduler_service.start()
@@ -167,6 +162,8 @@ async def main() -> None:
         logger.error("Критическая ошибка при работе бота: %s", e, exc_info=True)
     finally:
         # Останавливаем планировщик
+        from src.services.service_registry import get_scheduler_service
+        scheduler_service = get_scheduler_service()
         if scheduler_service:
             await scheduler_service.stop()
         
