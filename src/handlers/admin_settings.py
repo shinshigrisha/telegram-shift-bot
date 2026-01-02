@@ -591,8 +591,12 @@ async def callback_select_group_for_slots(callback: CallbackQuery, state: FSMCon
 async def process_slot_end_time(message: Message, state: FSMContext, group_service: GroupService) -> None:
     """Обработка ввода времени окончания слота."""
     if message.text and message.text.lower() == "отмена":
+        data = await state.get_data()
         await state.clear()
-        await message.answer("❌ Добавление слота отменено")
+        if data.get("slot_index") is not None:
+            await message.answer("❌ Редактирование слота отменено")
+        else:
+            await message.answer("❌ Добавление слота отменено")
         return
     
     time_text = message.text.strip() if message.text else ""
