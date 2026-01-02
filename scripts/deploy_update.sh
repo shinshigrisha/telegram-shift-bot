@@ -17,10 +17,21 @@ else
 fi
 
 echo "🔨 Пересборка образа бота..."
-docker compose build bot
+docker compose build --no-cache bot
 
 echo "🗄️ Выполнение миграции users..."
-docker compose run --rm bot python scripts/run_migration_users.py
+# Пробуем выполнить через Python скрипт
+if docker compose run --rm bot python scripts/run_migration_users.py 2>/dev/null; then
+    echo "✅ Миграция выполнена через Python скрипт"
+else
+    echo "⚠️ Python скрипт не найден, выполняем миграцию напрямую через PostgreSQL..."
+    # Выполняем миграцию напрямую через PostgreSQL
+    docker compose exec -T postgres psql -U bot_user -d shift_bot < migrations/005_create_users_table.sql || {
+        echo "⚠️ Прямое выполнение не удалось, пробуем альтернативный способ..."
+        cat migrations/005_create_users_table.sql | docker compose exec -T postgres psql -U bot_user -d shift_bot
+    }
+    echo "✅ Миграция выполнена напрямую через PostgreSQL"
+fi
 
 echo "🔄 Перезапуск бота..."
 docker compose up -d bot

@@ -12,14 +12,17 @@ cd /opt/telegram-shift-bot
 docker compose run --rm bot python scripts/run_migration_users.py
 ```
 
-### Вариант 2: Напрямую через PostgreSQL
+### Вариант 2: Напрямую через PostgreSQL (рекомендуется, если образ не обновлен)
 
 ```bash
 # На сервере выполните:
 cd /opt/telegram-shift-bot
 
-# Выполните SQL напрямую
-docker compose exec postgres psql -U bot_user -d shift_bot -f /app/migrations/005_create_users_table.sql
+# Способ 1: Через скрипт
+bash scripts/migrate_users_direct.sh
+
+# Способ 2: Напрямую
+docker compose exec -T postgres psql -U bot_user -d shift_bot < migrations/005_create_users_table.sql
 ```
 
 ### Вариант 3: Через Python скрипт (локально)
