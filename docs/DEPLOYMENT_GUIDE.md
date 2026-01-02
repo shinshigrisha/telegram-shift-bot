@@ -70,8 +70,8 @@ rsync -avz --exclude 'venv' --exclude '__pycache__' --exclude '.git' \
 ```
 
 **Важно:** Убедитесь, что папка `backups/` скопирована:
-- `backups/postgres_backup_20251226_215630.sql`
-- `backups/redis_backup_20251226_220046.rdb`
+- `backups/postgres_backup_YYYYMMDD_HHMMSS.sql` (или `.sql.gz` если сжат)
+- `backups/redis_backup_YYYYMMDD_HHMMSS.rdb`
 
 ---
 
@@ -89,7 +89,7 @@ nano .env
 ```env
 # Telegram Bot
 BOT_TOKEN=ваш_токен_бота
-ADMIN_IDS=445137184,1010897385,814439240,1931231789,7784572644
+ADMIN_IDS=ваш_admin_id_1,ваш_admin_id_2,ваш_admin_id_3
 
 # Groq API
 GROQ_API_KEY=ваш_groq_api_key
@@ -99,18 +99,18 @@ DB_HOST=postgres
 DB_PORT=5432
 DB_NAME=shift_bot
 DB_USER=bot_user
-DB_PASSWORD=MySecureDbPass123
-DATABASE_URL=postgresql://bot_user:MySecureDbPass123@postgres:5432/shift_bot
+DB_PASSWORD=ваш_надежный_пароль_бд
+DATABASE_URL=postgresql://bot_user:ваш_надежный_пароль_бд@postgres:5432/shift_bot
 
 # Redis (для docker-compose используйте redis как хост)
 REDIS_HOST=redis
 REDIS_PORT=6379
-REDIS_PASSWORD=redis_secure_pass_456
+REDIS_PASSWORD=ваш_надежный_пароль_redis
 REDIS_DB=0
-REDIS_URL=redis://:redis_secure_pass_456@redis:6379/0
+REDIS_URL=redis://:ваш_надежный_пароль_redis@redis:6379/0
 
 # Encryption
-ENCRYPTION_KEY=4gLOUe8WXW_W2WKz-CleRecGeL_59b7lHJgytxzxjLs=
+ENCRYPTION_KEY=ваш_ключ_шифрования_база64
 
 # Poll Settings
 POLL_CREATION_HOUR=9
@@ -204,7 +204,7 @@ services:
     environment:
       POSTGRES_DB: shift_bot
       POSTGRES_USER: bot_user
-      POSTGRES_PASSWORD: MySecureDbPass123
+      POSTGRES_PASSWORD: ваш_надежный_пароль_бд
     volumes:
       - postgres_data:/var/lib/postgresql/data
       - ./backups:/backups:ro
@@ -220,7 +220,7 @@ services:
   redis:
     image: redis:7-alpine
     container_name: telegram-shift-redis
-    command: redis-server --requirepass redis_secure_pass_456
+    command: redis-server --requirepass ваш_надежный_пароль_redis
     volumes:
       - redis_data:/data
       - ./backups:/backups:ro
@@ -273,13 +273,15 @@ docker compose ps
 docker ps | grep telegram-shift-postgres
 
 # Восстанавливаем базу данных
-docker exec -i telegram-shift-postgres psql -U bot_user -d shift_bot < backups/postgres_backup_20251226_215630.sql
+# Замените имя_файла_бекапа на реальное имя вашего файла бекапа
+docker exec -i telegram-shift-postgres psql -U bot_user -d shift_bot < backups/имя_файла_бекапа.sql
 ```
 
 Если файл сжат (.gz):
 
 ```bash
-gunzip -c backups/postgres_backup_20251226_215630.sql.gz | docker exec -i telegram-shift-postgres psql -U bot_user -d shift_bot
+# Замените имя_файла_бекапа на реальное имя вашего файла бекапа
+gunzip -c backups/имя_файла_бекапа.sql.gz | docker exec -i telegram-shift-postgres psql -U bot_user -d shift_bot
 ```
 
 ### Восстановление Redis
@@ -289,13 +291,14 @@ gunzip -c backups/postgres_backup_20251226_215630.sql.gz | docker exec -i telegr
 docker compose stop redis
 
 # Копируем бекап в контейнер
-docker cp backups/redis_backup_20251226_220046.rdb telegram-shift-redis:/data/dump.rdb
+# Замените имя_файла_бекапа на реальное имя вашего файла бекапа Redis
+docker cp backups/имя_файла_бекапа.rdb $(docker compose ps -q redis):/data/dump.rdb
 
 # Запускаем Redis снова
 docker compose start redis
 
 # Проверяем, что данные загрузились
-docker compose exec redis redis-cli -a redis_secure_pass_456 DBSIZE
+docker compose exec redis redis-cli -a ваш_надежный_пароль_redis DBSIZE
 ```
 
 ---
@@ -346,7 +349,7 @@ docker compose logs -f bot
 docker compose exec postgres psql -U bot_user -d shift_bot -c "SELECT COUNT(*) FROM pg_tables;"
 
 # Проверка Redis
-docker compose exec redis redis-cli -a redis_secure_pass_456 PING
+docker compose exec redis redis-cli -a ваш_надежный_пароль_redis PING
 ```
 
 ### Проверка в Telegram
@@ -374,14 +377,14 @@ nano /opt/telegram-shift-bot/scripts/backup_cron.sh
 cd /opt/telegram-shift-bot
 export DB_NAME=shift_bot
 export DB_USER=bot_user
-export DB_PASSWORD=MySecureDbPass123
-export REDIS_PASSWORD=redis_secure_pass_456
+export DB_PASSWORD=ваш_надежный_пароль_бд
+export REDIS_PASSWORD=ваш_надежный_пароль_redis
 
 # Бекап PostgreSQL
 docker compose exec -T postgres pg_dump -U bot_user shift_bot | gzip > backups/postgres_backup_$(date +%Y%m%d_%H%M%S).sql.gz
 
 # Бекап Redis
-docker compose exec redis redis-cli -a redis_secure_pass_456 --rdb /backups/redis_backup_$(date +%Y%m%d_%H%M%S).rdb
+docker compose exec redis redis-cli -a ваш_надежный_пароль_redis --rdb /backups/redis_backup_$(date +%Y%m%d_%H%M%S).rdb
 docker compose cp telegram-shift-redis:/backups/redis_backup_$(date +%Y%m%d_%H%M%S).rdb ./backups/
 
 # Удаляем старые бекапы (старше 30 дней)
@@ -467,14 +470,14 @@ docker compose up -d bot
 **Проверьте:**
 ```bash
 # Проверка подключения из контейнера бота
-docker compose exec bot python -c "import asyncpg; import asyncio; asyncio.run(asyncpg.connect('postgresql://bot_user:MySecureDbPass123@postgres:5432/shift_bot'))"
+docker compose exec bot python -c "import asyncpg; import asyncio; asyncio.run(asyncpg.connect('postgresql://bot_user:ваш_надежный_пароль_бд@postgres:5432/shift_bot'))"
 ```
 
 ### Redis не отвечает
 
 ```bash
 # Проверка Redis
-docker compose exec redis redis-cli -a redis_secure_pass_456 PING
+docker compose exec redis redis-cli -a ваш_надежный_пароль_redis PING
 ```
 
 ### Просмотр всех логов
