@@ -39,11 +39,20 @@ def format_group_info(group: Dict[str, Any]) -> str:
     chat_id = group.get("telegram_chat_id", "?")
     
     # Получаем количество слотов из settings
-    settings = group.get("settings", {})
-    slots = settings.get("slots", [])
+    settings = group.get("settings")
+    if settings is None:
+        settings = {}
+    elif not isinstance(settings, dict):
+        # Если settings не словарь (например, строка JSON), пытаемся обработать
+        settings = {}
+    
+    slots = settings.get("slots", []) if isinstance(settings, dict) else []
     slots_count = len(slots) if isinstance(slots, list) else 0
     
     poll_close_time = group.get("poll_close_time", "19:00")
+    if poll_close_time and isinstance(poll_close_time, str) and len(poll_close_time) > 8:
+        # Обрезаем до формата ЧЧ:ММ если есть секунды
+        poll_close_time = poll_close_time[:5]
     
     # Форматируем topic_id если есть
     topic_id = group.get("telegram_topic_id")

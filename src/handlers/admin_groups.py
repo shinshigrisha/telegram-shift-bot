@@ -200,39 +200,71 @@ async def process_topic_id(message: Message, state: FSMContext, group_service: G
 @require_admin_callback
 async def callback_groups_list(callback: CallbackQuery, group_service: GroupService) -> None:
     """Показать список групп."""
-    groups = await group_service.get_all_groups()
-    
-    if not groups:
-        text = "📭 Нет зарегистрированных групп"
-        await safe_edit_message(callback.message, text, reply_markup=get_back_keyboard("admin:groups_menu"))
+    try:
+        groups = await group_service.get_all_groups()
+        logger.info(f"Получено групп: {len(groups) if groups else 0}")
+        
+        if not groups:
+            text = "📭 Нет зарегистрированных групп"
+            await safe_edit_message(callback.message, text, reply_markup=get_back_keyboard("admin:groups_menu"), parse_mode="HTML")
+            await safe_answer_callback(callback)
+            return
+        
+        text = format_groups_list(groups)
+        logger.debug(f"Сформированный текст: {text[:200]}...")
+        keyboard = get_groups_list_keyboard(groups, page=0)
+        
+        await safe_edit_message(callback.message, text, reply_markup=keyboard, parse_mode="HTML")
         await safe_answer_callback(callback)
-        return
-    
-    text = format_groups_list(groups)
-    keyboard = get_groups_list_keyboard(groups, page=0)
-    
-    await safe_edit_message(callback.message, text, reply_markup=keyboard)
-    await safe_answer_callback(callback)
+    except Exception as e:
+        logger.error(f"Ошибка при получении списка групп: {e}", exc_info=True)
+        await safe_edit_message(
+            callback.message,
+            f"❌ Ошибка при получении списка групп: {e}",
+            reply_markup=get_back_keyboard("admin:groups_menu"),
+            parse_mode="HTML"
+        )
+        await safe_answer_callback(callback)
 
 
 @router.callback_query(lambda c: c.data and c.data.startswith("admin:groups:list:page:"))
 @require_admin_callback
 async def callback_groups_list_page(callback: CallbackQuery, group_service: GroupService) -> None:
     """Пагинация списка групп."""
-    page = int(callback.data.split(":")[-1])
-    groups = await group_service.get_all_groups()
-    
-    if not groups:
-        text = "📭 Нет зарегистрированных групп"
-        await safe_edit_message(callback.message, text, reply_markup=get_back_keyboard("admin:groups_menu"))
+    try:
+        page = int(callback.data.split(":")[-1])
+        groups = await group_service.get_all_groups()
+        logger.info(f"Получено групп для страницы {page}: {len(groups) if groups else 0}")
+        
+        if not groups:
+            text = "📭 Нет зарегистрированных групп"
+            await safe_edit_message(callback.message, text, reply_markup=get_back_keyboard("admin:groups_menu"), parse_mode="HTML")
+            await safe_answer_callback(callback)
+            return
+        
+        text = format_groups_list(groups)
+        keyboard = get_groups_list_keyboard(groups, page=page)
+        
+        await safe_edit_message(callback.message, text, reply_markup=keyboard, parse_mode="HTML")
         await safe_answer_callback(callback)
-        return
-    
-    text = format_groups_list(groups)
-    keyboard = get_groups_list_keyboard(groups, page=page)
-    
-    await safe_edit_message(callback.message, text, reply_markup=keyboard)
-    await safe_answer_callback(callback)
+    except ValueError as e:
+        logger.error(f"Ошибка парсинга номера страницы: {e}", exc_info=True)
+        await safe_edit_message(
+            callback.message,
+            f"❌ Ошибка: неверный номер страницы",
+            reply_markup=get_back_keyboard("admin:groups_menu"),
+            parse_mode="HTML"
+        )
+        await safe_answer_callback(callback)
+    except Exception as e:
+        logger.error(f"Ошибка при получении списка групп: {e}", exc_info=True)
+        await safe_edit_message(
+            callback.message,
+            f"❌ Ошибка при получении списка групп: {e}",
+            reply_markup=get_back_keyboard("admin:groups_menu"),
+            parse_mode="HTML"
+        )
+        await safe_answer_callback(callback)
 
 
 @router.callback_query(lambda c: c.data == "admin:groups:set_topic")
