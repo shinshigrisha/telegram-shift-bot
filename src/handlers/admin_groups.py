@@ -169,11 +169,13 @@ async def process_topic_id(message: Message, state: FSMContext, group_service: G
     
     try:
         # Создаем группу
+        logger.info(f"Создание группы: name={group_name}, chat_id={chat_id}, topic_id={topic_id}")
         group = await group_service.create_group(
             name=group_name,
             telegram_chat_id=chat_id,
             telegram_topic_id=topic_id,
         )
+        logger.info(f"Группа успешно создана: id={group.get('id')}, name={group.get('name')}")
         
         topic_info = f"\nTopic ID: {topic_id}" if topic_id else "\n💡 Topic ID можно настроить позже через меню"
         
@@ -190,6 +192,7 @@ async def process_topic_id(message: Message, state: FSMContext, group_service: G
         await state.clear()
         
     except ValueError as e:
+        logger.error(f"Ошибка валидации при создании группы: {e}")
         await message.answer(f"❌ Ошибка: {e}", parse_mode="HTML")
     except Exception as e:
         logger.error("Ошибка при создании группы: %s", e, exc_info=True)
