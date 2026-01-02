@@ -24,14 +24,16 @@ from src.handlers import user_handlers
 from src.utils.db_pool import get_db_pool, close_db_pool
 
 # Создаём директорию для логов перед настройкой логирования
-Path("logs").mkdir(parents=True, exist_ok=True)
+# Используем абсолютный путь для надежности
+logs_dir = Path(__file__).parent.parent / "logs"
+logs_dir.mkdir(parents=True, exist_ok=True)
 
 # Настройка логирования
 logging.basicConfig(
     level=getattr(logging, settings.LOG_LEVEL.upper(), logging.INFO),
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
     handlers=[
-        logging.FileHandler('logs/bot.log', encoding='utf-8'),
+        logging.FileHandler(logs_dir / "bot.log", encoding='utf-8'),
         logging.StreamHandler(sys.stdout)
     ]
 )
