@@ -41,6 +41,7 @@ async def cmd_admin_panel(
 
 
 @router.callback_query(lambda c: c.data == "admin:back_to_main")
+@require_admin_callback
 async def callback_back_to_main(callback: CallbackQuery) -> None:
     """Вернуться в главное меню админ-панели."""
     await safe_edit_message(
