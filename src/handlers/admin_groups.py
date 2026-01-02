@@ -214,10 +214,26 @@ async def callback_groups_list(callback: CallbackQuery, group_service: GroupServ
             return
         
         text = format_groups_list(groups)
-        logger.debug(f"Сформированный текст: {text[:200]}...")
-        keyboard = get_groups_list_keyboard(groups, page=0)
+        logger.info(f"Сформированный текст (длина: {len(text)}): {text[:300]}...")
         
-        await safe_edit_message(callback.message, text, reply_markup=keyboard, parse_mode="HTML")
+        # Проверяем, что текст не пустой
+        if not text or len(text.strip()) == 0:
+            logger.error("Текст списка групп пустой после форматирования!")
+            text = "❌ Ошибка: не удалось сформировать список групп"
+        
+        # Ограничиваем длину текста для Telegram (максимум 4096 символов)
+        if len(text) > 4000:
+            text = text[:4000] + "\n\n... (список обрезан)"
+            logger.warning(f"Текст списка групп слишком длинный, обрезан до 4000 символов")
+        
+        keyboard = get_groups_list_keyboard(groups, page=0)
+        logger.debug(f"Клавиатура создана: {len(keyboard.inline_keyboard)} строк")
+        
+        result = await safe_edit_message(callback.message, text, reply_markup=keyboard, parse_mode="HTML")
+        if not result:
+            logger.error("Не удалось отредактировать сообщение со списком групп")
+            # Пробуем отправить новое сообщение
+            await callback.message.answer(text, reply_markup=keyboard, parse_mode="HTML")
         await safe_answer_callback(callback)
     except Exception as e:
         logger.error(f"Ошибка при получении списка групп: {e}", exc_info=True)
@@ -246,9 +262,19 @@ async def callback_groups_list_page(callback: CallbackQuery, group_service: Grou
             return
         
         text = format_groups_list(groups)
-        keyboard = get_groups_list_keyboard(groups, page=page)
+        logger.info(f"Сформированный текст для страницы {page} (длина: {len(text)}): {text[:300]}...")
         
-        await safe_edit_message(callback.message, text, reply_markup=keyboard, parse_mode="HTML")
+        # Ограничиваем длину текста для Telegram (максимум 4096 символов)
+        if len(text) > 4000:
+            text = text[:4000] + "\n\n... (список обрезан)"
+            logger.warning(f"Текст списка групп слишком длинный, обрезан до 4000 символов")
+        
+        keyboard = get_groups_list_keyboard(groups, page=page)
+        logger.debug(f"Клавиатура создана для страницы {page}: {len(keyboard.inline_keyboard)} строк")
+        
+        result = await safe_edit_message(callback.message, text, reply_markup=keyboard, parse_mode="HTML")
+        if not result:
+            logger.error(f"Не удалось отредактировать сообщение со списком групп (страница {page})")
         await safe_answer_callback(callback)
     except ValueError as e:
         logger.error(f"Ошибка парсинга номера страницы: {e}", exc_info=True)

@@ -180,7 +180,7 @@ def get_groups_list_keyboard(
     groups: List[Dict[str, Any]], 
     page: int = 0, 
     per_page: int = 10,
-    action: str = "select",
+    action: Optional[str] = None,
     back_callback: str = "admin:groups_menu"
 ) -> InlineKeyboardMarkup:
     """
@@ -190,11 +190,11 @@ def get_groups_list_keyboard(
         groups: Список групп
         page: Номер страницы (для пагинации)
         per_page: Количество групп на странице
-        action: Действие (select, delete, rename, slots)
+        action: Действие (delete, rename, slots) или None для простого просмотра
         back_callback: Callback для кнопки "Назад"
         
     Returns:
-        InlineKeyboardMarkup с кнопками групп
+        InlineKeyboardMarkup с кнопками групп (если action указан) или только пагинацией
     """
     keyboard = []
     
@@ -202,31 +202,40 @@ def get_groups_list_keyboard(
     end_idx = start_idx + per_page
     page_groups = groups[start_idx:end_idx]
     
-    for group in page_groups:
-        group_name = group.get("name", f"Группа {group.get('id', '?')}")
-        # Очищаем название для отображения
-        from src.utils.group_formatters import clean_group_name_for_display
-        display_name = clean_group_name_for_display(group_name)
-        # Ограничиваем длину названия
-        if len(display_name) > 30:
-            display_name = display_name[:27] + "..."
-        
-        group_id = group.get("id")
-        keyboard.append([
-            InlineKeyboardButton(
-                text=display_name,
-                callback_data=f"admin:group_{action}:{group_id}"
-            )
-        ])
+    # Если action указан, создаем кнопки для выбора группы
+    if action:
+        for group in page_groups:
+            group_name = group.get("name", f"Группа {group.get('id', '?')}")
+            # Очищаем название для отображения
+            from src.utils.group_formatters import clean_group_name_for_display
+            display_name = clean_group_name_for_display(group_name)
+            # Ограничиваем длину названия
+            if len(display_name) > 30:
+                display_name = display_name[:27] + "..."
+            
+            group_id = group.get("id")
+            keyboard.append([
+                InlineKeyboardButton(
+                    text=display_name,
+                    callback_data=f"admin:group_{action}:{group_id}"
+                )
+            ])
     
-    # Кнопки пагинации
+    # Кнопки пагинации (только если групп больше чем per_page)
     nav_buttons = []
-    if page > 0:
-        nav_buttons.append(InlineKeyboardButton(text="◀️", callback_data=f"admin:groups:{action}:page:{page-1}"))
-    if end_idx < len(groups):
-        nav_buttons.append(InlineKeyboardButton(text="▶️", callback_data=f"admin:groups:{action}:page:{page+1}"))
-    if nav_buttons:
-        keyboard.append(nav_buttons)
+    if len(groups) > per_page:
+        if page > 0:
+            if action:
+                nav_buttons.append(InlineKeyboardButton(text="◀️", callback_data=f"admin:groups:{action}:page:{page-1}"))
+            else:
+                nav_buttons.append(InlineKeyboardButton(text="◀️", callback_data=f"admin:groups:list:page:{page-1}"))
+        if end_idx < len(groups):
+            if action:
+                nav_buttons.append(InlineKeyboardButton(text="▶️", callback_data=f"admin:groups:{action}:page:{page+1}"))
+            else:
+                nav_buttons.append(InlineKeyboardButton(text="▶️", callback_data=f"admin:groups:list:page:{page+1}"))
+        if nav_buttons:
+            keyboard.append(nav_buttons)
     
     keyboard.append([InlineKeyboardButton(text="◀️ Назад", callback_data=back_callback)])
     
