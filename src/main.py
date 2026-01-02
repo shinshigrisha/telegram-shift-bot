@@ -23,6 +23,9 @@ from src.handlers import courier_ai
 from src.handlers import user_handlers
 from src.utils.db_pool import get_db_pool, close_db_pool
 
+# Создаём директорию для логов перед настройкой логирования
+Path("logs").mkdir(parents=True, exist_ok=True)
+
 # Настройка логирования
 logging.basicConfig(
     level=getattr(logging, settings.LOG_LEVEL.upper(), logging.INFO),
@@ -44,9 +47,6 @@ async def main() -> None:
     if not settings.BOT_TOKEN:
         logger.error("BOT_TOKEN не установлен! Установите его в .env файле.")
         sys.exit(1)
-    
-    # Создаём директорию для логов
-    Path("logs").mkdir(exist_ok=True)
     
     # Инициализируем Redis для FSM storage
     try:
