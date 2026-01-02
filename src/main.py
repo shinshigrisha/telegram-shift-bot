@@ -13,7 +13,7 @@ from aiogram.fsm.storage.redis import RedisStorage
 from redis.asyncio import Redis
 
 from config.settings import settings
-from src.middlewares.auth_middleware import AuthMiddleware
+from src.middlewares.auth_middleware import AdminMiddleware
 from src.middlewares.database_middleware import DatabaseMiddleware
 from src.middlewares.verification_middleware import VerificationMiddleware
 from src.handlers import admin
@@ -86,8 +86,8 @@ async def main() -> None:
     dp = Dispatcher(storage=storage)
     
     # Регистрируем middleware
-    dp.message.middleware(AuthMiddleware())
-    dp.callback_query.middleware(AuthMiddleware())
+    dp.message.middleware(AdminMiddleware())
+    dp.callback_query.middleware(AdminMiddleware())
     
     if settings.ENABLE_VERIFICATION:
         dp.message.middleware(VerificationMiddleware())

@@ -648,22 +648,16 @@ async def process_slot_end_time(message: Message, state: FSMContext, group_servi
             "Для отмены введите: <code>отмена</code>"
         )
         return
-            
-        except Exception as e:
-            logger.error("Ошибка при обновлении слота: %s", e, exc_info=True)
-            await message.answer(f"❌ Ошибка при обновлении слота: {e}")
-            await state.clear()
-            return
     
     # Это добавление нового слота
     await state.set_state(AdminPanelStates.waiting_for_slot_limit)
     
-        await message.answer(
-            f"✅ Время окончания: <code>{time_text}</code>\n\n"
-            "Введите лимит курьеров для этого слота (число от 1 до 10):\n"
-            "Или отправьте <code>по умолчанию</code> для лимита 3\n\n"
-            "Для отмены введите: <code>отмена</code>"
-        )
+    await message.answer(
+        f"✅ Время окончания: <code>{time_text}</code>\n\n"
+        "Введите лимит курьеров для этого слота (число от 1 до 10):\n"
+        "Или отправьте <code>по умолчанию</code> для лимита 3\n\n"
+        "Для отмены введите: <code>отмена</code>"
+    )
 
 
 @router.message(AdminPanelStates.waiting_for_slot_limit)
