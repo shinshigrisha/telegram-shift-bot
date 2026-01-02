@@ -2,9 +2,10 @@
 -- Расширяет функциональность системы опросов
 
 -- Таблица вариантов ответов опроса
+-- poll_id имеет тип UUID для соответствия daily_polls.id
 CREATE TABLE IF NOT EXISTS poll_options (
     id SERIAL PRIMARY KEY,
-    poll_id INTEGER REFERENCES daily_polls(id) ON DELETE CASCADE,
+    poll_id UUID REFERENCES daily_polls(id) ON DELETE CASCADE,
     option_index INTEGER NOT NULL,  -- Индекс варианта (0, 1, 2, ...)
     option_text TEXT NOT NULL,      -- Текст варианта (например, "07:30-19:30 (лимит: 3)")
     slot_start TIME,                -- Время начала слота
@@ -18,7 +19,7 @@ CREATE TABLE IF NOT EXISTS poll_options (
 -- Таблица голосов пользователей
 CREATE TABLE IF NOT EXISTS user_votes (
     id SERIAL PRIMARY KEY,
-    poll_id INTEGER REFERENCES daily_polls(id) ON DELETE CASCADE,
+    poll_id UUID REFERENCES daily_polls(id) ON DELETE CASCADE,
     option_id INTEGER REFERENCES poll_options(id) ON DELETE CASCADE,
     user_id BIGINT NOT NULL,        -- Telegram User ID
     user_name VARCHAR(255),         -- Имя пользователя (@username или first_name)

@@ -21,5 +21,8 @@ COPY . .
 ENV TZ=Europe/Moscow
 RUN ln -snf /usr/share/zoneinfo/$TZ /etc/localtime && echo $TZ > /etc/timezone
 
+# Устанавливаем PYTHONPATH для корректного импорта модулей
+ENV PYTHONPATH=/app
+
 # Запускаем бота
 CMD ["python", "src/main.py"]
