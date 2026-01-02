@@ -11,6 +11,10 @@ from redis.asyncio import Redis
 
 from src.utils.db_pool import get_db_pool
 from src.repositories.faq_repository import FAQRepository
+from src.repositories.group_repository import GroupRepository
+from src.repositories.poll_repository import PollRepository
+from src.services.group_service import GroupService
+from src.services.user_service import UserService
 
 logger = logging.getLogger(__name__)
 
@@ -20,10 +24,10 @@ _cached_db_pool: Pool | None = None
 
 class DatabaseMiddleware(BaseMiddleware):
     """
-    Middleware для предоставления FAQRepository и Redis в handlers.
+    Middleware для предоставления репозиториев и сервисов в handlers.
     
-    Автоматически создаёт FAQRepository из пула соединений PostgreSQL
-    и передаёт его в data для использования в handlers.
+    Автоматически создаёт репозитории и сервисы из пула соединений PostgreSQL
+    и передаёт их в data для использования в handlers.
     """
     
     async def __call__(
@@ -33,7 +37,7 @@ class DatabaseMiddleware(BaseMiddleware):
         data: Dict[str, Any]
     ) -> Any:
         """
-        Обработка события с добавлением FAQRepository.
+        Обработка события с добавлением репозиториев и сервисов.
         
         Args:
             handler: Следующий handler в цепочке
@@ -50,11 +54,21 @@ class DatabaseMiddleware(BaseMiddleware):
             if _cached_db_pool is None:
                 _cached_db_pool = await get_db_pool()
             
-            # Создаём FAQRepository
+            # Создаём репозитории
             faq_repo = FAQRepository(_cached_db_pool)
+            group_repo = GroupRepository(_cached_db_pool)
+            poll_repo = PollRepository(_cached_db_pool)
+            
+            # Создаём сервисы
+            group_service = GroupService(_cached_db_pool)
+            user_service = UserService(_cached_db_pool)
             
             # Добавляем в data для использования в handlers
             data["faq_repo"] = faq_repo
+            data["group_repo"] = group_repo
+            data["poll_repo"] = poll_repo
+            data["group_service"] = group_service
+            data["user_service"] = user_service
             data["db_pool"] = _cached_db_pool
             
             # Redis должен быть уже в data из другого middleware
@@ -63,8 +77,12 @@ class DatabaseMiddleware(BaseMiddleware):
             #     data["redis"] = Redis.from_url(REDIS_URL, decode_responses=True)
             
         except Exception as e:
-            logger.error("Ошибка при создании FAQRepository в middleware: %s", e, exc_info=True)
-            # Продолжаем без faq_repo (handler должен обработать это)
+            logger.error("Ошибка при создании репозиториев в middleware: %s", e, exc_info=True)
+            # Продолжаем без репозиториев (handler должен обработать это)
             data["faq_repo"] = None
+            data["group_repo"] = None
+            data["poll_repo"] = None
+            data["group_service"] = None
+            data["user_service"] = None
         
         return await handler(event, data)

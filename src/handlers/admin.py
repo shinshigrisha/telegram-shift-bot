@@ -228,10 +228,10 @@ async def cmd_setup_ziz(
         return
 
     await state.set_state(SetupStates.waiting_for_slots)
-    await state.update_data(group_id=group.id, group_name=group_name)
+    await state.update_data(group_id=group['id'], group_name=group_name)
 
     # Показываем текущие настройки, если они есть
-    current_slots = group.get_slots_config()
+    current_slots = group_service.get_slots_config(group)
     current_slots_text = ""
     if current_slots:
         current_slots_text = (
@@ -273,24 +273,9 @@ async def cmd_list_groups(
         await message.answer("📭 Нет зарегистрированных групп")
         return
 
-    from src.utils.group_formatters import clean_group_name_for_display
+    from src.utils.group_formatters import format_groups_list
     
-    text = "📋 Список групп:\n\n"
-    for group in groups:
-        status = "✅" if group.is_active else "❌"
-        night = "🌙" if group.is_night else "☀️"
-        slots = len(group.get_slots_config())
-        
-        # Очищаем название от "(тест)" для отображения
-        display_name = clean_group_name_for_display(group.name)
-
-        topic_info = f" | Topic: {group.telegram_topic_id}" if getattr(group, "telegram_topic_id", None) else ""
-        text += (
-            f"{status} {night} <b>{display_name}</b>\n"
-            f"   ID: {group.id} | Chat: {group.telegram_chat_id}{topic_info}\n"
-            f"   Слотов: {slots} | Закрытие: {group.poll_close_time}\n\n"
-        )
-
+    text = format_groups_list(groups)
     await message.answer(text)
 
 
@@ -351,14 +336,14 @@ async def cmd_add_group(
     if existing_by_name:
         await message.answer(
             f"❌ Группа с именем <b>{group_name}</b> уже существует\n"
-            f"ID: {existing_by_name.id} | Chat ID: {existing_by_name.telegram_chat_id}"
+            f"ID: {existing_by_name['id']} | Chat ID: {existing_by_name['telegram_chat_id']}"
         )
         return
     
     if existing_by_chat:
         await message.answer(
             f"❌ Группа с Chat ID <b>{chat_id}</b> уже существует\n"
-            f"Имя: <b>{existing_by_chat.name}</b> | ID: {existing_by_chat.id}"
+            f"Имя: <b>{existing_by_chat['name']}</b> | ID: {existing_by_chat['id']}"
         )
         return
 
@@ -373,7 +358,7 @@ async def cmd_add_group(
         topic_info = f"\nTopic ID: {topic_id}" if topic_id else ""
         await message.answer(
             f"✅ Группа <b>{group_name}</b> успешно создана!\n"
-            f"ID: {group.id}\n"
+            f"ID: {group['id']}\n"
             f"Chat ID: {chat_id}{topic_info}\n\n"
             f"Теперь можно настроить слоты командой:\n"
             f"/setup_ziz {group_name}"
@@ -513,24 +498,23 @@ async def cmd_set_topic(
     
     # Обновляем topic_id
     try:
-        from src.repositories.group_repository import GroupRepository
-        group_repo = GroupRepository(group_service.session)
-        await group_repo.update(group.id, telegram_topic_id=topic_id)
-        await group_service.session.refresh(group)
-        
-        # Проверяем, что группа соответствует chat_id из сообщения
-        if message.chat.id != group.telegram_chat_id:
-            await message.answer(
-                f"⚠️ Внимание: команда выполнена в чате {message.chat.id},\n"
-                f"а группа настроена на чат {group.telegram_chat_id}.\n\n"
-                f"✅ Topic ID для группы <b>{group_name}</b> установлен: {topic_id}\n\n"
-                f"Теперь опросы будут создаваться в указанной теме."
-            )
+        success = await group_service.set_topic_id(group['id'], "poll", topic_id)
+        if success:
+            # Проверяем, что группа соответствует chat_id из сообщения
+            if message.chat.id != group['telegram_chat_id']:
+                await message.answer(
+                    f"⚠️ Внимание: команда выполнена в чате {message.chat.id},\n"
+                    f"а группа настроена на чат {group['telegram_chat_id']}.\n\n"
+                    f"✅ Topic ID для группы <b>{group_name}</b> установлен: {topic_id}\n\n"
+                    f"Теперь опросы будут создаваться в указанной теме."
+                )
+            else:
+                await message.answer(
+                    f"✅ Topic ID для группы <b>{group_name}</b> установлен: {topic_id}\n\n"
+                    f"Теперь опросы будут создаваться в указанной теме."
+                )
         else:
-            await message.answer(
-                f"✅ Topic ID для группы <b>{group_name}</b> установлен: {topic_id}\n\n"
-                f"Теперь опросы будут создаваться в указанной теме."
-            )
+            await message.answer("❌ Ошибка при установке Topic ID")
     except Exception as e:
         logger.error("Error setting topic: %s", e, exc_info=True)
         await message.answer(f"❌ Ошибка при установке topic ID: {e}")
@@ -640,18 +624,26 @@ async def _set_topic_for_field(
         await message.answer(f"❌ Группа {group_name} не найдена")
         return
     
-    try:
-        from src.repositories.group_repository import GroupRepository
-        group_repo = GroupRepository(group_service.session)
-        await group_repo.update(group.id, **{field_name: topic_id})
-        await group_service.session.refresh(group)
-        
-        await message.answer(
-            f"✅ Topic ID для темы '{topic_display_name}' группы <b>{group_name}</b> установлен: {topic_id}"
-        )
-    except Exception as e:
-        logger.error("Error setting topic: %s", e, exc_info=True)
-        await message.answer(f"❌ Ошибка при установке topic ID: {e}")
+    # Определяем тип темы по field_name
+    topic_type_map = {
+        "arrival_departure_topic_id": "arrival",
+        "general_chat_topic_id": "general",
+        "important_info_topic_id": "important",
+    }
+    topic_type = topic_type_map.get(field_name)
+    
+    if topic_type:
+        try:
+            success = await group_service.set_topic_id(group['id'], topic_type, topic_id)
+            if success:
+                await message.answer(
+                    f"✅ Topic ID для темы '{topic_display_name}' группы <b>{group_name}</b> установлен: {topic_id}"
+                )
+            else:
+                await message.answer("❌ Ошибка при установке Topic ID")
+        except Exception as e:
+            logger.error("Error setting topic: %s", e, exc_info=True)
+            await message.answer(f"❌ Ошибка при установке topic ID: {e}")
 
 
 @router.message(Command("get_topic_id"))
