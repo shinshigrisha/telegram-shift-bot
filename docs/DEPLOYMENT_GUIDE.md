@@ -18,7 +18,7 @@ ssh ваш_пользователь@194.87.250.251
 
 ```bash
 # Обновляем систему
-docker compose config
+sudo apt update
 
 # Устанавливаем зависимости
 sudo apt install -y ca-certificates curl gnupg lsb-release

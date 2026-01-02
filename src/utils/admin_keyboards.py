@@ -43,10 +43,12 @@ def get_settings_menu_keyboard() -> InlineKeyboardMarkup:
 def get_polls_menu_keyboard() -> InlineKeyboardMarkup:
     """Меню управления опросами."""
     keyboard = [
+        [InlineKeyboardButton(text="📝 Создать опросы", callback_data="admin:polls:create")],
+        [InlineKeyboardButton(text="🔄 Пересоздать опросы", callback_data="admin:polls:recreate")],
         [InlineKeyboardButton(text="📊 Результаты опросов", callback_data="admin:polls:results")],
-        [InlineKeyboardButton(text="🔄 Создать опрос", callback_data="admin:polls:create")],
         [InlineKeyboardButton(text="🔒 Закрыть опрос", callback_data="admin:polls:close")],
-        [InlineKeyboardButton(text="📈 Статистика", callback_data="admin:polls:stats")],
+        [InlineKeyboardButton(text="🔒 Закрыть все опросы", callback_data="admin:polls:close_all")],
+        [InlineKeyboardButton(text="🔎 Найти опросы на завтра", callback_data="admin:polls:find_tomorrow")],
         [InlineKeyboardButton(text="◀️ Назад", callback_data="admin:back_to_main")],
     ]
     return InlineKeyboardMarkup(inline_keyboard=keyboard)

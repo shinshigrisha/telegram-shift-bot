@@ -21,6 +21,7 @@ from src.handlers import admin_curator
 from src.handlers import admin_panel_navigation
 from src.handlers import admin_groups
 from src.handlers import admin_settings
+from src.handlers import admin_polls
 from src.handlers import courier_ai
 from src.handlers import user_handlers
 from src.utils.db_pool import get_db_pool, close_db_pool
@@ -98,6 +99,7 @@ async def main() -> None:
     dp.include_router(admin_panel_navigation.router)
     dp.include_router(admin_groups.router)
     dp.include_router(admin_settings.router)
+    dp.include_router(admin_polls.router)
     dp.include_router(admin_curator.router)
     dp.include_router(courier_ai.router)
     dp.include_router(user_handlers.router)

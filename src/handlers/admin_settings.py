@@ -36,12 +36,48 @@ router = Router()
 @require_admin_callback
 async def callback_schedule_menu(callback: CallbackQuery) -> None:
     """Меню настройки расписания."""
+    from config.settings import settings
+    
+    # Показываем текущие настройки
+    creation_time = f"{settings.POLL_CREATION_HOUR:02d}:{settings.POLL_CREATION_MINUTE:02d}"
+    closing_time = f"{settings.POLL_CLOSING_HOUR:02d}:{settings.POLL_CLOSING_MINUTE:02d}"
+    reminder_hours = ", ".join(map(str, settings.REMINDER_HOURS)) if settings.REMINDER_HOURS else "0 (отключено)"
+    
     text = (
         "⏰ <b>Настройка расписания</b>\n\n"
-        "Выберите тип расписания:"
+        "📋 <b>Текущие настройки:</b>\n"
+        f"• Создание опросов: <code>{creation_time}</code>\n"
+        f"• Закрытие опросов: <code>{closing_time}</code>\n"
+        f"• Часы напоминаний: <code>{reminder_hours}</code>\n\n"
+        "Выберите действие:"
     )
     
-    await safe_edit_message(callback.message, text, reply_markup=get_schedule_type_keyboard())
+    # Создаем клавиатуру с кнопками просмотра и редактирования
+    from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
+    keyboard = [
+        [InlineKeyboardButton(text="✏️ Редактировать", callback_data="admin:schedule:edit")],
+        [InlineKeyboardButton(text="◀️ Назад", callback_data="admin:settings_menu")],
+    ]
+    
+    await safe_edit_message(callback.message, text, reply_markup=InlineKeyboardMarkup(inline_keyboard=keyboard))
+    await safe_answer_callback(callback)
+
+
+@router.callback_query(lambda c: c.data == "admin:schedule:edit")
+@require_admin_callback
+async def callback_schedule_edit(callback: CallbackQuery, state: FSMContext) -> None:
+    """Начало редактирования расписания."""
+    await state.set_state(AdminPanelStates.waiting_for_schedule_time)
+    await state.update_data(editing_schedule=True, step="creation_time")
+    
+    text = (
+        "✏️ <b>Редактирование расписания</b>\n\n"
+        "Введите время создания опросов в формате <code>ЧЧ:ММ</code>:\n"
+        "Пример: <code>09:00</code> или <code>08:00</code>\n\n"
+        "Для отмены введите: <code>отмена</code>"
+    )
+    
+    await safe_edit_message(callback.message, text, reply_markup=get_back_keyboard("admin:settings:schedule"))
     await safe_answer_callback(callback)
 
 
@@ -172,6 +208,108 @@ async def process_schedule_time(message: Message, state: FSMContext, group_servi
     
     time_text = message.text.strip() if message.text else ""
     
+    data = await state.get_data()
+    editing_schedule = data.get("editing_schedule", False)
+    step = data.get("step", "creation_time")
+    
+    if editing_schedule:
+        # Многошаговое редактирование расписания
+        if step == "creation_time":
+            # Проверяем формат времени
+            time_pattern = re.compile(r'^([0-1]?[0-9]|2[0-3]):([0-5][0-9])$')
+            if not time_pattern.match(time_text):
+                await message.answer(
+                    "❌ Неверный формат времени.\n"
+                    "Используйте формат <code>ЧЧ:ММ</code>.\n"
+                    "Пример: <code>09:00</code>\n\n"
+                    "Попробуйте еще раз или введите <code>отмена</code>."
+                )
+                return
+            
+            hours, minutes = map(int, time_text.split(":"))
+            await state.update_data(creation_hours=hours, creation_minutes=minutes, step="closing_time")
+            
+            await message.answer(
+                f"✅ Время создания опросов: <code>{time_text}</code>\n\n"
+                "Введите время закрытия опросов в формате <code>ЧЧ:ММ</code>:\n"
+                "Пример: <code>19:00</code>\n\n"
+                "Для отмены введите: <code>отмена</code>"
+            )
+            return
+        
+        elif step == "closing_time":
+            # Проверяем формат времени
+            time_pattern = re.compile(r'^([0-1]?[0-9]|2[0-3]):([0-5][0-9])$')
+            if not time_pattern.match(time_text):
+                await message.answer(
+                    "❌ Неверный формат времени.\n"
+                    "Используйте формат <code>ЧЧ:ММ</code>.\n"
+                    "Пример: <code>19:00</code>\n\n"
+                    "Попробуйте еще раз или введите <code>отмена</code>."
+                )
+                return
+            
+            hours, minutes = map(int, time_text.split(":"))
+            await state.update_data(closing_hours=hours, closing_minutes=minutes, step="reminder_hours")
+            
+            await message.answer(
+                f"✅ Время закрытия опросов: <code>{time_text}</code>\n\n"
+                "Введите часы напоминаний через запятую:\n"
+                "Пример: <code>10,12,14,16,18</code>\n"
+                "Или <code>0</code> для отключения напоминаний\n\n"
+                "Для отмены введите: <code>отмена</code>"
+            )
+            return
+        
+        elif step == "reminder_hours":
+            # Обрабатываем часы напоминаний
+            if time_text == "0":
+                reminder_hours = []
+            else:
+                try:
+                    reminder_hours = [int(h.strip()) for h in time_text.split(",") if h.strip().isdigit()]
+                    # Проверяем, что все часы в диапазоне 0-23
+                    if not all(0 <= h <= 23 for h in reminder_hours):
+                        raise ValueError("Часы должны быть от 0 до 23")
+                except ValueError as e:
+                    await message.answer(
+                        "❌ Неверный формат часов напоминаний.\n"
+                        "Используйте формат: <code>10,12,14,16,18</code>\n"
+                        "Или <code>0</code> для отключения\n\n"
+                        "Попробуйте еще раз или введите <code>отмена</code>."
+                    )
+                    return
+            
+            # Сохраняем все настройки
+            data = await state.get_data()
+            creation_hours = data.get("creation_hours")
+            creation_minutes = data.get("creation_minutes")
+            closing_hours = data.get("closing_hours")
+            closing_minutes = data.get("closing_minutes")
+            
+            # TODO: Сохранить в БД или конфиг
+            # Пока просто сообщаем пользователю
+            reminder_text = ", ".join(map(str, reminder_hours)) if reminder_hours else "0 (отключено)"
+            
+            await message.answer(
+                f"✅ <b>Расписание обновлено!</b>\n\n"
+                f"📋 <b>Новые настройки:</b>\n"
+                f"• Создание опросов: <code>{creation_hours:02d}:{creation_minutes:02d}</code>\n"
+                f"• Закрытие опросов: <code>{closing_hours:02d}:{closing_minutes:02d}</code>\n"
+                f"• Часы напоминаний: <code>{reminder_text}</code>\n\n"
+                f"💡 Для применения изменений обновите переменные окружения:\n"
+                f"<code>POLL_CREATION_HOUR={creation_hours}</code>\n"
+                f"<code>POLL_CREATION_MINUTE={creation_minutes}</code>\n"
+                f"<code>POLL_CLOSING_HOUR={closing_hours}</code>\n"
+                f"<code>POLL_CLOSING_MINUTE={closing_minutes}</code>\n"
+                f"<code>REMINDER_HOURS=[{','.join(map(str, reminder_hours))}]</code>\n\n"
+                f"После обновления перезапустите бота."
+            )
+            
+            await state.clear()
+            return
+    
+    # Старая логика для обратной совместимости
     # Проверяем формат времени (ЧЧ:ММ)
     time_pattern = re.compile(r'^([0-1]?[0-9]|2[0-3]):([0-5][0-9])$')
     if not time_pattern.match(time_text):
@@ -183,7 +321,6 @@ async def process_schedule_time(message: Message, state: FSMContext, group_servi
         )
         return
     
-    data = await state.get_data()
     schedule_type = data.get("schedule_type")
     schedule_type_name = data.get("schedule_type_name", "расписание")
     group_id = data.get("group_id")
@@ -610,8 +747,8 @@ async def process_slot_limit(message: Message, state: FSMContext, group_service:
 async def process_slot_start_time(message: Message, state: FSMContext) -> None:
     """Обработка ввода времени начала слота."""
     if message.text and message.text.lower() == "отмена":
-        await state.clear()
         data = await state.get_data()
+        await state.clear()
         if data.get("slot_index") is not None:
             await message.answer("❌ Редактирование слота отменено")
         else:
