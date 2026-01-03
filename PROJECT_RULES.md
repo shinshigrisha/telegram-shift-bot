@@ -279,6 +279,13 @@ except:
   - `admin:groups:create`
   - `admin:polls:close:123`
   - `admin:user:rename:456`
+  - `admin:curator_menu`
+  - `admin:curator:add_faq`
+  - `admin:curator:search_faq`
+  - `admin:curator:create_info`
+  - `admin:curator:create_warning`
+  - `admin:curator:clear_history`
+  - `admin:curator:stats`
 
 ### Состояния FSM
 
@@ -287,6 +294,13 @@ except:
   - `waiting_for_group_name`
   - `waiting_for_slot_start_time`
   - `waiting_for_broadcast_message`
+  - `waiting_for_faq_question`
+  - `waiting_for_faq_answer`
+  - `waiting_for_search_query`
+  - `waiting_for_info_topic`
+  - `waiting_for_warning_description`
+  - `waiting_for_warning_user_id`
+  - `waiting_for_clear_history_user_id`
 
 ---
 
@@ -376,6 +390,55 @@ async def cmd_admin(message: Message):
     groups = await get_groups()  # Может упасть
     await message.answer(str(groups))
 ```
+
+### AI куратор в админ-панели
+
+При добавлении функций AI куратора в админ-панель:
+
+1. **Добавьте кнопку в меню:**
+   ```python
+   # В src/utils/admin_keyboards.py
+   def get_curator_menu_keyboard() -> InlineKeyboardMarkup:
+       keyboard = [
+           [InlineKeyboardButton(text="➕ Добавить FAQ", callback_data="admin:curator:add_faq")],
+           # ...
+       ]
+   ```
+
+2. **Создайте callback handler:**
+   ```python
+   # В src/handlers/admin_curator.py
+   @router.callback_query(lambda c: c.data == "admin:curator:add_faq")
+   @require_admin_callback
+   async def callback_add_faq(callback: CallbackQuery, state: FSMContext) -> None:
+       await state.set_state(AdminPanelStates.waiting_for_faq_question)
+       # ...
+   ```
+
+3. **Используйте FSM для интерактивных диалогов:**
+   ```python
+   @router.message(AdminPanelStates.waiting_for_faq_question)
+   async def process_faq_question(message: Message, state: FSMContext) -> None:
+       if message.text and message.text.lower() in ["отмена", "cancel"]:
+           await state.clear()
+           return
+       # Обработка...
+   ```
+
+4. **Используйте CuratorService для бизнес-логики:**
+   ```python
+   # ✅ Правильно: через сервис
+   service = CuratorService(faq_repo, redis)
+   faq_id = await service.add_faq_to_knowledge_base(
+       question=question,
+       answer=answer,
+       category=category,
+       tag=tag
+   )
+   
+   # ❌ Неправильно: прямое обращение к репозиторию
+   faq_id = await faq_repo.add_faq(...)  # Лучше через сервис
+   ```
 
 ### Callback queries
 

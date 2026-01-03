@@ -100,7 +100,7 @@ faq_id = await add_faq_to_knowledge_base(
 
 - **Руководство по интеграции**: `docs/INTEGRATION_GUIDE.md`
 - **RAG документация**: `README_RAG.md`
-- **Примеры кода**: `examples/curator_usage_examples.py`
+- **Примеры кода**: `examples/curator_usage.py`
 
 ## 🔍 Как это работает
 

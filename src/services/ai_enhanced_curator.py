@@ -246,11 +246,34 @@ class EnhancedCuratorService:
             logger.debug("Ошибка при получении стиля общения: %s", e)
             return CommunicationStyle.UNKNOWN
     
+    def _is_greeting(self, question: str) -> bool:
+        """
+        Проверить, является ли вопрос простым приветствием.
+        
+        Args:
+            question: Вопрос пользователя
+            
+        Returns:
+            True, если это приветствие
+        """
+        question_lower = question.lower().strip()
+        greetings = [
+            "привет", "здравствуй", "здравствуйте", "добрый день",
+            "добрый вечер", "доброе утро", "hi", "hello", "hey",
+            "салют", "здарова", "доброго времени суток"
+        ]
+        return question_lower in greetings or any(
+            question_lower.startswith(g) or question_lower == g
+            for g in greetings
+        )
+    
     def _build_enhanced_system_prompt(
         self,
         context: QuestionContext,
         role: UserRole,
         style: CommunicationStyle,
+        has_faqs: bool = True,
+        is_greeting: bool = False,
     ) -> str:
         """
         Построить улучшенный системный промпт.
@@ -264,7 +287,19 @@ class EnhancedCuratorService:
             Улучшенный системный промпт
         """
         # Базовый промпт (как в требованиях)
-        base_prompt = """Ты — живой AI-куратор доставки.
+        if is_greeting:
+            base_prompt = """Ты — живой AI-куратор доставки.
+
+Пользователь поздоровался. Ответь дружелюбно и коротко, как живой человек.
+Спроси, чем можешь помочь.
+
+СТИЛЬ:
+- 1–2 предложения
+- дружелюбно, но без панибратства
+- по делу
+- без официоза"""
+        elif has_faqs:
+            base_prompt = """Ты — живой AI-куратор доставки.
 
 Ты помогаешь курьерам и кураторам разобраться в правилах и ситуациях.
 Ты говоришь как человек, спокойно и по делу.
@@ -274,10 +309,6 @@ class EnhancedCuratorService:
 - НЕ выдумывай правил
 - НЕ додумывай
 - Если информации нет — честно скажи об этом
-
-ЕСЛИ ИНФОРМАЦИИ НЕДОСТАТОЧНО:
-Скажи:
-«В базе знаний нет точного ответа. В такой ситуации лучше уточнить у куратора.»
 
 СТИЛЬ:
 - 2–6 предложений
@@ -289,6 +320,17 @@ class EnhancedCuratorService:
 
 ЕСЛИ ЕСТЬ РИСК ОШИБКИ:
 - задай ОДИН уточняющий вопрос"""
+        else:
+            base_prompt = """Ты — живой AI-куратор доставки.
+
+В базе знаний нет точного ответа на вопрос пользователя.
+Ответь честно и по-человечески, что информации нет, и предложи обратиться к куратору.
+
+СТИЛЬ:
+- 2–3 предложения
+- честно, без извинений
+- предложи помощь куратора
+- без официоза"""
         
         # Добавляем контекст вопроса
         context_hints = {
@@ -457,34 +499,46 @@ class EnhancedCuratorService:
             if user_id:
                 style = await self.get_communication_style(user_id)
             
-            # 4. Получаем базовый ответ через SimpleCuratorService
-            base_answer = await self.base_service.get_answer(question)
+            # 4. Получаем FAQ для контекста (если есть)
+            try:
+                faqs = await self.faq_repo.search_hybrid(question, limit=3)
+            except Exception as e:
+                logger.warning("Ошибка при поиске FAQ: %s. Продолжаем без FAQ.", e)
+                faqs = []
             
-            # Если базовый ответ — эскалация, возвращаем его как есть
-            if "куратору" in base_answer.lower() or "живому куратору" in base_answer.lower():
-                return base_answer
-            
-            # 5. Если Groq доступен — форматируем с улучшенным промптом
+            # 5. Если Groq доступен — генерируем улучшенный ответ
             if self.groq_enabled:
                 try:
-                    # Получаем FAQ для контекста
-                    faqs = await self.faq_repo.search_hybrid(question, limit=3)
-                    
-                    # Формируем контекст из FAQ
-                    context_text = "\n\n".join([
-                        f"Вопрос: {faq.get('question', '')}\nОтвет: {faq.get('answer', '')}"
-                        for faq in faqs[:2]
-                    ])
+                    # Проверяем, является ли вопрос простым приветствием или общим вопросом
+                    is_greeting = self._is_greeting(question)
+                    has_faqs = faqs and len(faqs) > 0
                     
                     # Строим улучшенный промпт
-                    system_prompt = self._build_enhanced_system_prompt(context, role, style)
+                    system_prompt = self._build_enhanced_system_prompt(context, role, style, has_faqs=has_faqs, is_greeting=is_greeting)
                     
-                    # Формируем запрос
-                    user_prompt = f"""Контекст:
+                    # Формируем контекст из FAQ (если есть)
+                    if has_faqs:
+                        context_text = "\n\n".join([
+                            f"Вопрос: {faq.get('question', '')}\nОтвет: {faq.get('answer', '')}"
+                            for faq in faqs[:2]
+                        ])
+                        user_prompt = f"""Контекст из базы знаний:
 {context_text}
 
 Вопрос пользователя:
 {question}"""
+                    else:
+                        # Если FAQ нет, но это приветствие — отвечаем дружелюбно
+                        if is_greeting:
+                            user_prompt = f"""Пользователь написал: {question}
+
+Ответь дружелюбно и коротко, как живой куратор. Спроси, чем можешь помочь."""
+                        else:
+                            # Если FAQ нет и это не приветствие — честно скажи об этом
+                            user_prompt = f"""Вопрос пользователя:
+{question}
+
+В базе знаний нет точного ответа на этот вопрос. Ответь честно, что информации нет, и предложи обратиться к куратору, если нужна помощь."""
                     
                     # Генерируем ответ через Groq API
                     response = self.client.chat.completions.create(
@@ -512,11 +566,32 @@ class EnhancedCuratorService:
                     return enhanced_answer
                 
                 except Exception as e:
-                    logger.warning("Ошибка при форматировании через Groq: %s. Используем базовый ответ.", e)
-                    return base_answer
+                    logger.warning("Ошибка при форматировании через Groq: %s. Генерируем fallback ответ.", e)
+                    # Fallback: генерируем простой ответ на основе контекста
+                    is_greeting = self._is_greeting(question)
+                    logger.info("Fallback: is_greeting=%s, faqs_count=%d", is_greeting, len(faqs) if faqs else 0)
+                    if is_greeting:
+                        logger.info("Fallback: возвращаем приветствие")
+                        return "Привет! Чем могу помочь?"
+                    elif faqs and len(faqs) > 0:
+                        # Если есть FAQ, используем первый ответ
+                        logger.info("Fallback: возвращаем ответ из FAQ")
+                        return faqs[0].get('answer', 'Извините, не могу помочь с этим вопросом.')
+                    else:
+                        # Если FAQ нет, честно говорим об этом
+                        logger.info("Fallback: возвращаем сообщение об отсутствии ответа")
+                        return "В базе знаний нет точного ответа на этот вопрос. Обратитесь к куратору для помощи."
             
-            # Если Groq недоступен — возвращаем базовый ответ
-            return base_answer
+            # Если Groq недоступен — генерируем простой ответ
+            is_greeting = self._is_greeting(question)
+            if is_greeting:
+                return "Привет! Чем могу помочь?"
+            elif faqs and len(faqs) > 0:
+                # Если есть FAQ, используем первый ответ
+                return faqs[0].get('answer', 'Извините, не могу помочь с этим вопросом.')
+            else:
+                # Если FAQ нет, честно говорим об этом
+                return "В базе знаний нет точного ответа на этот вопрос. Обратитесь к куратору для помощи."
         
         except Exception as e:
             logger.error("Ошибка при получении улучшенного ответа: %s", e, exc_info=True)

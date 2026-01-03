@@ -11,6 +11,7 @@ def get_admin_panel_keyboard() -> InlineKeyboardMarkup:
         [InlineKeyboardButton(text="📋 Управление группами", callback_data="admin:groups_menu")],
         [InlineKeyboardButton(text="⚙️ Настройки", callback_data="admin:settings_menu")],
         [InlineKeyboardButton(text="📊 Опросы", callback_data="admin:polls_menu")],
+        [InlineKeyboardButton(text="🤖 AI куратор", callback_data="admin:curator_menu")],
         [InlineKeyboardButton(text="📢 Рассылка", callback_data="admin:broadcast_menu")],
         [InlineKeyboardButton(text="📈 Мониторинг", callback_data="admin:monitoring_menu")],
     ]
@@ -378,6 +379,20 @@ def get_confirmation_keyboard(confirm_callback: str, cancel_callback: str) -> In
             InlineKeyboardButton(text="✅ Подтвердить", callback_data=confirm_callback),
             InlineKeyboardButton(text="❌ Отмена", callback_data=cancel_callback),
         ]
+    ]
+    return InlineKeyboardMarkup(inline_keyboard=keyboard)
+
+
+def get_curator_menu_keyboard() -> InlineKeyboardMarkup:
+    """Меню AI куратора."""
+    keyboard = [
+        [InlineKeyboardButton(text="➕ Добавить FAQ", callback_data="admin:curator:add_faq")],
+        [InlineKeyboardButton(text="🔍 Поиск FAQ", callback_data="admin:curator:search_faq")],
+        [InlineKeyboardButton(text="📢 Создать информационное сообщение", callback_data="admin:curator:create_info")],
+        [InlineKeyboardButton(text="⚠️ Создать замечание", callback_data="admin:curator:create_warning")],
+        [InlineKeyboardButton(text="🗑️ Очистить историю", callback_data="admin:curator:clear_history")],
+        [InlineKeyboardButton(text="📊 Статистика AI", callback_data="admin:curator:stats")],
+        [InlineKeyboardButton(text="◀️ Назад", callback_data="admin:back_to_main")],
     ]
     return InlineKeyboardMarkup(inline_keyboard=keyboard)
 

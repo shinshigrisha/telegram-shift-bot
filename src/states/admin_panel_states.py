@@ -49,3 +49,14 @@ class AdminPanelStates(StatesGroup):
     # Верификация пользователей
     waiting_for_user_name = State()  # Ожидание ввода имени и фамилии для верификации
     waiting_for_user_rename = State()  # Ожидание нового имени и фамилии для переименования
+    
+    # AI куратор
+    waiting_for_faq_question = State()  # Ожидание вопроса для FAQ
+    waiting_for_faq_answer = State()  # Ожидание ответа для FAQ
+    waiting_for_faq_category = State()  # Ожидание категории для FAQ (опционально)
+    waiting_for_faq_tag = State()  # Ожидание тега для FAQ (опционально)
+    waiting_for_search_query = State()  # Ожидание поискового запроса
+    waiting_for_info_topic = State()  # Ожидание темы для информационного сообщения
+    waiting_for_warning_description = State()  # Ожидание описания нарушения для замечания
+    waiting_for_warning_user_id = State()  # Ожидание user_id для замечания
+    waiting_for_clear_history_user_id = State()  # Ожидание user_id для очистки истории

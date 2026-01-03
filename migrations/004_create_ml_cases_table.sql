@@ -29,6 +29,18 @@ BEGIN
 END;
 $$ LANGUAGE plpgsql;
 
+-- Удаляем триггер, если он уже существует (для идемпотентности)
+DO $$
+BEGIN
+    IF EXISTS (
+        SELECT 1 FROM pg_trigger 
+        WHERE tgname = 'trigger_update_ml_cases_vectors' 
+        AND tgrelid = 'ml_cases'::regclass
+    ) THEN
+        DROP TRIGGER trigger_update_ml_cases_vectors ON ml_cases;
+    END IF;
+END $$;
+
 CREATE TRIGGER trigger_update_ml_cases_vectors
     BEFORE INSERT OR UPDATE OF input, explanation ON ml_cases
     FOR EACH ROW

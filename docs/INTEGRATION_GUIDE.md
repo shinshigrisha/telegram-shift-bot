@@ -202,4 +202,4 @@ for faq in results:
 
 ## Примеры использования
 
-См. `examples/curator_usage_examples.py` для полных примеров всех функций.
+См. `examples/curator_usage.py` для полных примеров всех функций.

@@ -44,6 +44,9 @@ class FAQRepository:
         Использует пересечение массивов keywords с ключевыми словами из вопроса.
         Ищет только в записях типа 'faq' (FAQ имеют keywords).
         
+        ВАЖНО: Для unified_knowledge_base поиск по ключевым словам отключен из-за проблем
+        с оператором & для массивов. Используется только полнотекстовый поиск.
+        
         Args:
             question: Вопрос пользователя
             limit: Максимальное количество результатов
@@ -69,30 +72,12 @@ class FAQRepository:
                 """)
                 
                 if table_exists:
-                    # Используем unified_knowledge_base
-                    query = """
-                        SELECT 
-                            id,
-                            type,
-                            question,
-                            answer,
-                            keywords,
-                            category,
-                            tag,
-                            source,
-                            chunk_index,
-                            content,
-                            created_at,
-                            updated_at
-                        FROM unified_knowledge_base
-                        WHERE type = 'faq' AND keywords && $1::text[]
-                        ORDER BY 
-                            array_length(keywords & $1::text[], 1) DESC,
-                            id DESC
-                        LIMIT $2
-                    """
+                    # Для unified_knowledge_base поиск по ключевым словам отключен
+                    # из-за проблем с оператором & для массивов text[]
+                    # Используем только полнотекстовый поиск через search_hybrid
+                    return []
                 else:
-                    # Fallback на старую таблицу faq_ai
+                    # Fallback на старую таблицу faq_ai (там оператор & работает)
                     query = """
                         SELECT 
                             id,
@@ -110,8 +95,9 @@ class FAQRepository:
                             id DESC
                         LIMIT $2
                     """
-                
-                rows = await conn.fetch(query, words, limit)
+                    # Явно преобразуем words в массив text[] для PostgreSQL
+                    words_array = words if isinstance(words, list) else list(words)
+                    rows = await conn.fetch(query, words_array, limit)
                 
                 # Преобразуем результаты в единый формат
                 results = []
@@ -400,7 +386,12 @@ class FAQRepository:
             Список найденных результатов из всей базы знаний (без дубликатов)
         """
         # Сначала поиск по ключевым словам (только FAQ)
-        keyword_results = await self.search_by_keywords(question, limit)
+        # Обрабатываем ошибки, чтобы не падать при проблемах с SQL
+        try:
+            keyword_results = await self.search_by_keywords(question, limit)
+        except Exception as e:
+            logger.warning("Ошибка при поиске по ключевым словам: %s. Продолжаем с полнотекстовым поиском.", e)
+            keyword_results = []
         
         # Объединяем результаты (ключевые слова + полнотекстовый поиск)
         seen_ids = {r['id'] for r in keyword_results}
@@ -409,16 +400,19 @@ class FAQRepository:
         # Если не хватает результатов, дополняем полнотекстовым поиском
         # (он уже ищет во всей unified_knowledge_base, включая chunks)
         if len(all_results) < limit:
-            text_results = await self.search_by_text(question, limit * 2)  # Берем больше для фильтрации
-            
-            for result in text_results:
-                # Пропускаем дубликаты
-                result_id = result.get('id') or f"{result.get('type', 'unknown')}_{result.get('id', 0)}"
-                if result_id not in seen_ids:
-                    all_results.append(result)
-                    seen_ids.add(result_id)
-                    if len(all_results) >= limit:
-                        break
+            try:
+                text_results = await self.search_by_text(question, limit * 2)  # Берем больше для фильтрации
+                
+                for result in text_results:
+                    # Пропускаем дубликаты
+                    result_id = result.get('id') or f"{result.get('type', 'unknown')}_{result.get('id', 0)}"
+                    if result_id not in seen_ids:
+                        all_results.append(result)
+                        seen_ids.add(result_id)
+                        if len(all_results) >= limit:
+                            break
+            except Exception as e:
+                logger.warning("Ошибка при полнотекстовом поиске: %s. Возвращаем результаты по ключевым словам.", e)
         
         return all_results[:limit]
     

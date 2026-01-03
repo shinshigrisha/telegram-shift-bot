@@ -8,7 +8,7 @@ from aiogram.types import Message, CallbackQuery
 
 from config.settings import settings
 from src.utils.auth import require_admin_callback
-from src.utils.admin_keyboards import get_admin_panel_keyboard
+from src.utils.admin_keyboards import get_admin_panel_keyboard, get_curator_menu_keyboard
 from src.utils.telegram_helpers import safe_edit_message, safe_answer_callback
 
 logger = logging.getLogger(__name__)
@@ -33,7 +33,7 @@ async def cmd_admin_panel(
         "📋 <b>Управление группами</b> — создание, настройка, темы\n"
         "⚙️ <b>Настройки</b> — расписание, параметры\n"
         "📊 <b>Опросы</b> — создание, управление, результаты\n"
-        "🤖 <b>AI функции</b> — определение тегов, подсказки, чек-листы\n"
+        "🤖 <b>AI куратор</b> — управление базой знаний, FAQ, сообщения\n"
         "📢 <b>Рассылка</b> — отправка сообщений в группы\n"
         "📈 <b>Мониторинг</b> — статистика, логи, статус"
     )
@@ -51,7 +51,7 @@ async def callback_back_to_main(callback: CallbackQuery) -> None:
         "📋 <b>Управление группами</b> — создание, настройка, темы\n"
         "⚙️ <b>Настройки</b> — расписание, параметры\n"
         "📊 <b>Опросы</b> — создание, управление, результаты\n"
-        "🤖 <b>AI функции</b> — определение тегов, подсказки, чек-листы\n"
+        "🤖 <b>AI куратор</b> — управление базой знаний, FAQ, сообщения\n"
         "📢 <b>Рассылка</b> — отправка сообщений в группы\n"
         "📈 <b>Мониторинг</b> — статистика, логи, статус",
         reply_markup=get_admin_panel_keyboard(),
@@ -112,6 +112,24 @@ async def callback_broadcast_menu(callback: CallbackQuery) -> None:
         "Выберите тему для рассылки:"
     )
     await safe_edit_message(callback.message, text, reply_markup=get_broadcast_topic_keyboard())
+    await safe_answer_callback(callback)
+
+
+@router.callback_query(lambda c: c.data == "admin:curator_menu")
+@require_admin_callback
+async def callback_curator_menu(callback: CallbackQuery) -> None:
+    """Меню AI куратора."""
+    text = (
+        "🤖 <b>AI куратор</b>\n\n"
+        "Управление базой знаний и AI-функциями:\n\n"
+        "➕ <b>Добавить FAQ</b> — добавить новый вопрос-ответ в базу знаний\n"
+        "🔍 <b>Поиск FAQ</b> — найти релевантные FAQ по запросу\n"
+        "📢 <b>Создать информационное сообщение</b> — сгенерировать сообщение для рассылки\n"
+        "⚠️ <b>Создать замечание</b> — сгенерировать замечание курьеру\n"
+        "🗑️ <b>Очистить историю</b> — очистить историю диалога пользователя\n"
+        "📊 <b>Статистика AI</b> — статистика использования AI-куратора"
+    )
+    await safe_edit_message(callback.message, text, reply_markup=get_curator_menu_keyboard())
     await safe_answer_callback(callback)
 
 

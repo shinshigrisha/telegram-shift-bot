@@ -12,11 +12,13 @@ from typing import Optional
 from aiogram import Router, Bot
 from aiogram.types import Message
 from aiogram.enums import ChatType
+from aiogram.filters import MagicData
 
 # Локальные импорты
 from src.repositories.faq_repository import FAQRepository
 from src.services.simple_curator_service import SimpleCuratorService
 from src.services.ai_enhanced_curator import EnhancedCuratorService
+from src.services.new_curator_service import NewCuratorService
 from src.services.ai_response_service import ai_response_service
 from redis.asyncio import Redis
 
@@ -31,6 +33,7 @@ async def handle_courier_message(
     bot: Bot,
     faq_repo: Optional[FAQRepository] = None,
     redis: Optional[Redis] = None,
+    **kwargs,  # Для явного доступа к data из middleware
 ) -> None:
     """
     Обработка сообщений от курьеров.
@@ -82,18 +85,50 @@ async def handle_courier_message(
         # Создаём улучшенный AI-куратор (с живым общением)
         # Использует EnhancedCuratorService, который является обёрткой над SimpleCuratorService
         # и добавляет: анализ контекста, определение роли, память стиля, переходные фразы
-        if redis:
-            curator = EnhancedCuratorService(faq_repo=faq_repo, redis=redis)
-        else:
-            # Fallback на простой куратор, если Redis недоступен
+        
+        # Пытаемся получить Redis из middleware, если не передан через параметр
+        # В aiogram 3 dependency injection работает автоматически, но иногда нужно явно получать из data
+        if redis is None:
+            # Пробуем получить из kwargs (data из middleware)
+            if kwargs and "redis" in kwargs:
+                redis = kwargs["redis"]
+                logger.info("Redis получен из kwargs для пользователя %s", user_id)
+            
+            # Если всё ещё None, создаём Redis клиент напрямую (он уже используется для FSM)
+            if redis is None:
+                try:
+                    from config.settings import settings
+                    from redis.asyncio import Redis as RedisClient
+                    redis = RedisClient.from_url(settings.REDIS_URL, decode_responses=True)
+                    await redis.ping()  # Проверяем подключение
+                    logger.info("Redis клиент создан напрямую для пользователя %s", user_id)
+                except Exception as e:
+                    logger.warning("Не удалось создать Redis клиент: %s", e)
+                    redis = None
+        
+        logger.info("Redis доступен: %s, тип: %s", redis is not None, type(redis).__name__ if redis else "None")
+        logger.info("FAQ repo доступен: %s", faq_repo is not None)
+        
+        # Используем новый куратор с DecisionEngine, ResponseValidator и ExplainabilityLogger
+        # Для explainability логов создаем директорию logs/explainability
+        from pathlib import Path
+        log_dir = Path(__file__).parent.parent.parent / "logs" / "explainability"
+        
+        try:
+            curator = NewCuratorService(faq_repo=faq_repo, log_dir=log_dir)
+            logger.info("✅ Используется NewCuratorService (новая архитектура) для пользователя %s", user_id)
+        except Exception as e:
+            logger.error("❌ Ошибка при создании NewCuratorService: %s. Используем SimpleCuratorService.", e, exc_info=True)
             curator = SimpleCuratorService(faq_repo=faq_repo)
 
         # Показываем, что бот печатает
         await bot.send_chat_action(message.chat.id, "typing")
 
         # Получаем ответ от куратора
-        # EnhancedCuratorService.get_answer() принимает user_id для стиля общения
-        if isinstance(curator, EnhancedCuratorService):
+        # NewCuratorService.get_answer() принимает user_id для логирования
+        if isinstance(curator, NewCuratorService):
+            answer = await curator.get_answer(question, user_id=user_id)
+        elif isinstance(curator, EnhancedCuratorService):
             answer = await curator.get_answer(question, user_id=user_id)
         else:
             answer = await curator.get_answer(question)
