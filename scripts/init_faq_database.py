@@ -8,9 +8,13 @@
 3. Вставку начальных данных
 
 Использование:
+    # В Docker-контейнере (рекомендуется):
+    docker compose run --rm bot python scripts/init_faq_database.py
+    
+    # Или напрямую (если зависимости установлены локально):
     python scripts/init_faq_database.py
     
-Или с указанием DATABASE_URL:
+    # С указанием DATABASE_URL:
     DATABASE_URL=postgresql://user:pass@host:5432/dbname python scripts/init_faq_database.py
 """
 import asyncio
@@ -62,7 +66,7 @@ async def init_faq_database():
             with open(migration_1, 'r', encoding='utf-8') as f:
                 sql = f.read()
             await conn.execute(sql)
-            print("✅ Таблица faq_ai создана")
+            print("✅ Таблица faq_ai и связанные объекты созданы/обновлены")
         else:
             print(f"⚠️  Файл миграции не найден: {migration_1}")
         
@@ -95,7 +99,7 @@ async def init_faq_database():
             with open(migration_4, 'r', encoding='utf-8') as f:
                 sql = f.read()
             await conn.execute(sql)
-            print("✅ Таблица ml_cases создана")
+            print("✅ Таблица ml_cases и связанные объекты созданы/обновлены")
         else:
             print(f"⚠️  Файл миграции не найден: {migration_4}")
         

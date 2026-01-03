@@ -17,6 +17,7 @@ from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from apscheduler.triggers.cron import CronTrigger
 from apscheduler.triggers.date import DateTrigger
 from aiogram import Bot
+from aiogram.exceptions import TelegramForbiddenError, TelegramAPIError, TelegramNetworkError
 
 from config.settings import settings
 
@@ -522,6 +523,7 @@ class SchedulerService:
         Args:
             message: Текст уведомления
         """
+        sent_count = 0
         for admin_id in settings.ADMIN_IDS:
             try:
                 await self.bot.send_message(
@@ -529,8 +531,24 @@ class SchedulerService:
                     text=message,
                     parse_mode="HTML",
                 )
+                sent_count += 1
+            except TelegramForbiddenError as e:
+                error_description = str(e)
+                if "bot can't initiate conversation" in error_description.lower():
+                    logger.warning("Админ %d: бот не может начать диалог (нужно отправить /start боту)", admin_id)
+                elif "bot was blocked" in error_description.lower():
+                    logger.warning("Админ %d: бот заблокирован пользователем", admin_id)
+                else:
+                    logger.warning("Админ %d: ошибка доступа - %s", admin_id, error_description)
+            except TelegramNetworkError as e:
+                logger.error("Админ %d: сетевая ошибка при отправке уведомления - %s", admin_id, e)
+            except TelegramAPIError as e:
+                logger.error("Админ %d: ошибка API Telegram - %s", admin_id, e)
             except Exception as e:
-                logger.error("Ошибка отправки уведомления админу %d: %s", admin_id, e)
+                logger.error("Админ %d: неожиданная ошибка при отправке уведомления - %s", admin_id, e, exc_info=True)
+        
+        if sent_count == 0 and settings.ADMIN_IDS:
+            logger.error("Не удалось отправить уведомление ни одному админу из %d", len(settings.ADMIN_IDS))
     
     # Публичные методы для ручного управления
     

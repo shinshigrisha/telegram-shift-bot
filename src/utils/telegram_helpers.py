@@ -4,8 +4,8 @@
 from typing import Optional
 import logging
 
-from aiogram.types import Message, CallbackQuery, InlineKeyboardMarkup
-from aiogram.exceptions import TelegramBadRequest, TelegramNetworkError
+from aiogram.types import Message, CallbackQuery, InlineKeyboardMarkup  # pyright: ignore[reportMissingImports]
+from aiogram.exceptions import TelegramBadRequest, TelegramNetworkError  # pyright: ignore[reportMissingImports]
 
 logger = logging.getLogger(__name__)
 

@@ -359,7 +359,7 @@ INSERT INTO faq_ai (question, answer, keywords, category, tag) VALUES
     'Отмена / возврат',
     'Отмена / заказ вернулся в магазин'
 )
-ON CONFLICT DO NOTHING;
+ON CONFLICT (qa_hash) DO NOTHING;
 
 -- Обновляем search_vector для всех новых записей
 UPDATE faq_ai SET search_vector = to_tsvector('russian', question || ' ' || answer)

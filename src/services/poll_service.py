@@ -6,6 +6,7 @@ from typing import List, Optional, Dict, Any, Tuple
 from datetime import date, datetime, timedelta
 from asyncpg import Pool
 from aiogram import Bot
+from aiogram.exceptions import TelegramForbiddenError, TelegramAPIError, TelegramNetworkError
 
 from src.repositories.poll_repository import PollRepository
 from src.repositories.group_repository import GroupRepository
@@ -188,8 +189,32 @@ class PollService:
                         target_date
                     )
                     
+                except TelegramForbiddenError as e:
+                    # Бот был исключен из группы или не имеет доступа
+                    error_description = str(e)
+                    if "bot was kicked" in error_description.lower():
+                        error_msg = f"Группа {group['name']}: бот был исключен из группы"
+                    elif "bot can't initiate conversation" in error_description.lower():
+                        error_msg = f"Группа {group['name']}: бот не может начать диалог"
+                    elif "bot was blocked" in error_description.lower():
+                        error_msg = f"Группа {group['name']}: бот заблокирован"
+                    else:
+                        error_msg = f"Группа {group['name']}: нет доступа к группе - {error_description}"
+                    logger.warning(error_msg)
+                    errors.append(error_msg)
+                except TelegramNetworkError as e:
+                    # Сетевая ошибка - можно попробовать позже
+                    error_msg = f"Группа {group['name']}: сетевая ошибка - {str(e)}"
+                    logger.error(error_msg)
+                    errors.append(error_msg)
+                except TelegramAPIError as e:
+                    # Другие ошибки API Telegram
+                    error_msg = f"Группа {group['name']}: ошибка API Telegram - {str(e)}"
+                    logger.error(error_msg)
+                    errors.append(error_msg)
                 except Exception as e:
-                    error_msg = f"Группа {group['name']}: ошибка создания опроса - {str(e)}"
+                    # Неожиданные ошибки
+                    error_msg = f"Группа {group['name']}: неожиданная ошибка - {str(e)}"
                     logger.error(error_msg, exc_info=True)
                     errors.append(error_msg)
                     
