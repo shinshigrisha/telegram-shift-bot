@@ -536,6 +536,78 @@ docker compose exec redis redis-cli -a ваш_надежный_пароль_redi
 docker compose logs --tail=100 -f
 ```
 
+### Ошибка "ModuleNotFoundError: No module named 'asyncpg'" при запуске скриптов
+
+**Проблема:** Вы пытаетесь запустить скрипт (например, `init_faq_database.py`) напрямую на хосте, но зависимости установлены только в Docker-контейнере.
+
+**Ошибка:**
+```bash
+python scripts/init_faq_database.py
+# ModuleNotFoundError: No module named 'asyncpg'
+```
+
+**Решение:** Всегда запускайте скрипты внутри Docker-контейнера:
+
+```bash
+# Правильный способ запуска скриптов
+docker compose run --rm bot python scripts/init_faq_database.py
+
+# Или если контейнер уже запущен
+docker compose exec bot python scripts/init_faq_database.py
+```
+
+**Важно:** Не пытайтесь устанавливать зависимости на хосте с помощью `pip install`, так как современные системы Linux (особенно Debian/Ubuntu) используют "externally-managed-environment" и не позволяют устанавливать пакеты напрямую. Все зависимости должны быть установлены в Docker-контейнере через `requirements.txt` и `Dockerfile`.
+
+### Ошибка "trigger already exists" при инициализации базы данных
+
+**Проблема:** При повторном запуске скрипта `init_faq_database.py` возникает ошибка, что триггер уже существует.
+
+**Ошибка:**
+```bash
+docker compose run --rm bot python scripts/init_faq_database.py
+# ❌ Ошибка: trigger "trigger_update_faq_ai_search_vector" for relation "faq_ai" already exists
+```
+
+**Решение:** Эта проблема исправлена в последней версии миграции. Если вы видите эту ошибку:
+
+1. **Обновите код** из репозитория:
+   ```bash
+   git pull
+   ```
+
+2. **Пересоберите образ бота** (чтобы применить обновленную миграцию):
+   ```bash
+   docker compose build bot
+   ```
+
+3. **Запустите скрипт снова**:
+   ```bash
+   docker compose run --rm bot python scripts/init_faq_database.py
+   ```
+
+Миграция теперь использует `DROP TRIGGER IF EXISTS` перед созданием триггеров, что делает её идемпотентной (безопасной для повторных запусков).
+
+**Примечание:** Если проблема сохраняется после обновления, можно вручную удалить триггеры:
+```bash
+docker compose exec postgres psql -U bot_user -d shift_bot -c "DROP TRIGGER IF EXISTS trigger_update_faq_ai_search_vector ON faq_ai;"
+docker compose exec postgres psql -U bot_user -d shift_bot -c "DROP TRIGGER IF EXISTS trigger_update_faq_ai_updated_at ON faq_ai;"
+```
+
+Затем запустите скрипт инициализации снова.
+
+### Безопасность данных при повторном запуске миграций
+
+**Важно:** Повторный запуск скрипта `init_faq_database.py` **НЕ удаляет** существующие данные из базы.
+
+**Что происходит при повторном запуске:**
+- ✅ Таблицы создаются только если их нет (`CREATE TABLE IF NOT EXISTS`)
+- ✅ Индексы создаются только если их нет (`CREATE INDEX IF NOT EXISTS`)
+- ✅ Триггеры пересоздаются безопасно (`DROP TRIGGER IF EXISTS` + `CREATE TRIGGER`)
+- ✅ Данные **не удаляются** и **не дублируются** благодаря уникальному индексу на `qa_hash`
+- ✅ При попытке вставить дубликат используется `ON CONFLICT (qa_hash) DO NOTHING`
+
+**Итог:** Скрипт идемпотентен — его можно запускать многократно без потери или дублирования данных.
+
 ---
 
 ## Безопасность

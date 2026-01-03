@@ -6,11 +6,11 @@ import logging
 import sys
 from pathlib import Path
 
-from aiogram import Bot, Dispatcher
-from aiogram.client.default import DefaultBotProperties
-from aiogram.enums import ParseMode
-from aiogram.fsm.storage.redis import RedisStorage
-from redis.asyncio import Redis
+from aiogram import Bot, Dispatcher  # pyright: ignore[reportMissingImports]
+from aiogram.client.default import DefaultBotProperties  # pyright: ignore[reportMissingImports]
+from aiogram.enums import ParseMode  # pyright: ignore[reportMissingImports]
+from aiogram.fsm.storage.redis import RedisStorage  # pyright: ignore[reportMissingImports]
+from redis.asyncio import Redis  # pyright: ignore[reportMissingImports]
 
 from config.settings import settings
 from src.middlewares.auth_middleware import AdminMiddleware

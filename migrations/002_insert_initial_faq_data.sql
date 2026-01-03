@@ -73,7 +73,7 @@ INSERT INTO faq_ai (question, answer, keywords, category, tag) VALUES
     'Температура',
     'Температурный режим'
 )
-ON CONFLICT DO NOTHING;
+ON CONFLICT (qa_hash) DO NOTHING;
 
 -- Обновляем search_vector для всех записей (триггер сделает это автоматически при INSERT,
 -- но для существующих записей нужно обновить вручную)

@@ -1,7 +1,7 @@
 """
 Состояния FSM для настройки групп (существующие).
 """
-from aiogram.fsm.state import State, StatesGroup
+from aiogram.fsm.state import State, StatesGroup  # pyright: ignore[reportMissingImports]
 
 
 class SetupStates(StatesGroup):
