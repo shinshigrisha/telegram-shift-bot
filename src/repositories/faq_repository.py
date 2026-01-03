@@ -39,16 +39,17 @@ class FAQRepository:
         limit: int = 5
     ) -> List[Dict[str, Any]]:
         """
-        Поиск FAQ по ключевым словам.
+        Поиск по ключевым словам в единой базе знаний.
         
         Использует пересечение массивов keywords с ключевыми словами из вопроса.
+        Ищет только в записях типа 'faq' (FAQ имеют keywords).
         
         Args:
             question: Вопрос пользователя
             limit: Максимальное количество результатов
         
         Returns:
-            Список найденных FAQ
+            Список найденных записей
         """
         try:
             # Извлекаем ключевые слова из вопроса (убираем стоп-слова)
@@ -58,29 +59,102 @@ class FAQRepository:
                 return []
             
             async with self.pool.acquire() as conn:
-                query = """
-                    SELECT 
-                        id,
-                        question,
-                        answer,
-                        keywords,
-                        category,
-                        tag,
-                        created_at,
-                        updated_at
-                    FROM faq_ai
-                    WHERE keywords && $1::text[]
-                    ORDER BY 
-                        array_length(keywords & $1::text[], 1) DESC,
-                        id DESC
-                    LIMIT $2
-                """
+                # Проверяем, существует ли unified_knowledge_base
+                table_exists = await conn.fetchval("""
+                    SELECT EXISTS (
+                        SELECT FROM information_schema.tables 
+                        WHERE table_schema = 'public' 
+                        AND table_name = 'unified_knowledge_base'
+                    )
+                """)
+                
+                if table_exists:
+                    # Используем unified_knowledge_base
+                    query = """
+                        SELECT 
+                            id,
+                            type,
+                            question,
+                            answer,
+                            keywords,
+                            category,
+                            tag,
+                            source,
+                            chunk_index,
+                            content,
+                            created_at,
+                            updated_at
+                        FROM unified_knowledge_base
+                        WHERE type = 'faq' AND keywords && $1::text[]
+                        ORDER BY 
+                            array_length(keywords & $1::text[], 1) DESC,
+                            id DESC
+                        LIMIT $2
+                    """
+                else:
+                    # Fallback на старую таблицу faq_ai
+                    query = """
+                        SELECT 
+                            id,
+                            question,
+                            answer,
+                            keywords,
+                            category,
+                            tag,
+                            created_at,
+                            updated_at
+                        FROM faq_ai
+                        WHERE keywords && $1::text[]
+                        ORDER BY 
+                            array_length(keywords & $1::text[], 1) DESC,
+                            id DESC
+                        LIMIT $2
+                    """
+                
                 rows = await conn.fetch(query, words, limit)
                 
-                return [dict(row) for row in rows]
+                # Преобразуем результаты в единый формат
+                results = []
+                for row in rows:
+                    result = dict(row)
+                    # Если это unified_knowledge_base, нормализуем формат
+                    if 'type' in result:
+                        if result['type'] == 'faq':
+                            # Для FAQ используем question/answer
+                            results.append({
+                                'id': result['id'],
+                                'question': result['question'],
+                                'answer': result['answer'],
+                                'keywords': result.get('keywords', []),
+                                'category': result.get('category'),
+                                'tag': result.get('tag'),
+                                'type': 'faq',
+                                'created_at': result['created_at'],
+                                'updated_at': result['updated_at']
+                            })
+                        elif result['type'] == 'chunk':
+                            # Для chunks используем content как answer
+                            results.append({
+                                'id': result['id'],
+                                'question': f"Информация из {result['source']} (chunk #{result['chunk_index']})",
+                                'answer': result['content'],
+                                'keywords': [],
+                                'category': 'knowledge_base',
+                                'tag': None,
+                                'type': 'chunk',
+                                'source': result['source'],
+                                'chunk_index': result['chunk_index'],
+                                'created_at': result['created_at'],
+                                'updated_at': result['updated_at']
+                            })
+                    else:
+                        # Старый формат из faq_ai
+                        results.append(result)
+                
+                return results
         
         except Exception as e:
-            logger.error("Ошибка при поиске FAQ по ключевым словам: %s", e, exc_info=True)
+            logger.error("Ошибка при поиске по ключевым словам: %s", e, exc_info=True)
             return []
     
     async def search_by_text(
@@ -89,16 +163,17 @@ class FAQRepository:
         limit: int = 5
     ) -> List[Dict[str, Any]]:
         """
-        Полнотекстовый поиск FAQ по тексту вопроса и ответа.
+        Полнотекстовый поиск по всей базе знаний.
         
         Использует PostgreSQL полнотекстовый поиск (to_tsvector/to_tsquery).
+        Ищет в unified_knowledge_base (все типы записей).
         
         Args:
             question: Вопрос пользователя
             limit: Максимальное количество результатов
         
         Returns:
-            Список найденных FAQ
+            Список найденных записей из всей базы знаний
         """
         try:
             # Формируем tsquery из вопроса
@@ -109,28 +184,196 @@ class FAQRepository:
                 return []
             
             async with self.pool.acquire() as conn:
-                query = """
-                    SELECT 
-                        id,
-                        question,
-                        answer,
-                        keywords,
-                        category,
-                        tag,
-                        created_at,
-                        updated_at,
-                        ts_rank(search_vector, to_tsquery('russian', $1)) as rank
-                    FROM faq_ai
-                    WHERE search_vector @@ to_tsquery('russian', $1)
-                    ORDER BY rank DESC, id DESC
-                    LIMIT $2
-                """
+                # Проверяем, существует ли unified_knowledge_base
+                table_exists = await conn.fetchval("""
+                    SELECT EXISTS (
+                        SELECT FROM information_schema.tables 
+                        WHERE table_schema = 'public' 
+                        AND table_name = 'unified_knowledge_base'
+                    )
+                """)
+                
+                if table_exists:
+                    # Используем unified_knowledge_base (все типы)
+                    query = """
+                        SELECT 
+                            id,
+                            type,
+                            question,
+                            answer,
+                            keywords,
+                            category,
+                            tag,
+                            source,
+                            chunk_index,
+                            content,
+                            created_at,
+                            updated_at,
+                            ts_rank(search_vector, to_tsquery('russian', $1)) as rank
+                        FROM unified_knowledge_base
+                        WHERE search_vector @@ to_tsquery('russian', $1)
+                        ORDER BY rank DESC, id DESC
+                        LIMIT $2
+                    """
+                else:
+                    # Fallback на старую таблицу faq_ai
+                    query = """
+                        SELECT 
+                            id,
+                            question,
+                            answer,
+                            keywords,
+                            category,
+                            tag,
+                            created_at,
+                            updated_at,
+                            ts_rank(search_vector, to_tsquery('russian', $1)) as rank
+                        FROM faq_ai
+                        WHERE search_vector @@ to_tsquery('russian', $1)
+                        ORDER BY rank DESC, id DESC
+                        LIMIT $2
+                    """
+                
                 rows = await conn.fetch(query, search_query, limit)
                 
-                return [dict(row) for row in rows]
+                # Преобразуем результаты в единый формат
+                results = []
+                for row in rows:
+                    result = dict(row)
+                    # Если это unified_knowledge_base, нормализуем формат
+                    if 'type' in result:
+                        if result['type'] == 'faq':
+                            # Для FAQ используем question/answer
+                            results.append({
+                                'id': result['id'],
+                                'question': result['question'],
+                                'answer': result['answer'],
+                                'keywords': result.get('keywords', []),
+                                'category': result.get('category'),
+                                'tag': result.get('tag'),
+                                'type': 'faq',
+                                'rank': result.get('rank', 0),
+                                'created_at': result['created_at'],
+                                'updated_at': result['updated_at']
+                            })
+                        elif result['type'] == 'chunk':
+                            # Для chunks используем content как answer
+                            results.append({
+                                'id': result['id'],
+                                'question': f"Информация из {result['source']} (chunk #{result['chunk_index']})",
+                                'answer': result['content'],
+                                'keywords': [],
+                                'category': 'knowledge_base',
+                                'tag': None,
+                                'type': 'chunk',
+                                'source': result['source'],
+                                'chunk_index': result['chunk_index'],
+                                'rank': result.get('rank', 0),
+                                'created_at': result['created_at'],
+                                'updated_at': result['updated_at']
+                            })
+                    else:
+                        # Старый формат из faq_ai
+                        results.append(result)
+                
+                return results
         
         except Exception as e:
-            logger.error("Ошибка при полнотекстовом поиске FAQ: %s", e, exc_info=True)
+            logger.error("Ошибка при полнотекстовом поиске: %s", e, exc_info=True)
+            return []
+    
+    async def search_knowledge_base(
+        self,
+        question: str,
+        limit: int = 5
+    ) -> List[Dict[str, Any]]:
+        """
+        Поиск chunks в единой базе знаний.
+        
+        Использует полнотекстовый поиск PostgreSQL.
+        Ищет только записи типа 'chunk' в unified_knowledge_base.
+        
+        Args:
+            question: Вопрос пользователя
+            limit: Максимальное количество результатов
+        
+        Returns:
+            Список найденных chunks в формате, совместимом с FAQ
+        """
+        try:
+            # Формируем tsquery из вопроса
+            search_query = self._prepare_tsquery(question)
+            
+            if not search_query:
+                return []
+            
+            async with self.pool.acquire() as conn:
+                # Проверяем, существует ли unified_knowledge_base
+                table_exists = await conn.fetchval("""
+                    SELECT EXISTS (
+                        SELECT FROM information_schema.tables 
+                        WHERE table_schema = 'public' 
+                        AND table_name = 'unified_knowledge_base'
+                    )
+                """)
+                
+                if table_exists:
+                    # Используем unified_knowledge_base (только chunks)
+                    query = """
+                        SELECT 
+                            id,
+                            source,
+                            content,
+                            chunk_index,
+                            created_at,
+                            updated_at,
+                            ts_rank(search_vector, to_tsquery('russian', $1)) as rank
+                        FROM unified_knowledge_base
+                        WHERE type = 'chunk' 
+                        AND search_vector @@ to_tsquery('russian', $1)
+                        ORDER BY rank DESC, chunk_index ASC
+                        LIMIT $2
+                    """
+                else:
+                    # Fallback на старую таблицу knowledge_base
+                    query = """
+                        SELECT 
+                            id,
+                            source,
+                            content,
+                            chunk_index,
+                            created_at,
+                            updated_at,
+                            ts_rank(to_tsvector('russian', content), to_tsquery('russian', $1)) as rank
+                        FROM knowledge_base
+                        WHERE to_tsvector('russian', content) @@ to_tsquery('russian', $1)
+                        ORDER BY rank DESC, chunk_index ASC
+                        LIMIT $2
+                    """
+                
+                rows = await conn.fetch(query, search_query, limit)
+                
+                # Преобразуем в формат, совместимый с FAQ
+                results = []
+                for row in rows:
+                    results.append({
+                        'id': f"kb_{row['id']}",  # Префикс для отличия от FAQ
+                        'question': f"Информация из {row['source']} (chunk #{row['chunk_index']})",
+                        'answer': row['content'],
+                        'source': row['source'],
+                        'chunk_index': row['chunk_index'],
+                        'category': 'knowledge_base',
+                        'tag': None,
+                        'keywords': [],
+                        'created_at': row['created_at'],
+                        'updated_at': row['updated_at'],
+                        'rank': row['rank']
+                    })
+                
+                return results
+        
+        except Exception as e:
+            logger.error("Ошибка при поиске chunks: %s", e, exc_info=True)
             return []
     
     async def search_hybrid(
@@ -139,37 +382,45 @@ class FAQRepository:
         limit: int = 5
     ) -> List[Dict[str, Any]]:
         """
-        Гибридный поиск: сначала по ключевым словам, затем полнотекстовый.
+        Гибридный поиск по единой базе знаний.
+        
+        Если используется unified_knowledge_base:
+        - Сначала поиск по ключевым словам (только FAQ)
+        - Затем полнотекстовый поиск (все типы записей)
+        
+        Если используется старая структура:
+        - Сначала в таблице faq_ai (по ключевым словам и полнотекстовый)
+        - Затем в таблице knowledge_base (chunks из PDF)
         
         Args:
             question: Вопрос пользователя
             limit: Максимальное количество результатов
         
         Returns:
-            Список найденных FAQ (без дубликатов)
+            Список найденных результатов из всей базы знаний (без дубликатов)
         """
-        # Сначала поиск по ключевым словам
+        # Сначала поиск по ключевым словам (только FAQ)
         keyword_results = await self.search_by_keywords(question, limit)
         
-        # Если нашли достаточно результатов, возвращаем их
-        if len(keyword_results) >= limit:
-            return keyword_results
-        
-        # Дополняем полнотекстовым поиском
-        text_results = await self.search_by_text(question, limit)
-        
-        # Объединяем результаты, убирая дубликаты по id
+        # Объединяем результаты (ключевые слова + полнотекстовый поиск)
         seen_ids = {r['id'] for r in keyword_results}
-        unique_results = keyword_results.copy()
+        all_results = keyword_results.copy()
         
-        for result in text_results:
-            if result['id'] not in seen_ids:
-                unique_results.append(result)
-                seen_ids.add(result['id'])
-                if len(unique_results) >= limit:
-                    break
+        # Если не хватает результатов, дополняем полнотекстовым поиском
+        # (он уже ищет во всей unified_knowledge_base, включая chunks)
+        if len(all_results) < limit:
+            text_results = await self.search_by_text(question, limit * 2)  # Берем больше для фильтрации
+            
+            for result in text_results:
+                # Пропускаем дубликаты
+                result_id = result.get('id') or f"{result.get('type', 'unknown')}_{result.get('id', 0)}"
+                if result_id not in seen_ids:
+                    all_results.append(result)
+                    seen_ids.add(result_id)
+                    if len(all_results) >= limit:
+                        break
         
-        return unique_results[:limit]
+        return all_results[:limit]
     
     async def add_faq(
         self,
@@ -181,6 +432,9 @@ class FAQRepository:
     ) -> int:
         """
         Добавить новый FAQ в базу знаний.
+        
+        Добавляет в unified_knowledge_base, если она существует,
+        иначе в старую таблицу faq_ai.
         
         Args:
             question: Вопрос
@@ -197,24 +451,55 @@ class FAQRepository:
             if keywords is None:
                 keywords = self._extract_keywords(question)
             
-            # Создаем search_vector для полнотекстового поиска
-            search_text = f"{question} {answer}"
-            
             async with self.pool.acquire() as conn:
-                query = """
-                    INSERT INTO faq_ai (question, answer, keywords, category, tag, search_vector)
-                    VALUES ($1, $2, $3::text[], $4, $5, to_tsvector('russian', $6))
-                    RETURNING id
-                """
-                row = await conn.fetchrow(
-                    query,
-                    question,
-                    answer,
-                    keywords,
-                    category,
-                    tag,
-                    search_text
-                )
+                # Проверяем, существует ли unified_knowledge_base
+                table_exists = await conn.fetchval("""
+                    SELECT EXISTS (
+                        SELECT FROM information_schema.tables 
+                        WHERE table_schema = 'public' 
+                        AND table_name = 'unified_knowledge_base'
+                    )
+                """)
+                
+                if table_exists:
+                    # Используем unified_knowledge_base
+                    query = """
+                        INSERT INTO unified_knowledge_base (
+                            type, question, answer, keywords, category, tag, search_vector
+                        )
+                        VALUES (
+                            'faq', $1, $2, $3::text[], $4, $5, 
+                            to_tsvector('russian', $6 || ' ' || $7)
+                        )
+                        RETURNING id
+                    """
+                    row = await conn.fetchrow(
+                        query,
+                        question,
+                        answer,
+                        keywords,
+                        category,
+                        tag,
+                        question,
+                        answer
+                    )
+                else:
+                    # Fallback на старую таблицу faq_ai
+                    search_text = f"{question} {answer}"
+                    query = """
+                        INSERT INTO faq_ai (question, answer, keywords, category, tag, search_vector)
+                        VALUES ($1, $2, $3::text[], $4, $5, to_tsvector('russian', $6))
+                        RETURNING id
+                    """
+                    row = await conn.fetchrow(
+                        query,
+                        question,
+                        answer,
+                        keywords,
+                        category,
+                        tag,
+                        search_text
+                    )
                 
                 logger.info("Добавлен новый FAQ: id=%d, question=%s", row['id'], question[:50])
                 return row['id']

@@ -1,12 +1,9 @@
 """
-Обработчик сообщений от курьеров для AI-куратора.
+Простой обработчик сообщений от курьеров для AI-куратора.
 
-Использует RAG (Retrieval-Augmented Generation) через PostgreSQL для поиска релевантных FAQ.
-
-Работает в три этапа:
-1. Rule-based ответы для частых сценариев (терминал сломан, ДТП, повреждение товара, недозвон).
-2. Must-match кейсы из конфигурации (обязательные маршруты).
-3. Генерация через AI-куратора (Groq + LLaMA 3) с RAG через PostgreSQL, если доступен GROQ_API_KEY.
+Использует SimpleCuratorService для поиска ответов в таблице FAQ.
+Если ответ найден — форматирует через Groq API.
+Если ответ не найден — отправляет к живому куратору.
 """
 import logging
 from typing import Optional
@@ -15,13 +12,13 @@ from typing import Optional
 from aiogram import Router, Bot
 from aiogram.types import Message
 from aiogram.enums import ChatType
-from redis.asyncio import Redis
 
 # Локальные импорты
-from config.settings import settings
-from src.ai.curator import AICurator
 from src.repositories.faq_repository import FAQRepository
+from src.services.simple_curator_service import SimpleCuratorService
+from src.services.ai_enhanced_curator import EnhancedCuratorService
 from src.services.ai_response_service import ai_response_service
+from redis.asyncio import Redis
 
 logger = logging.getLogger(__name__)
 
@@ -39,13 +36,14 @@ async def handle_courier_message(
     Обработка сообщений от курьеров.
     
     Обрабатывает только текстовые сообщения в приватных чатах.
-    Сначала пытается выдать rule-based ответ, затем обращается к AI-куратору (если доступен).
+    Использует EnhancedCuratorService (с живым общением) или SimpleCuratorService
+    для поиска ответов в FAQ.
     
     Args:
         message: Сообщение от пользователя
         bot: Экземпляр бота
         faq_repo: Репозиторий для работы с FAQ (dependency injection)
-        redis: Клиент Redis для хранения истории (dependency injection)
+        redis: Клиент Redis для памяти стиля общения (dependency injection)
     """
     # Обрабатываем только приватные чаты
     if message.chat.type != ChatType.PRIVATE:
@@ -67,41 +65,40 @@ async def handle_courier_message(
         if question.startswith("/"):
             return
         
-        # Быстрый ответ для типовых сценариев
+        # Быстрый ответ для типовых сценариев (опционально, можно убрать)
         quick_reply = ai_response_service.build_courier_quick_reply(question)
         if quick_reply:
             await message.answer(quick_reply)
             return
 
-        # Если нет зависимостей (БД/Redis) или ключа — используем rule-based ответ
-        if faq_repo is None or redis is None:
+        # Если нет FAQ репозитория — отправляем общий ответ
+        if faq_repo is None:
             logger.warning(
-                "Missing dependencies in courier_ai handler: faq_repo=%s, redis=%s. "
-                "Отправляю rule-based ответ без AI.",
-                faq_repo is not None,
-                redis is not None,
+                "FAQ репозиторий недоступен. Отправляю общий ответ."
             )
             await message.answer(ai_response_service.build_courier_generic_answer(question))
             return
 
-        if not settings.GROQ_API_KEY:
-            logger.warning("GROQ_API_KEY не установлен, использую rule-based ответ без AI.")
-            await message.answer(ai_response_service.build_courier_generic_answer(question))
-            return
+        # Создаём улучшенный AI-куратор (с живым общением)
+        # Использует EnhancedCuratorService, который является обёрткой над SimpleCuratorService
+        # и добавляет: анализ контекста, определение роли, память стиля, переходные фразы
+        if redis:
+            curator = EnhancedCuratorService(faq_repo=faq_repo, redis=redis)
+        else:
+            # Fallback на простой куратор, если Redis недоступен
+            curator = SimpleCuratorService(faq_repo=faq_repo)
 
-        curator = AICurator(
-            faq_repo=faq_repo,
-            redis=redis,
-        )
-
+        # Показываем, что бот печатает
         await bot.send_chat_action(message.chat.id, "typing")
 
-        answer = await curator.generate_response(
-            user_id=user_id,
-            question=question,
-            prompt_type="question",
-        )
+        # Получаем ответ от куратора
+        # EnhancedCuratorService.get_answer() принимает user_id для стиля общения
+        if isinstance(curator, EnhancedCuratorService):
+            answer = await curator.get_answer(question, user_id=user_id)
+        else:
+            answer = await curator.get_answer(question)
 
+        # Отправляем ответ курьеру
         await message.answer(answer)
 
         logger.info(
@@ -110,10 +107,6 @@ async def handle_courier_message(
             len(question),
         )
 
-    except ValueError as e:
-        logger.error("Ошибка конфигурации AI-куратора: %s", e, exc_info=True)
-        await message.answer(ai_response_service.build_courier_generic_answer(message.text.strip()))
-
     except Exception as e:  # noqa: BLE001
         logger.error(
             "Ошибка при обработке сообщения от пользователя %s: %s",
@@ -121,6 +114,7 @@ async def handle_courier_message(
             e,
             exc_info=True,
         )
+        # В случае ошибки отправляем общий ответ
         await message.answer(
             ai_response_service.build_courier_generic_answer(message.text.strip())
         )

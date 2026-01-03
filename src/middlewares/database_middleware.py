@@ -9,6 +9,7 @@ from aiogram import BaseMiddleware
 from asyncpg import Pool
 from redis.asyncio import Redis
 
+from config.settings import settings
 from src.utils.db_pool import get_db_pool
 from src.repositories.faq_repository import FAQRepository
 from src.repositories.group_repository import GroupRepository
@@ -20,6 +21,8 @@ logger = logging.getLogger(__name__)
 
 # Глобальный кэш для пула соединений (чтобы не создавать каждый раз)
 _cached_db_pool: Pool | None = None
+# Глобальный кэш для Redis клиента (чтобы не создавать каждый раз)
+_cached_redis: Redis | None = None
 
 
 class DatabaseMiddleware(BaseMiddleware):
@@ -47,12 +50,26 @@ class DatabaseMiddleware(BaseMiddleware):
         Returns:
             Результат обработки handler
         """
-        global _cached_db_pool
+        global _cached_db_pool, _cached_redis
         
         try:
             # Получаем или создаём пул соединений
             if _cached_db_pool is None:
                 _cached_db_pool = await get_db_pool()
+            
+            # Получаем или создаём Redis клиент
+            if _cached_redis is None:
+                try:
+                    _cached_redis = Redis.from_url(
+                        settings.REDIS_URL,
+                        decode_responses=True
+                    )
+                    # Проверяем подключение
+                    await _cached_redis.ping()
+                    logger.debug("Redis клиент создан и подключён")
+                except Exception as redis_error:
+                    logger.error("Ошибка при создании Redis клиента: %s", redis_error, exc_info=True)
+                    _cached_redis = None
             
             # Создаём репозитории
             faq_repo = FAQRepository(_cached_db_pool)
@@ -70,11 +87,7 @@ class DatabaseMiddleware(BaseMiddleware):
             data["group_service"] = group_service
             data["user_service"] = user_service
             data["db_pool"] = _cached_db_pool
-            
-            # Redis должен быть уже в data из другого middleware
-            # Если нет, можно добавить здесь:
-            # if "redis" not in data:
-            #     data["redis"] = Redis.from_url(REDIS_URL, decode_responses=True)
+            data["redis"] = _cached_redis  # Добавляем Redis в data
             
         except Exception as e:
             logger.error("Ошибка при создании репозиториев в middleware: %s", e, exc_info=True)
@@ -84,5 +97,6 @@ class DatabaseMiddleware(BaseMiddleware):
             data["poll_repo"] = None
             data["group_service"] = None
             data["user_service"] = None
+            data["redis"] = None
         
         return await handler(event, data)
