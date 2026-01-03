@@ -24,9 +24,10 @@ sudo apt update
 sudo apt install -y ca-certificates curl gnupg lsb-release
 
 # Добавляем официальный GPG ключ Docker
-sudo install -m 0755 -d /etc/apt/keyrings
+sudo apt install -y ca-certificates curl gnupg lsb-release
 curl -fsSL https://download.docker.com/linux/ubuntu/gpg | sudo gpg --dearmor -o /etc/apt/keyrings/docker.gpg
 sudo chmod a+r /etc/apt/keyrings/docker.gpg
+
 
 # Добавляем репозиторий Docker
 echo \
@@ -45,6 +46,7 @@ docker compose version
 sudo usermod -aG docker $USER
 # Выйдите и войдите снова, чтобы изменения вступили в силу
 ```
+
 
 ### Создание директории для проекта
 
