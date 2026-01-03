@@ -61,8 +61,16 @@ async def init_faq_database():
             print(f"📄 Выполняю миграцию: {migration_1.name}")
             with open(migration_1, 'r', encoding='utf-8') as f:
                 sql = f.read()
-            await conn.execute(sql)
-            print("✅ Таблица faq_ai создана")
+            try:
+                await conn.execute(sql)
+                print("✅ Таблица faq_ai создана")
+            except asyncpg.exceptions.DuplicateObjectError as e:
+                if "already exists" in str(e) or "trigger" in str(e).lower():
+                    print(f"ℹ️  Объект уже существует (пропускаем): {e}")
+                else:
+                    raise
+            except asyncpg.exceptions.DuplicateTableError:
+                print("ℹ️  Таблица faq_ai уже существует (пропускаем)")
         else:
             print(f"⚠️  Файл миграции не найден: {migration_1}")
         
@@ -72,8 +80,16 @@ async def init_faq_database():
             print(f"📄 Выполняю миграцию: {migration_2.name}")
             with open(migration_2, 'r', encoding='utf-8') as f:
                 sql = f.read()
-            await conn.execute(sql)
-            print("✅ Начальные данные вставлены")
+            try:
+                await conn.execute(sql)
+                print("✅ Начальные данные вставлены")
+            except asyncpg.exceptions.UniqueViolationError:
+                print("ℹ️  Начальные данные уже существуют (пропускаем)")
+            except Exception as e:
+                if "already exists" in str(e).lower() or "duplicate" in str(e).lower():
+                    print(f"ℹ️  Данные уже существуют (пропускаем): {e}")
+                else:
+                    raise
         else:
             print(f"⚠️  Файл миграции не найден: {migration_2}")
         
@@ -83,8 +99,16 @@ async def init_faq_database():
             print(f"📄 Выполняю миграцию: {migration_3.name}")
             with open(migration_3, 'r', encoding='utf-8') as f:
                 sql = f.read()
-            await conn.execute(sql)
-            print("✅ Расширенный набор кейсов добавлен")
+            try:
+                await conn.execute(sql)
+                print("✅ Расширенный набор кейсов добавлен")
+            except asyncpg.exceptions.UniqueViolationError:
+                print("ℹ️  Расширенные кейсы уже существуют (пропускаем)")
+            except Exception as e:
+                if "already exists" in str(e).lower() or "duplicate" in str(e).lower():
+                    print(f"ℹ️  Данные уже существуют (пропускаем): {e}")
+                else:
+                    raise
         else:
             print(f"⚠️  Файл миграции не найден: {migration_3}")
         
@@ -94,8 +118,16 @@ async def init_faq_database():
             print(f"📄 Выполняю миграцию: {migration_4.name}")
             with open(migration_4, 'r', encoding='utf-8') as f:
                 sql = f.read()
-            await conn.execute(sql)
-            print("✅ Таблица ml_cases создана")
+            try:
+                await conn.execute(sql)
+                print("✅ Таблица ml_cases создана")
+            except asyncpg.exceptions.DuplicateObjectError as e:
+                if "already exists" in str(e) or "trigger" in str(e).lower():
+                    print(f"ℹ️  Объект уже существует (пропускаем): {e}")
+                else:
+                    raise
+            except asyncpg.exceptions.DuplicateTableError:
+                print("ℹ️  Таблица ml_cases уже существует (пропускаем)")
         else:
             print(f"⚠️  Файл миграции не найден: {migration_4}")
         

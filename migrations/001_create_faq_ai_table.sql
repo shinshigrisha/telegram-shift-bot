@@ -34,16 +34,7 @@ END;
 $$ LANGUAGE plpgsql;
 
 -- Удаляем триггер, если он уже существует (для идемпотентности)
-DO $$
-BEGIN
-    IF EXISTS (
-        SELECT 1 FROM pg_trigger 
-        WHERE tgname = 'trigger_update_faq_ai_search_vector' 
-        AND tgrelid = 'faq_ai'::regclass
-    ) THEN
-        DROP TRIGGER trigger_update_faq_ai_search_vector ON faq_ai;
-    END IF;
-END $$;
+DROP TRIGGER IF EXISTS trigger_update_faq_ai_search_vector ON faq_ai;
 
 CREATE TRIGGER trigger_update_faq_ai_search_vector
     BEFORE INSERT OR UPDATE OF question, answer ON faq_ai
@@ -60,16 +51,7 @@ END;
 $$ LANGUAGE plpgsql;
 
 -- Удаляем триггер, если он уже существует (для идемпотентности)
-DO $$
-BEGIN
-    IF EXISTS (
-        SELECT 1 FROM pg_trigger 
-        WHERE tgname = 'trigger_update_faq_ai_updated_at' 
-        AND tgrelid = 'faq_ai'::regclass
-    ) THEN
-        DROP TRIGGER trigger_update_faq_ai_updated_at ON faq_ai;
-    END IF;
-END $$;
+DROP TRIGGER IF EXISTS trigger_update_faq_ai_updated_at ON faq_ai;
 
 CREATE TRIGGER trigger_update_faq_ai_updated_at
     BEFORE UPDATE ON faq_ai
