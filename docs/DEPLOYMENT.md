@@ -12,11 +12,21 @@ python3 scripts/init_runtime_database.py
 docker compose up -d bot
 ```
 
+## Что проверить перед боевым запуском
+
+- бот добавлен в нужные группы и назначен администратором;
+- у каждой группы сохранен корректный `Chat ID`;
+- в `.env` заполнены `BOT_TOKEN`, `ADMIN_IDS`, `DB_*`, `REDIS_*`;
+- если Redis запущен с паролем, тот же пароль указан в `REDIS_PASSWORD`;
+- после создания группы проверьте, что у дневных групп появились стандартные слоты;
+- выполните один тестовый опрос и одно ручное закрытие через `/admin`.
+
 ## После запуска
 
 - Проверьте логи: `docker compose logs -f bot`
 - Проверьте таблицы: `docker compose exec postgres psql -U bot_user -d shift_bot -c "\dt"`
 - Проверьте Redis: `docker compose exec redis redis-cli -a "$REDIS_PASSWORD" ping`
+- Проверьте статус контейнеров: `docker compose ps`
 
 ## Сброс перед новым стартом
 
@@ -24,4 +34,10 @@ docker compose up -d bot
 docker compose exec -T postgres psql -U bot_user -d shift_bot < scripts/reset_runtime_data.sql
 bash scripts/reset_redis_data.sh
 python3 scripts/init_runtime_database.py
+```
+
+## Обновление на сервере
+
+```bash
+bash scripts/deploy_update.sh
 ```

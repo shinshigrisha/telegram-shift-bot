@@ -2,6 +2,9 @@ FROM python:3.11-slim
 
 WORKDIR /app
 
+ENV PYTHONDONTWRITEBYTECODE=1
+ENV PYTHONUNBUFFERED=1
+
 # Устанавливаем системные зависимости
 RUN apt-get update && apt-get install -y \
     gcc \
@@ -25,4 +28,4 @@ RUN ln -snf /usr/share/zoneinfo/$TZ /etc/localtime && echo $TZ > /etc/timezone
 ENV PYTHONPATH=/app
 
 # Запускаем бота
-CMD ["python", "src/main.py"]
+CMD ["python3", "src/main.py"]

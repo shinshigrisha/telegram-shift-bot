@@ -20,3 +20,11 @@
 ```bash
 python3 -m compileall src config scripts
 ```
+
+## Актуальные служебные скрипты
+
+- `scripts/init_runtime_database.py` — инициализация рабочей схемы БД
+- `scripts/reset_runtime_data.sql` — очистка рабочих данных PostgreSQL
+- `scripts/reset_redis_data.sh` — очистка Redis
+- `scripts/deploy_update.sh` — обновление проекта на сервере
+- `scripts/backup_postgres.sh`, `scripts/backup_redis.sh`, `scripts/backup_all.sh` — резервные копии

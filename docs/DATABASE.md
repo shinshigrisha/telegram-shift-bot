@@ -50,6 +50,12 @@ bash scripts/reset_redis_data.sh
 3. `migrations/007_create_poll_options_votes.sql`
 4. `migrations/010_create_group_members.sql`
 
+Для нового разворачивания основной сценарий — не ручной прогон старых миграций, а запуск:
+
+```bash
+python3 scripts/init_runtime_database.py
+```
+
 ## Проверка
 
 ```bash
