@@ -34,31 +34,6 @@ CREATE INDEX IF NOT EXISTS idx_user_votes_poll_id ON user_votes (poll_id);
 CREATE INDEX IF NOT EXISTS idx_user_votes_user_id ON user_votes (user_id);
 CREATE INDEX IF NOT EXISTS idx_user_votes_option_id ON user_votes (option_id);
 
--- Добавляем новые поля в groups, если их нет
-DO $$
-BEGIN
-    IF NOT EXISTS (
-        SELECT 1 FROM information_schema.columns 
-        WHERE table_name = 'groups' AND column_name = 'arrival_departure_topic_id'
-    ) THEN
-        ALTER TABLE groups ADD COLUMN arrival_departure_topic_id BIGINT;
-    END IF;
-    
-    IF NOT EXISTS (
-        SELECT 1 FROM information_schema.columns 
-        WHERE table_name = 'groups' AND column_name = 'general_chat_topic_id'
-    ) THEN
-        ALTER TABLE groups ADD COLUMN general_chat_topic_id BIGINT;
-    END IF;
-    
-    IF NOT EXISTS (
-        SELECT 1 FROM information_schema.columns 
-        WHERE table_name = 'groups' AND column_name = 'important_info_topic_id'
-    ) THEN
-        ALTER TABLE groups ADD COLUMN important_info_topic_id BIGINT;
-    END IF;
-END $$;
-
 -- Добавляем новые поля в daily_polls, если их нет
 DO $$
 BEGIN

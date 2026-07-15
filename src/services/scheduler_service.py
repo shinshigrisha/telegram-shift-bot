@@ -1,14 +1,9 @@
 """
 Сервис планировщика задач для автоматического управления опросами.
-
-Использует APScheduler для:
-- Автоматического создания опросов в 09:00
-- Напоминаний перед закрытием (14:00, 18:30)
-- Автоматического закрытия опросов в 19:00
-- Создания скриншотов результатов
 """
 import logging
 import asyncio
+from html import escape
 from datetime import date, datetime, time, timedelta
 from typing import Optional, List, Dict, Any, Callable
 from pathlib import Path
@@ -19,6 +14,7 @@ from apscheduler.triggers.date import DateTrigger
 from aiogram import Bot
 
 from config.settings import settings
+from src.services.group_member_service import GroupMemberService
 
 logger = logging.getLogger(__name__)
 
@@ -51,6 +47,7 @@ class SchedulerService:
         self.bot = bot
         self.poll_service = poll_service
         self.group_service = group_service
+        self.group_member_service = GroupMemberService(group_service.db_pool)
         self.scheduler = AsyncIOScheduler(timezone="Europe/Moscow")
         self._is_running = False
     
@@ -64,6 +61,7 @@ class SchedulerService:
         self._add_poll_creation_job()
         self._add_reminder_jobs()
         self._add_poll_closing_job()
+        self._add_night_poll_closing_job()
         
         # Запускаем планировщик
         self.scheduler.start()
@@ -117,25 +115,6 @@ class SchedulerService:
                 kwargs={"reminder_hour": hour},
             )
         
-        # Финальное напоминание за 30 минут до закрытия
-        final_hour = settings.POLL_CLOSING_HOUR
-        final_minute = settings.POLL_CLOSING_MINUTE - 30
-        if final_minute < 0:
-            final_hour -= 1
-            final_minute += 60
-        
-        self.scheduler.add_job(
-            self._send_final_reminder,
-            CronTrigger(
-                hour=final_hour,
-                minute=final_minute,
-                timezone="Europe/Moscow"
-            ),
-            id="final_reminder",
-            name="Финальное напоминание",
-            replace_existing=True,
-        )
-    
     def _add_poll_closing_job(self) -> None:
         """Добавить задачу закрытия опросов."""
         self.scheduler.add_job(
@@ -149,14 +128,22 @@ class SchedulerService:
             name="Закрытие ежедневных опросов",
             replace_existing=True,
         )
+
+    def _add_night_poll_closing_job(self) -> None:
+        self.scheduler.add_job(
+            self._close_night_polls,
+            CronTrigger(hour=17, minute=0, timezone="Europe/Moscow"),
+            id="close_night_polls",
+            name="Закрытие ночных опросов",
+            replace_existing=True,
+        )
     
     async def _create_daily_polls(self) -> None:
         """Создать опросы на завтра для всех активных групп."""
         logger.info("🔄 Запуск автоматического создания опросов...")
         
         try:
-            target_date = date.today() + timedelta(days=1)
-            logger.info("📅 Целевая дата для создания опросов: %s", target_date.strftime('%d.%m.%Y'))
+            logger.info("📅 Создание опросов для дневных и ночных групп")
             
             # Проверяем, что group_service доступен
             if not self.group_service:
@@ -174,12 +161,12 @@ class SchedulerService:
             except Exception as e:
                 logger.error("Ошибка при проверке групп: %s", e, exc_info=True)
             
-            created_count, errors = await self.poll_service.create_daily_polls(target_date)
+            created_count, errors = await self.poll_service.create_daily_polls()
             
             # Формируем отчет
             report = (
                 f"📊 <b>Автоматическое создание опросов</b>\n\n"
-                f"📅 Дата: {target_date.strftime('%d.%m.%Y')}\n"
+                f"📅 Дата запуска: {date.today().strftime('%d.%m.%Y')}\n"
                 f"✅ Создано: {created_count}\n"
             )
             
@@ -213,14 +200,16 @@ class SchedulerService:
         logger.info("🔔 Отправка напоминаний (час: %d)...", reminder_hour)
         
         try:
-            # Получаем все активные опросы на завтра
             tomorrow = date.today() + timedelta(days=1)
             active_polls = await self.poll_service.poll_repo.get_active_polls()
-            
-            # Фильтруем опросы на завтра
-            tomorrow_polls = [p for p in active_polls if p.get('poll_date') == tomorrow]
-            
-            if not tomorrow_polls:
+
+            target_polls = []
+            for poll in active_polls:
+                group = await self.group_service.get_group_by_id(poll['group_id'])
+                if group and not group.get("is_night", False) and poll.get('poll_date') == tomorrow:
+                    target_polls.append((poll, group))
+
+            if not target_polls:
                 logger.info("Нет активных опросов на завтра для напоминаний")
                 return
             
@@ -234,29 +223,19 @@ class SchedulerService:
             
             sent_count = 0
             
-            for poll in tomorrow_polls:
+            for poll, group in target_polls:
                 try:
-                    group = await self.group_service.get_group_by_id(poll['group_id'])
-                    if not group:
+                    not_voted = await self._get_not_voted_members(poll, group)
+                    if not not_voted:
                         continue
-                    
-                    # Отправляем напоминание в общий чат
-                    general_topic_id = group.get('general_chat_topic_id')
-                    chat_id = group['telegram_chat_id']
-                    
-                    message = (
-                        f"⏰ <b>Напоминание!</b>\n\n"
-                        f"До окончания записи на завтра осталось: <b>{hours_left} ч.</b>\n\n"
-                        f"Не забудьте отметиться в опросе!"
-                    )
-                    
+
+                    message = self._build_reminder_message(not_voted, hours_left)
+
                     await self.bot.send_message(
-                        chat_id=chat_id,
+                        chat_id=group['telegram_chat_id'],
                         text=message,
-                        message_thread_id=general_topic_id,
                         parse_mode="HTML",
                     )
-                    
                     sent_count += 1
                     
                 except Exception as e:
@@ -271,111 +250,36 @@ class SchedulerService:
         except Exception as e:
             logger.error("Ошибка при отправке напоминаний: %s", e, exc_info=True)
     
-    async def _send_final_reminder(self) -> None:
-        """Отправить финальное напоминание за 30 минут до закрытия."""
-        logger.info("🚨 Отправка финального напоминания...")
-        
-        try:
-            tomorrow = date.today() + timedelta(days=1)
-            active_polls = await self.poll_service.poll_repo.get_active_polls()
-            tomorrow_polls = [p for p in active_polls if p.get('poll_date') == tomorrow]
-            
-            if not tomorrow_polls:
-                return
-            
-            sent_count = 0
-            
-            for poll in tomorrow_polls:
-                try:
-                    group = await self.group_service.get_group_by_id(poll['group_id'])
-                    if not group:
-                        continue
-                    
-                    general_topic_id = group.get('general_chat_topic_id')
-                    chat_id = group['telegram_chat_id']
-                    
-                    message = (
-                        "🚨 <b>ФИНАЛЬНОЕ НАПОМИНАНИЕ!</b>\n\n"
-                        "До окончания записи на завтра осталось: <b>30 минут!</b>\n\n"
-                        "Срочно отметьтесь в опросе, если еще не сделали это!"
-                    )
-                    
-                    await self.bot.send_message(
-                        chat_id=chat_id,
-                        text=message,
-                        message_thread_id=general_topic_id,
-                        parse_mode="HTML",
-                    )
-                    
-                    sent_count += 1
-                    
-                except Exception as e:
-                    logger.error(
-                        "Ошибка отправки финального напоминания в группу %s: %s",
-                        poll.get('group_id'),
-                        e
-                    )
-            
-            logger.info("Отправлено финальных напоминаний: %d", sent_count)
-            
-        except Exception as e:
-            logger.error("Ошибка при отправке финального напоминания: %s", e, exc_info=True)
-    
     async def _close_daily_polls(self) -> None:
-        """Закрыть все активные опросы и сгенерировать отчеты."""
+        """Закрыть дневные опросы на завтра."""
+        await self._close_polls(is_night=False, target_date=date.today() + timedelta(days=1))
+
+    async def _close_night_polls(self) -> None:
+        """Закрыть ночные опросы на сегодня."""
+        await self._close_polls(is_night=True, target_date=date.today())
+
+    async def _close_polls(self, is_night: bool, target_date: date) -> None:
+        """Закрыть активные опросы по типу группы и дате."""
         logger.info("🔒 Запуск автоматического закрытия опросов...")
         
         try:
-            tomorrow = date.today() + timedelta(days=1)
             active_polls = await self.poll_service.poll_repo.get_active_polls()
-            tomorrow_polls = [p for p in active_polls if p.get('poll_date') == tomorrow]
-            
-            if not tomorrow_polls:
+            selected_polls = []
+            for poll in active_polls:
+                group = await self.group_service.get_group_by_id(poll['group_id'])
+                if group and bool(group.get("is_night", False)) == is_night and poll.get('poll_date') == target_date:
+                    selected_polls.append((poll, group))
+
+            if not selected_polls:
                 logger.info("Нет активных опросов для закрытия")
                 return
             
             closed_count = 0
             errors = []
             
-            for poll in tomorrow_polls:
+            for poll, group in selected_polls:
                 try:
-                    group = await self.group_service.get_group_by_id(poll['group_id'])
-                    if not group:
-                        errors.append(f"Группа {poll['group_id']} не найдена")
-                        continue
-                    
-                    # Закрываем опрос в Telegram
-                    try:
-                        await self.bot.stop_poll(
-                            chat_id=group['telegram_chat_id'],
-                            message_id=poll['telegram_message_id'],
-                        )
-                    except Exception as e:
-                        logger.warning("Не удалось закрыть опрос в Telegram: %s", e)
-                    
-                    # Генерируем отчет о результатах
-                    report = await self._generate_poll_report(poll, group)
-                    
-                    # Сохраняем отчет как скриншот (текстовый)
-                    screenshot_path = await self._save_poll_report(poll, group, report)
-                    
-                    # Отправляем отчет в тему "приход/уход"
-                    arrival_topic_id = group.get('arrival_departure_topic_id')
-                    if arrival_topic_id:
-                        await self.bot.send_message(
-                            chat_id=group['telegram_chat_id'],
-                            text=report,
-                            message_thread_id=arrival_topic_id,
-                            parse_mode="HTML",
-                        )
-                    
-                    # Закрываем опрос в БД
-                    await self.poll_service.poll_repo.update(
-                        poll_id=poll['id'],
-                        status="closed",
-                        screenshot_path=screenshot_path,
-                        closed_at=datetime.now(),
-                    )
+                    await self.close_single_poll_with_reporting(poll, group)
                     
                     closed_count += 1
                     logger.info("Закрыт опрос для группы %s", group['name'])
@@ -388,7 +292,7 @@ class SchedulerService:
             # Отчет для админов
             report = (
                 f"🔒 <b>Автоматическое закрытие опросов</b>\n\n"
-                f"📅 Дата опросов: {tomorrow.strftime('%d.%m.%Y')}\n"
+                f"📅 Дата опросов: {target_date.strftime('%d.%m.%Y')}\n"
                 f"✅ Закрыто: {closed_count}\n"
             )
             
@@ -431,8 +335,7 @@ class SchedulerService:
         settings_data = group.get('settings', {})
         slots = settings_data.get('slots', [])
         
-        # Получаем результаты из БД (results - JSON с голосами)
-        results = poll.get('results', {})
+        results = self._normalize_results(poll.get('results'))
         
         report = (
             f"📊 <b>Результаты опроса</b>\n"
@@ -441,36 +344,53 @@ class SchedulerService:
             f"⏰ Закрыт: {datetime.now().strftime('%H:%M')}\n\n"
         )
         
-        # Форматируем результаты по слотам
-        if slots:
+        if group.get("is_night", False):
+            for title, key in (
+                ("Выхожу", "night_out"),
+                ("Не выхожу", "not_going"),
+                ("Куратор", "curator"),
+                ("Выходной", "day_off"),
+            ):
+                voters = results.get(key, [])
+                report += f"• <b>{title}</b> ({len(voters)}):\n"
+                for voter in voters[:20]:
+                    report += f"   • {voter.get('name', 'Неизвестно')}\n"
+                report += "\n"
+        elif slots:
             for i, slot in enumerate(slots):
                 start = slot.get('start', '?')
                 end = slot.get('end', '?')
-                limit = slot.get('limit', 3)
                 
-                # Получаем голоса для этого слота (если есть)
-                slot_votes = results.get(f'slot_{i}', [])
+                slot_votes = results.get('slots', {}).get(f'slot_{i}', [])
                 current_count = len(slot_votes) if isinstance(slot_votes, list) else 0
-                
-                status = "✅" if current_count >= limit else "⚠️" if current_count > 0 else "❌"
-                
-                report += f"{status} <b>{start}-{end}</b> ({current_count}/{limit})\n"
+
+                status = "✅" if current_count > 0 else "❌"
+                report += f"{status} <b>{start}-{end}</b> ({current_count})\n"
                 
                 if isinstance(slot_votes, list) and slot_votes:
                     for voter in slot_votes[:10]:  # Максимум 10 имен
-                        report += f"   • {voter}\n"
+                        report += f"   • {voter.get('name', 'Неизвестно')}\n"
                     if len(slot_votes) > 10:
                         report += f"   ... и еще {len(slot_votes) - 10}\n"
                 report += "\n"
         
-        # Добавляем информацию о выходных
-        dayoff_votes = results.get('dayoff', [])
-        if dayoff_votes:
-            report += f"🏖 <b>Выходной</b> ({len(dayoff_votes)}):\n"
-            for voter in dayoff_votes[:10]:
-                report += f"   • {voter}\n"
-            if len(dayoff_votes) > 10:
-                report += f"   ... и еще {len(dayoff_votes) - 10}\n"
+        if not group.get("is_night", False):
+            curator_votes = results.get('curator', [])
+            if curator_votes:
+                report += f"👤 <b>Куратор</b> ({len(curator_votes)}):\n"
+                for voter in curator_votes[:10]:
+                    report += f"   • {voter.get('name', 'Неизвестно')}\n"
+                if len(curator_votes) > 10:
+                    report += f"   ... и еще {len(curator_votes) - 10}\n"
+                report += "\n"
+
+            dayoff_votes = results.get('day_off', [])
+            if dayoff_votes:
+                report += f"🏖 <b>Выходной</b> ({len(dayoff_votes)}):\n"
+                for voter in dayoff_votes[:10]:
+                    report += f"   • {voter.get('name', 'Неизвестно')}\n"
+                if len(dayoff_votes) > 10:
+                    report += f"   ... и еще {len(dayoff_votes) - 10}\n"
         
         return report
     
@@ -514,6 +434,143 @@ class SchedulerService:
         except Exception as e:
             logger.error("Ошибка сохранения отчета: %s", e, exc_info=True)
             return ""
+
+    async def close_single_poll_with_reporting(
+        self,
+        poll: Dict[str, Any],
+        group: Dict[str, Any],
+    ) -> None:
+        """Закрыть один опрос, отправить итоги в чат и сохранить отчет."""
+        try:
+            await self.bot.stop_poll(
+                chat_id=group['telegram_chat_id'],
+                message_id=poll['telegram_message_id'],
+            )
+        except Exception as e:
+            logger.warning("Не удалось закрыть опрос в Telegram: %s", e)
+
+        fresh_poll = await self.poll_service.poll_repo.get_by_id(str(poll["id"])) or poll
+        report = await self._generate_poll_report(fresh_poll, group)
+        not_voted = await self._get_not_voted_members(fresh_poll, group)
+        not_voted_report = self._format_not_voted_report(not_voted)
+        screenshot_path = await self._save_poll_report(fresh_poll, group, report)
+
+        await self.bot.send_message(
+            chat_id=group['telegram_chat_id'],
+            text=report,
+            parse_mode="HTML",
+        )
+        await self.bot.send_message(
+            chat_id=group['telegram_chat_id'],
+            text=not_voted_report,
+            parse_mode="HTML",
+        )
+
+        await self.poll_service.poll_repo.update(
+            poll_id=fresh_poll['id'],
+            status="closed",
+            screenshot_path=screenshot_path,
+            closed_at=datetime.now(),
+        )
+
+    def _normalize_results(self, results: Dict[str, Any] | None) -> Dict[str, Any]:
+        if isinstance(results, dict):
+            results.setdefault("slots", {})
+            results.setdefault("curator", [])
+            results.setdefault("day_off", [])
+            results.setdefault("night_out", [])
+            results.setdefault("not_going", [])
+            return results
+        return {"slots": {}, "curator": [], "day_off": [], "night_out": [], "not_going": []}
+
+    def _extract_voted_user_ids(self, poll: Dict[str, Any]) -> set[int]:
+        results = self._normalize_results(poll.get("results"))
+        user_ids: set[int] = set()
+        for voters in results.get("slots", {}).values():
+            if isinstance(voters, list):
+                for voter in voters:
+                    if isinstance(voter, dict) and voter.get("user_id"):
+                        user_ids.add(int(voter["user_id"]))
+        for voter in results.get("day_off", []):
+            if isinstance(voter, dict) and voter.get("user_id"):
+                user_ids.add(int(voter["user_id"]))
+        for key in ("curator", "night_out", "not_going"):
+            for voter in results.get(key, []):
+                if isinstance(voter, dict) and voter.get("user_id"):
+                    user_ids.add(int(voter["user_id"]))
+        return user_ids
+
+    def _format_member_tag(self, member: Dict[str, Any]) -> str:
+        full_name = escape(member.get("full_name", "Неизвестный сотрудник"))
+        username = member.get("username")
+        if username:
+            username = str(username)
+            return username if username.startswith("@") else f"@{username}"
+        telegram_user_id = member.get("telegram_user_id")
+        if telegram_user_id:
+            return f'<a href="tg://user?id={telegram_user_id}">{full_name}</a>'
+        return full_name
+
+    def _build_reminder_message(self, not_voted: List[Dict[str, Any]], hours_left: int) -> str:
+        lines = "\n".join(f"• {self._format_member_tag(member)}" for member in not_voted[:30])
+        if len(not_voted) > 30:
+            lines += f"\n... и еще {len(not_voted) - 30}"
+        return (
+            f"⏰ <b>Напоминание 17:00</b>\n\n"
+            f"До закрытия опроса осталось: <b>{hours_left} ч.</b>\n\n"
+            f"<b>Еще не отметились:</b>\n{lines}"
+        )
+
+    async def _get_not_voted_members(
+        self,
+        poll: Dict[str, Any],
+        group: Dict[str, Any],
+    ) -> List[Dict[str, Any]]:
+        members = await self.group_member_service.get_group_members(group["id"])
+        voted_user_ids = self._extract_voted_user_ids(poll)
+        not_voted: List[Dict[str, Any]] = []
+        for member in members:
+            telegram_user_id = member.get("telegram_user_id")
+            if telegram_user_id is None or int(telegram_user_id) not in voted_user_ids:
+                not_voted.append(member)
+        return not_voted
+
+    def _format_not_voted_report(self, not_voted: List[Dict[str, Any]]) -> str:
+        if not not_voted:
+            return "✅ <b>Все сотрудники из реестра отметились в опросе.</b>"
+
+        lines = "\n".join(f"• {self._format_member_tag(member)}" for member in not_voted[:50])
+        if len(not_voted) > 50:
+            lines += f"\n... и еще {len(not_voted) - 50}"
+        return "❌ <b>Не отметились:</b>\n" + lines
+
+    async def send_manual_reminder_for_group(self, group_id: int) -> tuple[bool, str]:
+        group = await self.group_service.get_group_by_id(group_id)
+        if not group:
+            return False, "Группа не найдена."
+        if group.get("is_night", False):
+            return False, "Для ночных групп напоминание 17:00 не используется."
+
+        target_date = date.today() + timedelta(days=1)
+        poll = await self.poll_service.poll_repo.get_by_group_and_date(group_id, target_date)
+        if not poll or poll.get("status") != "active":
+            return False, f"Активный опрос на {target_date.strftime('%d.%m.%Y')} не найден."
+
+        not_voted = await self._get_not_voted_members(poll, group)
+        if not not_voted:
+            await self.bot.send_message(
+                chat_id=group['telegram_chat_id'],
+                text="✅ <b>Тест напоминания 17:00</b>\n\nВсе сотрудники из реестра уже отметились.",
+                parse_mode="HTML",
+            )
+            return True, "Все сотрудники уже отметились. В чат отправлено тестовое уведомление."
+
+        await self.bot.send_message(
+            chat_id=group['telegram_chat_id'],
+            text=self._build_reminder_message(not_voted, hours_left=2),
+            parse_mode="HTML",
+        )
+        return True, f"Тест напоминания отправлен в группу {group.get('name')}."
     
     async def _notify_admins(self, message: str) -> None:
         """
@@ -576,20 +633,7 @@ class SchedulerService:
                     continue
                 
                 # Закрываем опрос в Telegram
-                try:
-                    await self.bot.stop_poll(
-                        chat_id=group['telegram_chat_id'],
-                        message_id=poll['telegram_message_id'],
-                    )
-                except Exception as e:
-                    logger.warning("Не удалось закрыть опрос в Telegram: %s", e)
-                
-                # Закрываем в БД
-                await self.poll_service.poll_repo.update(
-                    poll_id=poll['id'],
-                    status="closed",
-                    closed_at=datetime.now(),
-                )
+                await self.close_single_poll_with_reporting(poll, group)
                 
                 closed_count += 1
                 

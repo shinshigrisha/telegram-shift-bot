@@ -500,12 +500,52 @@ async def callback_select_group_for_slots(callback: CallbackQuery, state: FSMCon
             f"✏️ <b>Изменение слотов</b>\n\n"
             f"Группа: <b>{group_name}</b>\n\n"
             f"{slots_text}\n\n"
-            "Выберите количество слотов (максимум 5):"
+            "Введите количество слотов числом.\n"
+            "Можно указать больше 5, если нужно.\n\n"
+            "Пример: <code>6</code>"
         )
-        
-        from src.utils.admin_keyboards import get_slots_count_keyboard
-        await safe_edit_message(callback.message, text, reply_markup=get_slots_count_keyboard(), parse_mode="HTML")
+        await safe_edit_message(callback.message, text, reply_markup=get_back_keyboard("admin:settings:slots"), parse_mode="HTML")
         await safe_answer_callback(callback)
+
+
+@router.message(AdminPanelStates.waiting_for_slots_count)
+async def process_slots_count(message: Message, state: FSMContext, group_service: GroupService) -> None:
+    """Обработка количества слотов без ограничения в 5."""
+    if message.text and message.text.lower() == "отмена":
+        await state.clear()
+        await message.answer("❌ Настройка слотов отменена", parse_mode="HTML")
+        return
+
+    try:
+        slots_count = int((message.text or "").strip())
+        if slots_count < 1 or slots_count > 24:
+            raise ValueError
+    except ValueError:
+        await message.answer("❌ Введите количество слотов числом от 1 до 24.", parse_mode="HTML")
+        return
+
+    data = await state.get_data()
+    group_id = data.get("group_id")
+    group = await group_service.get_group_by_id(group_id)
+    if not group:
+        await state.clear()
+        await message.answer("❌ Группа не найдена.", parse_mode="HTML")
+        return
+
+    group_name = clean_group_name_for_display(group.get("name", "Без названия"))
+    await state.update_data(slots_count=slots_count, current_slot_index=0, slots=[])
+    await state.set_state(AdminPanelStates.waiting_for_slot_start_hour)
+
+    from src.utils.admin_keyboards import get_hours_keyboard
+    await message.answer(
+        f"⚙️ <b>Настройка слотов</b>\n\n"
+        f"Группа: <b>{group_name}</b>\n"
+        f"Количество слотов: <b>{slots_count}</b>\n\n"
+        f"📋 <b>Слот 1 из {slots_count}</b>\n\n"
+        "Выберите час начала слота:",
+        parse_mode="HTML",
+        reply_markup=get_hours_keyboard("admin:slot:start_hour", "admin:settings:slots"),
+    )
 
 
 @router.message(AdminPanelStates.waiting_for_slot_end_time)
@@ -556,18 +596,13 @@ async def process_slot_end_time(message: Message, state: FSMContext, group_servi
     
     await state.update_data(slot_end_time=time_text)
     
-    # Если slot_index есть, значит это редактирование - запрашиваем лимит
+    # Если slot_index есть, значит это редактирование - сохраняем без лимита
     if slot_index is not None:
         await state.set_state(AdminPanelStates.waiting_for_slot_limit)
-        
-        current_limit = data.get("slot_limit", 3)
-        
         await message.answer(
             f"✅ Новое время окончания: <code>{time_text}</code>\n\n"
-            f"Текущий лимит: {current_limit}\n\n"
-            "Введите новый лимит курьеров (число от 1 до 10):\n"
-            "Или отправьте <code>по умолчанию</code> для лимита 3\n"
-            "Или отправьте <code>не менять</code> чтобы оставить текущий лимит\n\n"
+            "Слот будет сохранен без ограничения по количеству курьеров.\n\n"
+            "Отправьте любое сообщение для подтверждения.\n\n"
             "Для отмены введите: <code>отмена</code>",
             parse_mode="HTML"
         )
@@ -578,8 +613,8 @@ async def process_slot_end_time(message: Message, state: FSMContext, group_servi
     
     await message.answer(
         f"✅ Время окончания: <code>{time_text}</code>\n\n"
-        "Введите лимит курьеров для этого слота (число от 1 до 10):\n"
-        "Или отправьте <code>по умолчанию</code> для лимита 3\n\n"
+        "Слот будет сохранен без ограничения по количеству курьеров.\n\n"
+        "Отправьте любое сообщение для подтверждения.\n\n"
         "Для отмены введите: <code>отмена</code>",
         parse_mode="HTML"
     )
@@ -587,7 +622,7 @@ async def process_slot_end_time(message: Message, state: FSMContext, group_servi
 
 @router.message(AdminPanelStates.waiting_for_slot_limit)
 async def process_slot_limit(message: Message, state: FSMContext, group_service: GroupService) -> None:
-    """Обработка ввода лимита курьеров для слота."""
+    """Сохранение слота без лимита."""
     if message.text and message.text.lower() == "отмена":
         data = await state.get_data()
         await state.clear()
@@ -597,33 +632,8 @@ async def process_slot_limit(message: Message, state: FSMContext, group_service:
             await message.answer("❌ Добавление слота отменено", parse_mode="HTML")
         return
     
-    limit_text = message.text.strip() if message.text else ""
     data = await state.get_data()
     slot_index = data.get("slot_index")
-    
-    # Определяем лимит
-    if limit_text.lower() in ["по умолчанию", "default", "3"]:
-        limit = 3
-    elif limit_text.lower() in ["не менять", "оставить", "skip"]:
-        # При редактировании - используем текущий лимит
-        if slot_index is not None:
-            limit = data.get("slot_limit", 3)
-        else:
-            limit = 3
-    else:
-        try:
-            limit = int(limit_text)
-            if limit < 1 or limit > 10:
-                raise ValueError("Лимит должен быть от 1 до 10")
-        except ValueError:
-            await message.answer(
-                "❌ Лимит должен быть числом от 1 до 10.\n"
-                "Или отправьте <code>по умолчанию</code> для лимита 3\n"
-                "Или <code>не менять</code> чтобы оставить текущий (при редактировании)\n\n"
-                "Попробуйте еще раз или введите <code>отмена</code>.",
-                parse_mode="HTML"
-            )
-            return
     
     group_id = data.get("group_id")
     start_time = data.get("slot_start_time")
@@ -650,7 +660,6 @@ async def process_slot_limit(message: Message, state: FSMContext, group_service:
             slots[slot_index] = {
                 "start": start_time,
                 "end": end_time,
-                "limit": limit,
             }
             
             await group_service.update_slots(group_id, slots)
@@ -658,7 +667,7 @@ async def process_slot_limit(message: Message, state: FSMContext, group_service:
             await message.answer(
                 f"✅ Слот успешно обновлен!\n\n"
                 f"Время: <code>{start_time}</code> - <code>{end_time}</code>\n"
-                f"Лимит курьеров: {limit}",
+                f"Без ограничения по количеству",
                 parse_mode="HTML",
                 reply_markup=get_back_keyboard("admin:settings:slots")
             )
@@ -667,7 +676,6 @@ async def process_slot_limit(message: Message, state: FSMContext, group_service:
             new_slot = {
                 "start": start_time,
                 "end": end_time,
-                "limit": limit,
             }
             slots.append(new_slot)
             
@@ -677,7 +685,7 @@ async def process_slot_limit(message: Message, state: FSMContext, group_service:
             await message.answer(
                 f"✅ Слот успешно добавлен!\n\n"
                 f"Время: <code>{start_time}</code> - <code>{end_time}</code>\n"
-                f"Лимит курьеров: {limit}",
+                f"Без ограничения по количеству",
                 parse_mode="HTML",
                 reply_markup=get_back_keyboard("admin:settings:slots")
             )
@@ -825,8 +833,7 @@ async def callback_delete_slot(callback: CallbackQuery, group_service: GroupServ
         
         text = (
             f"✅ Слот успешно удален!\n\n"
-            f"Было: <code>{slot.get('start')}</code> - <code>{slot.get('end')}</code>\n"
-            f"Лимит: {slot.get('limit')}"
+            f"Было: <code>{slot.get('start')}</code> - <code>{slot.get('end')}</code>"
         )
         
         await safe_edit_message(callback.message, text, reply_markup=get_back_keyboard("admin:settings:slots"))
@@ -972,7 +979,7 @@ async def callback_slot_end_hour(callback: CallbackQuery, state: FSMContext) -> 
 
 @router.callback_query(lambda c: c.data and c.data.startswith("admin:slot:end_minute:"))
 @require_admin_callback
-async def callback_slot_end_minute(callback: CallbackQuery, state: FSMContext) -> None:
+async def callback_slot_end_minute(callback: CallbackQuery, state: FSMContext, group_service: GroupService) -> None:
     """Обработка выбора минуты окончания слота."""
     minute = callback.data.split(":")[-1]  # "00" или "30"
     
@@ -982,19 +989,56 @@ async def callback_slot_end_minute(callback: CallbackQuery, state: FSMContext) -
     start_time = data.get("slot_start_time", "00:00")
     
     await state.update_data(slot_end_time=end_time)
-    await state.set_state(AdminPanelStates.waiting_for_slot_courier_limit)
-    
+
     slots_count = data.get("slots_count", 1)
-    current_slot = data.get("current_slot_index", 0) + 1
-    
+    current_slot_index = data.get("current_slot_index", 0)
+    current_slot = current_slot_index + 1
+    slots = data.get("slots", [])
+    slots.append({"start": start_time, "end": end_time})
+    current_slot_index += 1
+
+    if current_slot_index < slots_count:
+        await state.update_data(
+            slots=slots,
+            current_slot_index=current_slot_index,
+            slot_start_time=None,
+            slot_end_time=None,
+        )
+        await state.set_state(AdminPanelStates.waiting_for_slot_start_hour)
+        from src.utils.admin_keyboards import get_hours_keyboard
+        text = (
+            f"✅ <b>Слот {current_slot} настроен!</b>\n\n"
+            f"Время: <b>{start_time}</b> - <b>{end_time}</b>\n\n"
+            f"📋 <b>Слот {current_slot_index + 1} из {slots_count}</b>\n\n"
+            "Выберите час начала слота:"
+        )
+        await safe_edit_message(callback.message, text, reply_markup=get_hours_keyboard("admin:slot:start_hour", "admin:settings:slots"), parse_mode="HTML")
+        await safe_answer_callback(callback)
+        return
+
+    await state.update_data(slots=slots)
+    slots_text = ""
+    for i, slot in enumerate(slots, 1):
+        slots_text += f"{i}. <b>{slot['start']}</b> - <b>{slot['end']}</b>\n"
+
+    group_id = data.get("group_id")
+    group = await group_service.get_group_by_id(group_id)
+    group_name = clean_group_name_for_display(group.get("name", "Без названия")) if group else "Без названия"
     text = (
-        f"📋 <b>Слот {current_slot} из {slots_count}</b>\n\n"
-        f"Время: <b>{start_time}</b> - <b>{end_time}</b>\n\n"
-        "Выберите количество курьеров:"
+        f"✅ <b>Все слоты настроены!</b>\n\n"
+        f"Группа: <b>{group_name}</b>\n\n"
+        f"📋 <b>Настроенные слоты:</b>\n{slots_text}\n"
+        "Подтвердите сохранение настроек:"
     )
-    
-    from src.utils.admin_keyboards import get_courier_limit_keyboard
-    keyboard = get_courier_limit_keyboard(f"admin:slot:end_minute:{minute}")
+
+    from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
+    keyboard = InlineKeyboardMarkup(inline_keyboard=[
+        [
+            InlineKeyboardButton(text="✅ Подтвердить", callback_data="admin:slot:confirm"),
+            InlineKeyboardButton(text="❌ Отмена", callback_data="admin:settings:slots"),
+        ]
+    ])
+
     await safe_edit_message(callback.message, text, reply_markup=keyboard, parse_mode="HTML")
     await safe_answer_callback(callback)
 
@@ -1002,8 +1046,7 @@ async def callback_slot_end_minute(callback: CallbackQuery, state: FSMContext) -
 @router.callback_query(lambda c: c.data and c.data.startswith("admin:slot:limit:"))
 @require_admin_callback
 async def callback_slot_limit(callback: CallbackQuery, state: FSMContext, group_service: GroupService) -> None:
-    """Обработка выбора количества курьеров для слота."""
-    limit = int(callback.data.split(":")[-1])
+    """Совместимость со старым сценарием: сохраняем слот без лимита."""
     
     data = await state.get_data()
     start_time = data.get("slot_start_time", "00:00")
@@ -1016,7 +1059,6 @@ async def callback_slot_limit(callback: CallbackQuery, state: FSMContext, group_
     new_slot = {
         "start": start_time,
         "end": end_time,
-        "limit": limit
     }
     slots.append(new_slot)
     
@@ -1035,13 +1077,13 @@ async def callback_slot_limit(callback: CallbackQuery, state: FSMContext, group_
         text = (
             f"✅ <b>Слот {current_slot_index} настроен!</b>\n\n"
             f"Время: <b>{start_time}</b> - <b>{end_time}</b>\n"
-            f"Курьеров: <b>{limit}</b>\n\n"
+            f"Без ограничения по количеству\n\n"
             f"📋 <b>Слот {current_slot_index + 1} из {slots_count}</b>\n\n"
             "Выберите час начала слота:"
         )
         
         from src.utils.admin_keyboards import get_hours_keyboard
-        keyboard = get_hours_keyboard("admin:slot:start_hour", f"admin:slot:limit:{limit}")
+        keyboard = get_hours_keyboard("admin:slot:start_hour", "admin:settings:slots")
         await safe_edit_message(callback.message, text, reply_markup=keyboard, parse_mode="HTML")
         await safe_answer_callback(callback)
     else:
@@ -1051,7 +1093,7 @@ async def callback_slot_limit(callback: CallbackQuery, state: FSMContext, group_
         # Формируем текст с информацией о всех слотах
         slots_text = ""
         for i, slot in enumerate(slots, 1):
-            slots_text += f"{i}. <b>{slot['start']}</b> - <b>{slot['end']}</b> (лимит: {slot['limit']})\n"
+            slots_text += f"{i}. <b>{slot['start']}</b> - <b>{slot['end']}</b>\n"
         
         group_id = data.get("group_id")
         group = await group_service.get_group_by_id(group_id)
@@ -1105,7 +1147,7 @@ async def callback_slot_confirm(callback: CallbackQuery, state: FSMContext, grou
         # Формируем текст с информацией о сохраненных слотах
         slots_text = ""
         for i, slot in enumerate(slots, 1):
-            slots_text += f"{i}. <b>{slot['start']}</b> - <b>{slot['end']}</b> (лимит: {slot['limit']})\n"
+            slots_text += f"{i}. <b>{slot['start']}</b> - <b>{slot['end']}</b>\n"
         
         text = (
             f"✅ <b>Слоты успешно сохранены!</b>\n\n"

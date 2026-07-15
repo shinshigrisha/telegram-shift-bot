@@ -5,7 +5,7 @@ from functools import wraps
 from typing import Callable, Any
 import logging
 
-from aiogram.types import Message, CallbackQuery, User
+from aiogram.types import Message, CallbackQuery
 from config.settings import settings
 
 logger = logging.getLogger(__name__)
@@ -49,31 +49,6 @@ def require_admin_callback(func: Callable) -> Callable:
             return
         return await func(callback, *args, **kwargs)
     return wrapper
-
-
-def is_curator(user: User) -> bool:
-    """
-    Проверяет, является ли пользователь куратором.
-    
-    Args:
-        user: Объект пользователя Telegram
-        
-    Returns:
-        True если пользователь куратор, False иначе
-    """
-    # Кураторы определяются по username или user_id
-    # Можно расширить логику проверки
-    curator_usernames = getattr(settings, 'CURATOR_USERNAMES', [])
-    curator_ids = getattr(settings, 'CURATOR_IDS', [])
-    
-    if user.username and user.username in curator_usernames:
-        return True
-    
-    if user.id in curator_ids:
-        return True
-    
-    return False
-
 
 def is_admin(user_id: int) -> bool:
     """

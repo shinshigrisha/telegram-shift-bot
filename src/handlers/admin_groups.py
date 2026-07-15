@@ -17,7 +17,6 @@ from src.utils.auth import require_admin_callback
 from src.utils.admin_keyboards import (
     get_groups_menu_keyboard,
     get_groups_list_keyboard,
-    get_topic_type_keyboard,
     get_confirmation_keyboard,
     get_back_keyboard,
 )
@@ -122,68 +121,22 @@ async def process_chat_id(message: Message, state: FSMContext, group_service: Gr
     
     data = await state.get_data()
     group_name = data.get("group_name")
-    
-    await state.update_data(chat_id=chat_id)
-    
-    # Спрашиваем про Topic ID (опционально)
-    await state.set_state(AdminPanelStates.waiting_for_topic_id)
-    
-    await message.answer(
-        f"✅ Chat ID: <code>{chat_id}</code>\n\n"
-        "Если группа форумная, введите Topic ID:\n"
-        "Или отправьте <code>пропустить</code> чтобы настроить позже\n\n"
-        "💡 <b>Как получить Topic ID:</b>\n"
-        "• Откройте нужную тему в форум-группе\n"
-        "• Используйте команду <code>/get_topic_id</code> прямо в теме\n"
-        "• Или скопируйте ссылку на тему (последнее число)\n\n"
-        "Для отмены введите: <code>отмена</code>",
-        parse_mode="HTML"
-    )
-
-
-@router.message(AdminPanelStates.waiting_for_topic_id)
-async def process_topic_id(message: Message, state: FSMContext, group_service: GroupService) -> None:
-    """Обработка Topic ID группы."""
-    if message.text and message.text.lower() == "отмена":
-        await state.clear()
-        await message.answer("❌ Создание группы отменено", parse_mode="HTML")
-        return
-    
-    topic_id = None
-    topic_id_text = message.text.strip() if message.text else ""
-    
-    if topic_id_text.lower() not in ["пропустить", "skip", ""]:
-        try:
-            topic_id = int(topic_id_text)
-        except ValueError:
-            await message.answer(
-                "❌ Topic ID должен быть числом.\n"
-                "Попробуйте еще раз, введите <code>пропустить</code> или <code>отмена</code>.",
-                parse_mode="HTML"
-            )
-            return
-    
-    data = await state.get_data()
-    group_name = data.get("group_name")
-    chat_id = data.get("chat_id")
-    
     try:
-        # Создаем группу
-        logger.info(f"Создание группы: name={group_name}, chat_id={chat_id}, topic_id={topic_id}")
+        logger.info(f"Создание группы: name={group_name}, chat_id={chat_id}")
         group = await group_service.create_group(
             name=group_name,
             telegram_chat_id=chat_id,
-            telegram_topic_id=topic_id,
         )
         logger.info(f"Группа успешно создана: id={group.get('id')}, name={group.get('name')}")
-        
-        topic_info = f"\nTopic ID: {topic_id}" if topic_id else "\n💡 Topic ID можно настроить позже через меню"
-        
         await message.answer(
             f"✅ Группа <b>{group_name}</b> успешно создана!\n\n"
             f"ID: {group['id']}\n"
-            f"Chat ID: {chat_id}{topic_info}\n\n"
-            f"Теперь можно настроить слоты через меню:\n"
+            f"Chat ID: {chat_id}\n\n"
+            f"🌙 Ночная группа: <b>{'Да' if group.get('is_night') else 'Нет'}</b>\n"
+            f"⏰ Закрытие опроса: <b>{str(group.get('poll_close_time', '19:00'))[:5]}</b>\n\n"
+            f"Для новой группы уже подставлены стандартные настройки.\n"
+            f"Дальше бот сам отправит опрос по расписанию и продолжит сценарий автоматически.\n\n"
+            f"Если нужно, слоты можно поменять через:\n"
             f"⚙️ Настройки → ⚙️ Настроить слоты",
             parse_mode="HTML",
             reply_markup=get_back_keyboard("admin:groups_menu")
@@ -299,174 +252,43 @@ async def callback_groups_list_page(callback: CallbackQuery, group_service: Grou
 @router.callback_query(lambda c: c.data == "admin:groups:set_topic")
 @require_admin_callback
 async def callback_set_topic_start(callback: CallbackQuery, state: FSMContext) -> None:
-    """Начать процесс настройки темы."""
-    await state.set_state(AdminPanelStates.waiting_for_topic_type_selection)
-    
+    """Темы отключены."""
+    await state.clear()
     text = (
-        "📌 <b>Установка темы для форум-группы</b>\n\n"
-        "Выберите тип темы:"
+        "ℹ️ <b>Темы отключены</b>\n\n"
+        "Теперь каждая ЗИЗ-группа работает как один общий чат:\n"
+        "опросы, ответы, результаты и рассылка идут без `topic_id`."
     )
-    
-    await safe_edit_message(callback.message, text, reply_markup=get_topic_type_keyboard())
+    await safe_edit_message(callback.message, text, reply_markup=get_back_keyboard("admin:groups_menu"))
     await safe_answer_callback(callback)
 
 
 @router.callback_query(lambda c: c.data and c.data.startswith("admin:topic_type:"))
 @require_admin_callback
 async def callback_select_topic_type(callback: CallbackQuery, state: FSMContext, group_service: GroupService) -> None:
-    """Обработка выбора типа темы."""
-    try:
-        topic_type = callback.data.split(":")[-1]  # poll, arrival, general, important
-        
-        topic_names = {
-            "poll": "Отметки на слот",
-            "arrival": "Приход/уход",
-            "general": "Общий чат",
-            "important": "Важная информация",
-        }
-        
-        topic_name = topic_names.get(topic_type, "тема")
-        
-        await state.update_data(topic_type=topic_type, topic_name=topic_name)
-        await state.set_state(AdminPanelStates.waiting_for_group_selection_for_topic)
-        
-        # Получаем список групп
-        groups = await group_service.get_all_groups()
-        logger.info(f"Получено групп для установки темы '{topic_name}': {len(groups) if groups else 0}")
-        
-        if not groups:
-            await safe_edit_message(
-                callback.message,
-                "❌ Нет зарегистрированных групп.\nСначала создайте группу.",
-                reply_markup=get_back_keyboard("admin:groups_menu"),
-                parse_mode="HTML"
-            )
-            await safe_answer_callback(callback)
-            return
-        
-        text = (
-            f"📌 <b>Установка темы: {topic_name}</b>\n\n"
-            "Выберите группу:"
-        )
-        
-        # Создаем клавиатуру с модифицированными callback_data
-        from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
-        keyboard_buttons = []
-        for group in groups:
-            group_name = clean_group_name_for_display(group.get("name", f"Группа {group.get('id', '?')}"))
-            if len(group_name) > 30:
-                group_name = group_name[:27] + "..."
-            keyboard_buttons.append([
-                InlineKeyboardButton(
-                    text=group_name,
-                    callback_data=f"admin:topic_group:{topic_type}:{group['id']}"
-                )
-            ])
-        keyboard_buttons.append([InlineKeyboardButton(text="◀️ Назад", callback_data="admin:groups:set_topic")])
-        keyboard = InlineKeyboardMarkup(inline_keyboard=keyboard_buttons)
-        
-        await safe_edit_message(callback.message, text, reply_markup=keyboard, parse_mode="HTML")
-        await safe_answer_callback(callback)
-    except Exception as e:
-        logger.error(f"Ошибка при получении списка групп для установки темы: {e}", exc_info=True)
-        await safe_edit_message(
-            callback.message,
-            f"❌ Ошибка при получении списка групп: {e}",
-            reply_markup=get_back_keyboard("admin:groups_menu"),
-            parse_mode="HTML"
-        )
-        await safe_answer_callback(callback)
+    """Темы отключены."""
+    await state.clear()
+    await safe_edit_message(
+        callback.message,
+        "ℹ️ Темы больше не используются.",
+        reply_markup=get_back_keyboard("admin:groups_menu"),
+        parse_mode="HTML",
+    )
+    await safe_answer_callback(callback)
 
 
 @router.callback_query(lambda c: c.data and c.data.startswith("admin:topic_group:"))
 @require_admin_callback
 async def callback_select_group_for_topic(callback: CallbackQuery, state: FSMContext) -> None:
-    """Обработка выбора группы для настройки темы."""
-    parts = callback.data.split(":")
-    topic_type = parts[2]
-    group_id = int(parts[3])
-    
-    await state.update_data(group_id=group_id)
-    await state.set_state(AdminPanelStates.waiting_for_topic_id_input)
-    
-    data = await state.get_data()
-    topic_name = data.get("topic_name", "тема")
-    
-    text = (
-        f"📌 <b>Установка темы: {topic_name}</b>\n\n"
-        "Введите Topic ID:\n"
-        "Или отправьте <code>авто</code> чтобы использовать Topic ID из контекста\n\n"
-        "💡 <b>Как получить Topic ID:</b>\n"
-        "• Откройте нужную тему в форум-группе\n"
-        "• Используйте команду <code>/get_topic_id</code> прямо в теме\n"
-        "• Или скопируйте ссылку на тему (последнее число)\n\n"
-        "Для отмены введите: <code>отмена</code>"
+    """Темы отключены."""
+    await state.clear()
+    await safe_edit_message(
+        callback.message,
+        "ℹ️ Темы больше не используются.",
+        reply_markup=get_back_keyboard("admin:groups_menu"),
+        parse_mode="HTML",
     )
-    
-    await safe_edit_message(callback.message, text, reply_markup=get_back_keyboard("admin:groups:set_topic"))
     await safe_answer_callback(callback)
-
-
-@router.message(AdminPanelStates.waiting_for_topic_id_input)
-async def process_topic_id_input(message: Message, state: FSMContext, group_service: GroupService) -> None:
-    """Обработка ввода Topic ID для темы."""
-    if message.text and message.text.lower() == "отмена":
-        await state.clear()
-        await message.answer("❌ Настройка темы отменена", parse_mode="HTML")
-        return
-    
-    # Проверяем, есть ли Topic ID в контексте сообщения (если команда /get_topic_id была использована)
-    topic_id = None
-    topic_id_text = message.text.strip() if message.text else ""
-    
-    if topic_id_text.lower() == "авто":
-        # Пытаемся получить из контекста (если сообщение в теме)
-        if message.is_topic_message and message.message_thread_id:
-            topic_id = message.message_thread_id
-        else:
-            await message.answer(
-                "❌ Не удалось автоматически определить Topic ID.\n"
-                "Введите Topic ID вручную или используйте команду <code>/get_topic_id</code> в теме.",
-                parse_mode="HTML"
-            )
-            return
-    else:
-        try:
-            topic_id = int(topic_id_text)
-        except ValueError:
-            await message.answer(
-                "❌ Topic ID должен быть числом.\n"
-                "Попробуйте еще раз, введите <code>авто</code> или <code>отмена</code>.",
-                parse_mode="HTML"
-            )
-            return
-    
-    data = await state.get_data()
-    group_id = data.get("group_id")
-    topic_type = data.get("topic_type")
-    topic_name = data.get("topic_name", "тема")
-    
-    try:
-        # Устанавливаем Topic ID
-        success = await group_service.set_topic_id(group_id, topic_type, topic_id)
-        
-        if success:
-            await message.answer(
-                f"✅ Topic ID для темы '{topic_name}' успешно установлен: <code>{topic_id}</code>\n\n"
-                f"Теперь опросы будут создаваться в указанной теме.",
-                parse_mode="HTML",
-                reply_markup=get_back_keyboard("admin:groups_menu")
-            )
-        else:
-            await message.answer("❌ Ошибка при установке Topic ID. Группа не найдена.", parse_mode="HTML")
-        
-        await state.clear()
-        
-    except ValueError as e:
-        await message.answer(f"❌ Ошибка: {e}", parse_mode="HTML")
-    except Exception as e:
-        logger.error("Ошибка при установке Topic ID: %s", e, exc_info=True)
-        await message.answer(f"❌ Ошибка при установке Topic ID: {e}", parse_mode="HTML")
 
 
 @router.callback_query(lambda c: c.data == "admin:groups:rename")
@@ -487,7 +309,7 @@ async def callback_rename_group_start(callback: CallbackQuery, state: FSMContext
             await safe_answer_callback(callback)
             return
         
-        await state.set_state(AdminPanelStates.waiting_for_group_selection_for_topic)  # Переиспользуем состояние
+        await state.set_state(AdminPanelStates.waiting_for_group_selection)
         await state.update_data(action="rename_group")
         
         text = (
@@ -679,7 +501,7 @@ async def callback_delete_group_start(callback: CallbackQuery, state: FSMContext
             await safe_answer_callback(callback)
             return
         
-        await state.set_state(AdminPanelStates.waiting_for_group_selection_for_topic)  # Переиспользуем состояние
+        await state.set_state(AdminPanelStates.waiting_for_group_selection)
         await state.update_data(action="delete_group")
         
         text = (

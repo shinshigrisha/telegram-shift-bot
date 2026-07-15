@@ -16,7 +16,7 @@ from src.repositories.poll_repository import PollRepository
 from src.repositories.group_repository import GroupRepository
 from src.states.setup_states import SetupStates
 from src.states.admin_panel_states import AdminPanelStates
-from src.utils.auth import require_admin, is_curator
+from src.utils.auth import require_admin
 
 
 logger = logging.getLogger(__name__)
@@ -33,7 +33,7 @@ async def cmd_start(
 ) -> None:
     """Команда /start - проверка верификации и запрос данных."""
     from src.handlers.user_handlers import get_user_commands  # type: ignore
-    from src.utils.admin_keyboards import get_admin_panel_keyboard
+    from src.utils.admin_keyboards import get_admin_panel_keyboard, get_admin_entry_keyboard
     from src.states.verification_states import VerificationStates
     
     user = message.from_user
@@ -45,15 +45,15 @@ async def cmd_start(
         text = (
             "👑 <b>Админ-панель</b>\n\n"
             "Выберите раздел для управления ботом:\n\n"
-            "📋 <b>Управление группами</b> — создание, настройка, темы\n"
+            "📋 <b>Управление группами</b> — создание и настройка ЗИЗ-групп\n"
             "⚙️ <b>Настройки</b> — расписание, параметры\n"
             "📊 <b>Опросы</b> — создание, управление, результаты\n"
-            "🤖 <b>AI куратор</b> — управление базой знаний, FAQ, сообщения\n"
             "📢 <b>Рассылка</b> — отправка сообщений в группы\n"
             "📈 <b>Мониторинг</b> — статистика, логи, статус"
         )
         try:
             await message.answer(text, reply_markup=get_admin_panel_keyboard())
+            await message.answer("Кнопка входа в админку закреплена снизу.", reply_markup=get_admin_entry_keyboard())
         except TelegramNetworkError as e:
             # Обрабатываем сетевые ошибки - временные проблемы с подключением
             logger.warning("Network error while sending admin panel to user %s: %s", user_id, e)
@@ -63,7 +63,7 @@ async def cmd_start(
                     "👑 <b>Админ-панель</b>\n\n"
                     "⚠️ Произошла временная ошибка сети.\n"
                     "Попробуйте команду /admin еще раз через несколько секунд."
-                )
+                , reply_markup=get_admin_entry_keyboard())
             except Exception:
                 logger.error("Failed to send error message to user %s", user_id)
         except TelegramAPIError as e:
@@ -74,27 +74,23 @@ async def cmd_start(
                     "👑 <b>Админ-панель</b>\n\n"
                     "❌ Произошла ошибка при отправке сообщения.\n"
                     "Попробуйте команду /admin еще раз."
-                )
+                , reply_markup=get_admin_entry_keyboard())
             except Exception:
                 logger.error("Failed to send error message to user %s", user_id)
         except Exception as e:  # noqa: BLE001
             logger.error("Unexpected error sending admin panel to user %s: %s", user_id, e, exc_info=True)
         return
     
-    # Проверяем, является ли пользователь куратором
-    user_is_curator = is_curator(user)
-    
-    # Проверяем верификацию (только если включена и пользователь не куратор)
+    # Проверяем верификацию
     logger.info(
-        "User %s called /start. ENABLE_VERIFICATION=%s, is_curator=%s, has_user_service=%s, has_state=%s",
+        "User %s called /start. ENABLE_VERIFICATION=%s, has_user_service=%s, has_state=%s",
         user_id,
         settings.ENABLE_VERIFICATION,
-        user_is_curator,
         user_service is not None,
         state is not None
     )
     
-    if settings.ENABLE_VERIFICATION and not user_is_curator and user_service and state:
+    if settings.ENABLE_VERIFICATION and user_service and state:
         is_verified = await user_service.is_verified(user_id)
         
         # Проверяем параметр команды /start (например, /start verify)
@@ -165,7 +161,7 @@ async def cmd_start(
     welcome_text += (
         "⏰ <b>Автоматический рабочий цикл:</b>\n"
         "• <b>09:00</b> - Создание опросов на следующий день\n"
-        "• <b>18:00</b> - Напоминание о закрытии записи\n"
+        "• <b>17:00</b> - Напоминание тем, кто не отметился\n"
         "• <b>19:00</b> - Автоматическое закрытие опросов\n\n"
     )
     
@@ -238,7 +234,7 @@ async def cmd_setup_ziz(
         current_slots_text = (
             "\n📋 <b>Текущие настройки слотов:</b>\n" +
             "\n".join(
-                f"• {s['start']}-{s['end']} (лимит: {s['limit']})"
+                f"• {s['start']}-{s['end']}"
                 for s in current_slots
             ) + "\n\n"
         )
@@ -252,11 +248,11 @@ async def cmd_setup_ziz(
         f"💡 <b>Важно:</b> Каждая группа имеет свои индивидуальные настройки слотов.\n"
         f"Настройки для <b>{group_name}</b> не влияют на другие группы.\n\n"
         "Введите слоты в формате:\n"
-        "<code>время_начала-время_конца:лимит</code>\n\n"
+        "<code>время_начала-время_конца</code>\n\n"
         "<b>Примеры:</b>\n"
-        "<code>07:30-19:30:3</code>\n"
-        "<code>08:00-20:00:2</code>\n"
-        "<code>10:00-22:00:1</code>\n\n"
+        "<code>07:30-19:30</code>\n"
+        "<code>08:00-20:00</code>\n"
+        "<code>10:00-22:00</code>\n\n"
         "Можно вводить несколько слотов сразу (каждый с новой строки).\n"
         "Когда закончите, отправьте: <b>готово</b>"
     )
@@ -295,9 +291,8 @@ async def cmd_add_group(
     if not command.args:
         await message.answer(
             "❌ Не указаны параметры группы\n"
-            "Использование: /add_group название chat_id [topic_id]\n"
-            "Пример: /add_group ЗИЗ-1 -1001234567890 123\n"
-            "topic_id - опционально, ID темы для форум-групп"
+            "Использование: /add_group название chat_id\n"
+            "Пример: /add_group ЗИЗ-1 -1001234567890"
         )
         return
 
@@ -305,7 +300,7 @@ async def cmd_add_group(
     if len(args) < 2:
         await message.answer(
             "❌ Недостаточно параметров\n"
-            "Использование: /add_group название chat_id [topic_id]"
+            "Использование: /add_group название chat_id"
         )
         return
 
@@ -316,23 +311,6 @@ async def cmd_add_group(
         await message.answer("❌ Chat ID должен быть числом")
         return
     
-    # Опциональный topic_id (можно указать явно или определить из контекста)
-    topic_id = None
-    auto_topic_id = message.message_thread_id if message.is_topic_message else None
-    
-    if len(args) >= 3:
-        try:
-            topic_id = int(args[2])
-        except ValueError:
-            await message.answer("❌ Topic ID должен быть числом")
-            return
-    elif auto_topic_id:
-        # Автоматически определяем topic_id из контекста, если команда в теме
-        topic_id = auto_topic_id
-        await message.answer(
-            f"📌 Topic ID автоматически определен из контекста: <b>{topic_id}</b>"
-        )
-
     # Проверяем, существует ли группа по имени или chat_id
     existing_by_name = await group_service.get_group_by_name(group_name)
     existing_by_chat = await group_service.get_group_by_chat_id(chat_id)
@@ -356,15 +334,16 @@ async def cmd_add_group(
         group = await group_service.create_group(
             name=group_name,
             telegram_chat_id=chat_id,
-            telegram_topic_id=topic_id,
-            is_night=False,
+            is_night=None,
         )
-        topic_info = f"\nTopic ID: {topic_id}" if topic_id else ""
         await message.answer(
             f"✅ Группа <b>{group_name}</b> успешно создана!\n"
             f"ID: {group['id']}\n"
-            f"Chat ID: {chat_id}{topic_info}\n\n"
-            f"Теперь можно настроить слоты командой:\n"
+            f"Chat ID: {chat_id}\n"
+            f"🌙 Ночная: {'Да' if group.get('is_night') else 'Нет'}\n\n"
+            f"Для новой группы уже подставлены стандартные настройки.\n"
+            f"Бот будет отправлять опросы по таймеру автоматически.\n\n"
+            f"При необходимости изменить слоты:\n"
             f"/setup_ziz {group_name}"
         )
     except Exception as e:
@@ -443,85 +422,11 @@ async def cmd_set_topic(
     group_service: GroupService,
     state: Optional[FSMContext] = None,
 ) -> None:
-    """Установить topic_id для группы."""
-    # Если команда выполнена в теме форум-группы, можно автоматически определить topic_id
-    auto_topic_id = message.message_thread_id if message.is_topic_message else None
-    
-    if not command.args:
-        if auto_topic_id:
-            await message.answer(
-                f"📌 Текущий Topic ID из контекста: <b>{auto_topic_id}</b>\n\n"
-                "Чтобы установить его для группы, используйте:\n"
-                "/set_topic название_группы\n"
-                "или\n"
-                "/set_topic название_группы topic_id"
-            )
-        else:
-            await message.answer(
-                "❌ Не указаны параметры\n"
-                "Использование: /set_topic название_группы [topic_id]\n"
-                "Пример: /set_topic ЗИЗ-1 123\n\n"
-                "💡 Если выполнить команду в теме форум-группы,\n"
-                "topic_id определится автоматически."
-            )
-        return
-    
-    args = command.args.strip().split()
-    if len(args) < 1:
-        await message.answer(
-            "❌ Не указано название группы\n"
-            "Использование: /set_topic название_группы [topic_id]"
-        )
-        return
-    
-    group_name = args[0]
-    
-    # Если topic_id не указан, используем из контекста или запрашиваем
-    if len(args) >= 2:
-        try:
-            topic_id = int(args[1])
-        except ValueError:
-            await message.answer("❌ Topic ID должен быть числом")
-            return
-    elif auto_topic_id:
-        topic_id = auto_topic_id
-        await message.answer(
-            f"📌 Используется Topic ID из контекста: <b>{topic_id}</b>"
-        )
-    else:
-        await message.answer(
-            "❌ Topic ID не указан и не может быть определен из контекста\n"
-            "Укажите его явно: /set_topic название_группы topic_id"
-        )
-        return
-    
-    group = await group_service.get_group_by_name(group_name)
-    if not group:
-        await message.answer(f"❌ Группа {group_name} не найдена")
-        return
-    
-    # Обновляем topic_id
-    try:
-        success = await group_service.set_topic_id(group['id'], "poll", topic_id)
-        if success:
-            # Проверяем, что группа соответствует chat_id из сообщения
-            if message.chat.id != group['telegram_chat_id']:
-                await message.answer(
-                    f"⚠️ Внимание: команда выполнена в чате {message.chat.id},\n"
-                    f"а группа настроена на чат {group['telegram_chat_id']}.\n\n"
-                    f"✅ Topic ID для группы <b>{group_name}</b> установлен: {topic_id}\n\n"
-                    f"Теперь опросы будут создаваться в указанной теме."
-                )
-            else:
-                await message.answer(
-                    f"✅ Topic ID для группы <b>{group_name}</b> установлен: {topic_id}\n\n"
-                    f"Теперь опросы будут создаваться в указанной теме."
-                )
-        else:
-            await message.answer("❌ Ошибка при установке Topic ID")
-    except Exception as e:
-        logger.error("Error setting topic: %s", e, exc_info=True)
-        await message.answer(f"❌ Ошибка при установке topic ID: {e}")
+    """Темы отключены."""
+    await message.answer(
+        "ℹ️ Темы внутри групп отключены.\n"
+        "Теперь у каждой ЗИЗ-группы один общий чат без topic/thread."
+    )
 
 
 @router.message(Command("set_arrival_topic"))
@@ -532,9 +437,10 @@ async def cmd_set_arrival_topic(
     group_service: GroupService,
     state: Optional[FSMContext] = None,
 ) -> None:
-    """Установить topic_id для темы 'приход/уход'."""
-    await _set_topic_for_field(
-        message, command, group_service, "arrival_departure_topic_id", "приход/уход"
+    """Темы отключены."""
+    await message.answer(
+        "ℹ️ Отдельные темы отключены.\n"
+        "Приход, рассылка, опросы и результаты работают в одном чате группы."
     )
 
 
@@ -546,9 +452,10 @@ async def cmd_set_general_topic(
     group_service: GroupService,
     state: Optional[FSMContext] = None,
 ) -> None:
-    """Установить topic_id для темы 'общий чат'."""
-    await _set_topic_for_field(
-        message, command, group_service, "general_chat_topic_id", "общий чат"
+    """Темы отключены."""
+    await message.answer(
+        "ℹ️ Отдельные темы отключены.\n"
+        "Приход, рассылка, опросы и результаты работают в одном чате группы."
     )
 
 
@@ -560,9 +467,10 @@ async def cmd_set_important_topic(
     group_service: GroupService,
     state: Optional[FSMContext] = None,
 ) -> None:
-    """Установить topic_id для темы 'важная информация'."""
-    await _set_topic_for_field(
-        message, command, group_service, "important_info_topic_id", "важная информация"
+    """Темы отключены."""
+    await message.answer(
+        "ℹ️ Отдельные темы отключены.\n"
+        "Приход, рассылка, опросы и результаты работают в одном чате группы."
     )
 
 
@@ -573,93 +481,11 @@ async def _set_topic_for_field(
     field_name: str,
     topic_display_name: str,
 ) -> None:
-    """Вспомогательная функция для установки topic_id в разные поля."""
-    auto_topic_id = message.message_thread_id if message.is_topic_message else None
-    
-    if not command.args:
-        if auto_topic_id:
-            await message.answer(
-                f"📌 Текущий Topic ID из контекста: <b>{auto_topic_id}</b>\n\n"
-                f"Чтобы установить его для темы '{topic_display_name}', используйте:\n"
-                f"/set_{field_name.split('_')[0]}_topic название_группы\n"
-                "или\n"
-                f"/set_{field_name.split('_')[0]}_topic название_группы topic_id"
-            )
-        else:
-            await message.answer(
-                f"❌ Не указаны параметры\n"
-                f"Использование: /set_{field_name.split('_')[0]}_topic название_группы [topic_id]\n"
-                f"Пример: /set_{field_name.split('_')[0]}_topic ЗИЗ-1 123\n\n"
-                "💡 Если выполнить команду в теме форум-группы,\n"
-                "topic_id определится автоматически."
-            )
-        return
-    
-    args = command.args.strip().split()
-    if len(args) < 1:
-        await message.answer(
-            f"❌ Не указано название группы\n"
-            f"Использование: /set_{field_name.split('_')[0]}_topic название_группы [topic_id]"
-        )
-        return
-    
-    group_name = args[0]
-    
-    if len(args) >= 2:
-        try:
-            topic_id = int(args[1])
-        except ValueError:
-            await message.answer("❌ Topic ID должен быть числом")
-            return
-    elif auto_topic_id:
-        topic_id = auto_topic_id
-        await message.answer(
-            f"📌 Используется Topic ID из контекста: <b>{topic_id}</b>"
-        )
-    else:
-        await message.answer(
-            "❌ Topic ID не указан и не может быть определен из контекста\n"
-            "Укажите его явно"
-        )
-        return
-    
-    group = await group_service.get_group_by_name(group_name)
-    if not group:
-        await message.answer(f"❌ Группа {group_name} не найдена")
-        return
-    
-    # Определяем тип темы по field_name
-    topic_type_map = {
-        "arrival_departure_topic_id": "arrival",
-        "general_chat_topic_id": "general",
-        "important_info_topic_id": "important",
-    }
-    topic_type = topic_type_map.get(field_name)
-    
-    if topic_type:
-        try:
-            success = await group_service.set_topic_id(group['id'], topic_type, topic_id)
-            if success:
-                await message.answer(
-                    f"✅ Topic ID для темы '{topic_display_name}' группы <b>{group_name}</b> установлен: {topic_id}"
-                )
-            else:
-                await message.answer("❌ Ошибка при установке Topic ID")
-        except Exception as e:
-            logger.error("Error setting topic: %s", e, exc_info=True)
-            await message.answer(f"❌ Ошибка при установке topic ID: {e}")
-    else:
-        # Обрабатываем случай, когда field_name не найден в topic_type_map
-        logger.error(
-            "Неизвестный field_name в _set_topic_for_field: %s. "
-            "Доступные поля: %s",
-            field_name,
-            ", ".join(topic_type_map.keys())
-        )
-        await message.answer(
-            f"❌ Внутренняя ошибка: неизвестный тип поля '{field_name}'\n"
-            f"Пожалуйста, сообщите администратору об этой ошибке."
-        )
+    """Совместимость со старым API команд."""
+    await message.answer(
+        "ℹ️ Темы отключены.\n"
+        "Дополнительная настройка `topic_id` больше не используется."
+    )
 
 
 @router.message(Command("get_topic_id"))
@@ -668,71 +494,8 @@ async def cmd_get_topic_id(
     message: Message,
     state: Optional[FSMContext] = None,
 ) -> None:
-    """Показать текущий topic_id из контекста сообщения."""
-    topic_id = message.message_thread_id if message.is_topic_message else None
-    
-    if topic_id:
-        # Проверяем, находимся ли мы в процессе установки темы через админ-панель
-        if state:
-            current_state = await state.get_state()
-            if current_state == AdminPanelStates.waiting_for_topic_id_input:
-                # Сохраняем topic_id в состояние
-                await state.update_data(topic_id=topic_id)
-                
-                # Получаем данные о типе темы
-                data = await state.get_data()
-                topic_type = data.get("topic_type")
-                topic_name = data.get("topic_name", "тема")
-                
-                if topic_type:
-                    # Показываем кнопку для продолжения
-                    from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
-                    keyboard = InlineKeyboardMarkup(inline_keyboard=[
-                        [
-                            InlineKeyboardButton(
-                                text="✅ Продолжить установку темы",
-                                callback_data=f"admin:select_group_topic_{topic_type}_continue",
-                            ),
-                        ],
-                        [
-                            InlineKeyboardButton(
-                                text="❌ Отмена",
-                                callback_data="admin:back_to_main",
-                            ),
-                        ],
-                    ])
-                    
-                    await message.answer(
-                        f"📌 <b>Topic ID определен:</b> {topic_id}\n\n"
-                        f"Тип темы: <b>{topic_name}</b>\n\n"
-                        "Нажмите кнопку ниже, чтобы продолжить установку темы.",
-                        reply_markup=keyboard,
-                    )
-                    return
-        
-        # Обычный ответ с topic_id
-        await message.answer(
-            f"📌 <b>Topic ID из контекста:</b> {topic_id}\n\n"
-            f"💬 Chat ID: {message.chat.id}\n"
-            f"📝 Message ID: {message.message_id}\n\n"
-            f"Чтобы установить этот topic_id для группы:\n"
-            f"/set_topic название_группы {topic_id}\n\n"
-            "💡 Или используйте админ-панель: /admin\n\n"
-            "💡 <b>Для установки через админ-панель:</b>\n"
-            "1. Откройте админ-панель: /admin\n"
-            "2. Выберите 'Установить тему'\n"
-            "3. Выберите тип темы\n"
-            "4. Если topic_id не определился автоматически, используйте 'Ввести вручную'\n"
-            "5. Введите этот Topic ID: <code>{topic_id}</code>".format(topic_id=topic_id)
-        )
-    else:
-        await message.answer(
-            "❌ Topic ID не найден в контексте сообщения.\n\n"
-            "💡 Чтобы узнать topic_id:\n"
-            "1. Выполните команду <b>/get_topic_id</b> в нужной теме форум-группы\n"
-            "2. Или перешлите сообщение из темы боту @RawDataBot\n"
-            "3. Или укажите topic_id вручную при создании/настройке группы\n\n"
-            "💡 Используйте админ-панель: /admin"
-        )
-
-
+    """Темы отключены."""
+    await message.answer(
+        "ℹ️ `topic_id` больше не нужен.\n"
+        "Бот работает в обычных группах без внутренних тем."
+    )

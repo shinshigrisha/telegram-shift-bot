@@ -1,19 +1,56 @@
 """
 Обработчики событий Telegram опросов (poll_answer).
-
-Отслеживает голоса пользователей в опросах и сохраняет их в БД.
 """
 import logging
 from typing import Optional, Dict, Any
+import json
 
 from aiogram import Router, Bot
 from aiogram.types import PollAnswer
 
+from src.repositories.group_member_repository import GroupMemberRepository
+from src.repositories.group_repository import GroupRepository
 from src.repositories.poll_repository import PollRepository
-from src.repositories.user_repository import UserRepository
+from src.services.group_member_service import GroupMemberService
+from src.utils.db_pool import get_db_pool
 
 logger = logging.getLogger(__name__)
 router = Router()
+
+
+def _normalize_results(results: Optional[Dict[str, Any]]) -> Dict[str, Any]:
+    if isinstance(results, str):
+        try:
+            results = json.loads(results)
+        except (json.JSONDecodeError, TypeError):
+            results = None
+    if isinstance(results, dict):
+        results.setdefault("slots", {})
+        results.setdefault("curator", [])
+        results.setdefault("day_off", [])
+        results.setdefault("night_out", [])
+        results.setdefault("not_going", [])
+        return results
+    return {"slots": {}, "curator": [], "day_off": [], "night_out": [], "not_going": []}
+
+
+def _member_payload(member: Dict[str, Any], user_id: int, fallback_name: str) -> Dict[str, Any]:
+    return {
+        "member_id": member.get("id"),
+        "user_id": user_id,
+        "name": member.get("full_name") or fallback_name,
+    }
+
+
+def _clear_previous_vote(results: Dict[str, Any], user_id: int) -> None:
+    for slot_voters in results["slots"].values():
+        if isinstance(slot_voters, list):
+            slot_voters[:] = [item for item in slot_voters if item.get("user_id") != user_id]
+
+    for key in ("curator", "day_off", "night_out", "not_going"):
+        bucket = results.get(key)
+        if isinstance(bucket, list):
+            results[key] = [item for item in bucket if item.get("user_id") != user_id]
 
 
 @router.poll_answer()
@@ -36,32 +73,85 @@ async def handle_poll_answer(
         poll_id,
         option_ids
     )
-    
-    # PollRepository должен быть доступен через middleware в data
-    # Но для poll_answer события middleware может не сработать
-    # Пока просто логируем, сохранение в БД будет реализовано позже
-    logger.debug("Получен голос в опросе, сохранение в БД будет реализовано")
-    
+
     try:
-        # Ищем опрос по telegram_poll_id
-        # TODO: Добавить метод get_by_telegram_poll_id в PollRepository
-        
-        # Формируем имя пользователя
         full_name = user.full_name or f"User_{user.id}"
         username = f"@{user.username}" if user.username else None
-        
-        # Логируем для отладки
-        logger.info(
-            "Пользователь %s (%s) проголосовал в опросе %s: варианты %s",
-            full_name,
-            username or user.id,
-            poll_id,
-            option_ids
+
+        pool = await get_db_pool()
+        poll_repo = PollRepository(pool)
+        group_repo = GroupRepository(pool)
+        member_service = GroupMemberService(pool)
+        member_repo = GroupMemberRepository(pool)
+
+        poll = await poll_repo.get_by_telegram_poll_id(poll_id)
+        if not poll:
+            logger.warning("Опрос с telegram_poll_id=%s не найден", poll_id)
+            return
+
+        group = await group_repo.get_by_id(poll["group_id"])
+        if not group:
+            logger.warning("Группа для опроса %s не найдена", poll.get("id"))
+            return
+
+        member = await member_service.resolve_member_for_vote(
+            group_id=group["id"],
+            telegram_user_id=user.id,
+            full_name=full_name,
+            username=username,
         )
-        
-        # TODO: Сохранить голос в таблицу user_votes
-        # Для этого нужно найти соответствие telegram_poll_id -> poll_id в нашей БД
-        
+
+        member_data = _member_payload(member, user.id, full_name)
+        slots = (group.get("settings") or {}).get("slots", [])
+
+        async with pool.acquire() as conn:
+            async with conn.transaction():
+                locked_row = await conn.fetchrow(
+                    "SELECT * FROM daily_polls WHERE id = $1 FOR UPDATE",
+                    poll["id"],
+                )
+                locked_poll = dict(locked_row) if locked_row else {}
+                results = _normalize_results(locked_poll.get("results"))
+
+                _clear_previous_vote(results, user.id)
+
+                if option_ids:
+                    selected_option = option_ids[0]
+                    if group.get("is_night", False):
+                        if selected_option == 0:
+                            results["night_out"].append(member_data)
+                        elif selected_option == 1:
+                            results["not_going"].append(member_data)
+                        elif selected_option == 2:
+                            results["curator"].append(member_data)
+                        else:
+                            results["day_off"].append(member_data)
+                    elif selected_option < len(slots):
+                        slot_key = f"slot_{selected_option}"
+                        current = results["slots"].setdefault(slot_key, [])
+                        current.append(member_data)
+                    elif selected_option == len(slots):
+                        results["curator"].append(member_data)
+                    else:
+                        results["day_off"].append(member_data)
+
+                await conn.execute(
+                    """
+                    UPDATE daily_polls
+                    SET results = $1::jsonb
+                    WHERE id = $2
+                    """,
+                    json.dumps(results),
+                    poll["id"],
+                )
+
+        persisted_member = await member_repo.get_by_group_and_telegram_id(group["id"], user.id)
+        logger.info(
+            "Голос сохранен: group=%s, member=%s, options=%s",
+            group.get("name"),
+            persisted_member.get("full_name") if persisted_member else full_name,
+            option_ids,
+        )
     except Exception as e:
         logger.error("Ошибка обработки голоса: %s", e, exc_info=True)
 

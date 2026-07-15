@@ -12,37 +12,21 @@ from aiogram.types import Message, CallbackQuery
 from src.states.admin_panel_states import AdminPanelStates
 from src.services.group_service import GroupService
 from src.utils.auth import require_admin_callback
-from src.utils.admin_keyboards import (
-    get_broadcast_topic_keyboard,
-    get_back_keyboard,
-)
+from src.utils.admin_keyboards import get_back_keyboard
 from src.utils.telegram_helpers import safe_edit_message, safe_answer_callback
-from src.utils.group_formatters import clean_group_name_for_display
 
 logger = logging.getLogger(__name__)
 router = Router()
 
 
-@router.callback_query(lambda c: c.data and c.data.startswith("admin:broadcast:topic:"))
+@router.callback_query(lambda c: c.data == "admin:broadcast:create")
 @require_admin_callback
-async def callback_broadcast_select_topic(callback: CallbackQuery, state: FSMContext) -> None:
-    """Обработка выбора темы для рассылки."""
-    topic_type = callback.data.split(":")[-1]  # poll, arrival, general, important
-    
-    topic_names = {
-        "poll": "Отметки на слот",
-        "arrival": "Приход/уход",
-        "general": "Общий чат",
-        "important": "Важная информация",
-    }
-    
-    topic_name = topic_names.get(topic_type, "тема")
-    
-    await state.update_data(broadcast_topic_type=topic_type, broadcast_topic_name=topic_name)
+async def callback_broadcast_start(callback: CallbackQuery, state: FSMContext) -> None:
+    """Старт рассылки без тем."""
     await state.set_state(AdminPanelStates.waiting_for_broadcast_message)
     
     text = (
-        f"📢 <b>Рассылка в тему: {topic_name}</b>\n\n"
+        "📢 <b>Рассылка по активным группам</b>\n\n"
         "Введите текст сообщения или отправьте фото с подписью.\n\n"
         "Можно использовать HTML-разметку для форматирования.\n\n"
         "Для отмены отправьте: <b>отмена</b>"
@@ -60,15 +44,6 @@ async def process_broadcast_message(
     group_service: GroupService,
 ) -> None:
     """Обработка ввода сообщения для рассылки."""
-    data = await state.get_data()
-    topic_type = data.get("broadcast_topic_type")
-    topic_name = data.get("broadcast_topic_name", "тема")
-    
-    if not topic_type:
-        await message.answer("❌ Ошибка: тип темы не выбран. Начните заново.", parse_mode="HTML")
-        await state.clear()
-        return
-    
     # Проверка на отмену
     if message.text and message.text.lower() in ["отмена", "cancel"]:
         await state.clear()
@@ -80,20 +55,6 @@ async def process_broadcast_message(
     
     if not groups:
         await message.answer("❌ Нет активных групп для рассылки", parse_mode="HTML")
-        await state.clear()
-        return
-    
-    # Маппинг типов тем на поля в группе
-    topic_field_map = {
-        "poll": "telegram_topic_id",
-        "arrival": "arrival_departure_topic_id",
-        "general": "general_chat_topic_id",
-        "important": "important_info_topic_id",
-    }
-    
-    topic_field = topic_field_map.get(topic_type)
-    if not topic_field:
-        await message.answer(f"❌ Неизвестный тип темы: {topic_type}", parse_mode="HTML")
         await state.clear()
         return
     
@@ -117,16 +78,6 @@ async def process_broadcast_message(
     for group in groups:
         try:
             chat_id = group.get("telegram_chat_id")
-            topic_id = group.get(topic_field)
-            
-            if not topic_id:
-                skipped_count += 1
-                logger.info(
-                    "Группа %s пропущена: тема '%s' не настроена",
-                    group.get("name"),
-                    topic_name
-                )
-                continue
             
             # Отправляем сообщение
             if has_photo:
@@ -136,7 +87,6 @@ async def process_broadcast_message(
                     chat_id=chat_id,
                     photo=photo.file_id,
                     caption=text_content,
-                    message_thread_id=topic_id,
                     parse_mode="HTML",
                 )
             else:
@@ -144,16 +94,11 @@ async def process_broadcast_message(
                 await bot.send_message(
                     chat_id=chat_id,
                     text=text_content,
-                    message_thread_id=topic_id,
                     parse_mode="HTML",
                 )
             
             sent_count += 1
-            logger.info(
-                "Сообщение отправлено в группу %s (тема: %s)",
-                group.get("name"),
-                topic_name
-            )
+            logger.info("Сообщение отправлено в группу %s", group.get("name"))
             
         except TelegramAPIError as e:
             error_msg = f"Группа {group.get('name')}: {str(e)}"
@@ -167,9 +112,8 @@ async def process_broadcast_message(
     # Формируем отчет
     report_text = (
         f"✅ <b>Рассылка завершена</b>\n\n"
-        f"Тема: <b>{topic_name}</b>\n\n"
         f"✅ Отправлено: <b>{sent_count}</b>\n"
-        f"⏭️ Пропущено (нет темы): <b>{skipped_count}</b>\n"
+        f"⏭️ Пропущено: <b>{skipped_count}</b>\n"
     )
     
     if errors:

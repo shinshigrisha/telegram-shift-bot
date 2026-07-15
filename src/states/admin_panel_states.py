@@ -10,14 +10,9 @@ class AdminPanelStates(StatesGroup):
     # Управление группами
     waiting_for_group_name = State()  # Ожидание названия группы
     waiting_for_chat_id = State()  # Ожидание Chat ID
-    waiting_for_topic_id = State()  # Ожидание Topic ID
-    waiting_for_topic_id_input = State()  # Ожидание ввода Topic ID вручную
     waiting_for_new_group_name = State()  # Ожидание нового названия группы для переименования
     waiting_for_delete_confirmation = State()  # Ожидание подтверждения удаления
-    
-    # Настройка тем
-    waiting_for_topic_type_selection = State()  # Выбор типа темы
-    waiting_for_group_selection_for_topic = State()  # Выбор группы для настройки темы
+    waiting_for_group_selection = State()  # Выбор группы для действия
     
     # Настройки - расписание
     waiting_for_schedule_type = State()  # Выбор типа расписания (создание/закрытие)
@@ -43,20 +38,15 @@ class AdminPanelStates(StatesGroup):
     waiting_for_slot_courier_limit = State()  # Ввод количества курьеров для слота
     
     # Рассылка
-    waiting_for_broadcast_topic = State()  # Выбор темы для рассылки
     waiting_for_broadcast_message = State()  # Ожидание текста или фото для рассылки
+    
+    # Сотрудники групп
+    waiting_for_employee_name = State()  # Ввод ФИО сотрудника
+    waiting_for_employee_group = State()  # Выбор группы для сотрудника
+    waiting_for_employee_rename = State()  # Новое ФИО сотрудника
+    waiting_for_employee_transfer_group = State()  # Выбор новой группы для сотрудника
     
     # Верификация пользователей
     waiting_for_user_name = State()  # Ожидание ввода имени и фамилии для верификации
     waiting_for_user_rename = State()  # Ожидание нового имени и фамилии для переименования
     
-    # AI куратор
-    waiting_for_faq_question = State()  # Ожидание вопроса для FAQ
-    waiting_for_faq_answer = State()  # Ожидание ответа для FAQ
-    waiting_for_faq_category = State()  # Ожидание категории для FAQ (опционально)
-    waiting_for_faq_tag = State()  # Ожидание тега для FAQ (опционально)
-    waiting_for_search_query = State()  # Ожидание поискового запроса
-    waiting_for_info_topic = State()  # Ожидание темы для информационного сообщения
-    waiting_for_warning_description = State()  # Ожидание описания нарушения для замечания
-    waiting_for_warning_user_id = State()  # Ожидание user_id для замечания
-    waiting_for_clear_history_user_id = State()  # Ожидание user_id для очистки истории

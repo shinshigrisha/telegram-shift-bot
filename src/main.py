@@ -6,6 +6,10 @@ import logging
 import sys
 from pathlib import Path
 
+PROJECT_ROOT = Path(__file__).resolve().parent.parent
+if str(PROJECT_ROOT) not in sys.path:
+    sys.path.insert(0, str(PROJECT_ROOT))
+
 from aiogram import Bot, Dispatcher
 from aiogram.client.default import DefaultBotProperties
 from aiogram.enums import ParseMode
@@ -17,16 +21,15 @@ from src.middlewares.auth_middleware import AdminMiddleware
 from src.middlewares.database_middleware import DatabaseMiddleware
 from src.middlewares.verification_middleware import VerificationMiddleware
 from src.handlers import admin
-from src.handlers import admin_curator
 from src.handlers import admin_panel_navigation
 from src.handlers import admin_groups
 from src.handlers import admin_settings
 from src.handlers import admin_polls
 from src.handlers import admin_broadcast
+from src.handlers import admin_employees
 from src.handlers import admin_monitoring
 from src.handlers import admin_scheduler
 from src.handlers import poll_handlers
-from src.handlers import courier_ai
 from src.handlers import user_handlers
 from src.utils.db_pool import get_db_pool, close_db_pool
 from src.services.scheduler_service import SchedulerService
@@ -38,7 +41,7 @@ from src.repositories.group_repository import GroupRepository
 
 # Создаём директорию для логов перед настройкой логирования
 # Используем абсолютный путь для надежности
-logs_dir = Path(__file__).parent.parent / "logs"
+logs_dir = PROJECT_ROOT / "logs"
 logs_dir.mkdir(parents=True, exist_ok=True)
 
 # Настройка логирования
@@ -64,16 +67,29 @@ async def main() -> None:
         sys.exit(1)
     
     # Инициализируем Redis для FSM storage
-    try:
-        redis = Redis.from_url(
-            settings.REDIS_URL,
-            decode_responses=True
+    redis = None
+    redis_errors = []
+    for redis_url in settings.REDIS_URL_CANDIDATES:
+        try:
+            redis = Redis.from_url(
+                redis_url,
+                decode_responses=True
+            )
+            await redis.ping()
+            logger.info("Подключение к Redis установлено: %s", redis_url)
+            break
+        except Exception as e:
+            redis_errors.append(f"{redis_url} -> {e}")
+            logger.warning("Ошибка подключения к Redis по %s: %s", redis_url, e)
+            if redis is not None:
+                await redis.aclose()
+                redis = None
+
+    if redis is None:
+        logger.error(
+            "Ошибка подключения к Redis. Проверены варианты:\n- %s",
+            "\n- ".join(redis_errors),
         )
-        # Проверяем подключение
-        await redis.ping()
-        logger.info("Подключение к Redis установлено")
-    except Exception as e:
-        logger.error("Ошибка подключения к Redis: %s", e, exc_info=True)
         sys.exit(1)
     
     # Создаём storage для FSM
@@ -111,11 +127,10 @@ async def main() -> None:
     dp.include_router(admin_settings.router)
     dp.include_router(admin_polls.router)
     dp.include_router(admin_broadcast.router)
+    dp.include_router(admin_employees.router)
     dp.include_router(admin_monitoring.router)
     dp.include_router(admin_scheduler.router)
     dp.include_router(poll_handlers.router)
-    dp.include_router(admin_curator.router)
-    dp.include_router(courier_ai.router)
     dp.include_router(user_handlers.router)
     
     logger.info("Роутеры зарегистрированы")
@@ -169,7 +184,7 @@ async def main() -> None:
         
         # Закрываем соединения
         await close_db_pool()
-        await redis.close()
+        await redis.aclose()
         await bot.session.close()
         logger.info("Бот остановлен")
 

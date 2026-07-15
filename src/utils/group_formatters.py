@@ -65,13 +65,9 @@ def format_group_info(group: Dict[str, Any]) -> str:
         # Обрезаем до формата ЧЧ:ММ если есть секунды
         poll_close_time = poll_close_time[:5]
     
-    # Форматируем topic_id если есть
-    topic_id = group.get("telegram_topic_id")
-    topic_info = f" | Topic: {topic_id}" if topic_id else ""
-    
     text = (
         f"{status} {night} <b>{name}</b>\n"
-        f"   ID: {group_id} | Chat: {chat_id}{topic_info}\n"
+        f"   ID: {group_id} | Chat: {chat_id}\n"
         f"   Слотов: {slots_count} | Закрытие: {poll_close_time}"
     )
     
@@ -111,11 +107,9 @@ def format_slot_info(slot: Dict[str, Any], slot_index: Optional[int] = None) -> 
     """
     start = slot.get("start", "?")
     end = slot.get("end", "?")
-    limit = slot.get("limit", 3)
-    
     index_prefix = f"{slot_index + 1}. " if slot_index is not None else ""
     
-    return f"{index_prefix}{start}-{end} (лимит: {limit})"
+    return f"{index_prefix}{start}-{end}"
 
 
 def format_slots_list(slots: List[Dict[str, Any]]) -> str:

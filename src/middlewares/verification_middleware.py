@@ -8,7 +8,6 @@ from aiogram.enums import ChatType
 from config.settings import settings
 from src.services.user_service import UserService
 from src.states.verification_states import VerificationStates
-from src.utils.auth import is_curator
 
 logger = logging.getLogger(__name__)
 
@@ -30,10 +29,6 @@ class VerificationMiddleware(BaseMiddleware):
         if not isinstance(event, Message):
             return await handler(event, data)
         
-        # Пропускаем кураторов без верификации
-        if event.from_user and is_curator(event.from_user):
-            return await handler(event, data)
-
         # Пропускаем команды без проверки (для верификации и админ-панели)
         if event.text and event.text.startswith("/"):
             command = event.text.split()[0] if event.text else ""
@@ -161,4 +156,3 @@ class VerificationMiddleware(BaseMiddleware):
                 return
 
         return await handler(event, data)
-

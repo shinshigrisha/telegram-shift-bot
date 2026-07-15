@@ -11,6 +11,22 @@ import json
 logger = logging.getLogger(__name__)
 
 
+def _normalize_poll_dict(poll_dict: Dict[str, Any]) -> Dict[str, Any]:
+    """
+    Нормализует словарь опроса, обрабатывая JSONB поля.
+    """
+    if "results" in poll_dict:
+        results = poll_dict["results"]
+        if isinstance(results, str):
+            try:
+                poll_dict["results"] = json.loads(results)
+            except (json.JSONDecodeError, TypeError):
+                poll_dict["results"] = {}
+        elif results is None:
+            poll_dict["results"] = {}
+    return poll_dict
+
+
 class PollRepository:
     """
     Репозиторий для работы с опросами в PostgreSQL.
@@ -33,7 +49,6 @@ class PollRepository:
         poll_date: date,
         telegram_poll_id: Optional[str] = None,
         telegram_message_id: Optional[int] = None,
-        telegram_topic_id: Optional[int] = None,
         status: str = "active",
         results: Optional[Dict[str, Any]] = None,
     ) -> Dict[str, Any]:
@@ -45,7 +60,6 @@ class PollRepository:
             poll_date: Дата опроса
             telegram_poll_id: ID опроса в Telegram (опционально)
             telegram_message_id: ID сообщения с опросом (опционально)
-            telegram_topic_id: Topic ID для форум-групп (опционально)
             status: Статус опроса (по умолчанию "active")
             results: Результаты опроса в формате JSON (опционально)
             
@@ -56,9 +70,9 @@ class PollRepository:
             query = """
                 INSERT INTO daily_polls (
                     group_id, poll_date, telegram_poll_id, telegram_message_id,
-                    telegram_topic_id, status, results
+                    status, results
                 )
-                VALUES ($1, $2, $3, $4, $5, $6, $7::jsonb)
+                VALUES ($1, $2, $3, $4, $5, $6::jsonb)
                 RETURNING *
             """
             row = await conn.fetchrow(
@@ -67,13 +81,12 @@ class PollRepository:
                 poll_date,
                 telegram_poll_id,
                 telegram_message_id,
-                telegram_topic_id,
                 status,
                 json.dumps(results) if results else None,
             )
             
             logger.info("Создан опрос: id=%s, group_id=%d, date=%s", row['id'], group_id, poll_date)
-            return dict(row)
+            return _normalize_poll_dict(dict(row))
     
     async def get_by_id(self, poll_id: str) -> Optional[Dict[str, Any]]:
         """
@@ -90,7 +103,7 @@ class PollRepository:
                 "SELECT * FROM daily_polls WHERE id = $1",
                 poll_id
             )
-            return dict(row) if row else None
+            return _normalize_poll_dict(dict(row)) if row else None
     
     async def get_by_group_and_date(
         self,
@@ -109,11 +122,58 @@ class PollRepository:
         """
         async with self.pool.acquire() as conn:
             row = await conn.fetchrow(
-                "SELECT * FROM daily_polls WHERE group_id = $1 AND poll_date = $2",
+                """
+                SELECT * FROM daily_polls
+                WHERE group_id = $1 AND poll_date = $2
+                ORDER BY
+                    CASE WHEN status = 'active' THEN 0 ELSE 1 END,
+                    created_at DESC,
+                    id DESC
+                LIMIT 1
+                """,
                 group_id,
                 poll_date
             )
-            return dict(row) if row else None
+            return _normalize_poll_dict(dict(row)) if row else None
+
+    async def get_latest_by_group(self, group_id: int) -> Optional[Dict[str, Any]]:
+        """Получить последний опрос группы независимо от даты и статуса."""
+        async with self.pool.acquire() as conn:
+            row = await conn.fetchrow(
+                """
+                SELECT * FROM daily_polls
+                WHERE group_id = $1
+                ORDER BY created_at DESC, poll_date DESC
+                LIMIT 1
+                """,
+                group_id,
+            )
+            return _normalize_poll_dict(dict(row)) if row else None
+
+    async def get_latest_active_by_group(self, group_id: int) -> Optional[Dict[str, Any]]:
+        """Получить последний активный опрос группы независимо от даты."""
+        async with self.pool.acquire() as conn:
+            row = await conn.fetchrow(
+                """
+                SELECT * FROM daily_polls
+                WHERE group_id = $1 AND status = 'active'
+                ORDER BY created_at DESC, poll_date DESC
+                LIMIT 1
+                """,
+                group_id,
+            )
+            return _normalize_poll_dict(dict(row)) if row else None
+
+    async def get_by_telegram_poll_id(self, telegram_poll_id: str) -> Optional[Dict[str, Any]]:
+        """
+        Получить опрос по Telegram poll id.
+        """
+        async with self.pool.acquire() as conn:
+            row = await conn.fetchrow(
+                "SELECT * FROM daily_polls WHERE telegram_poll_id = $1",
+                telegram_poll_id,
+            )
+            return _normalize_poll_dict(dict(row)) if row else None
     
     async def get_active_polls(self, group_id: Optional[int] = None) -> List[Dict[str, Any]]:
         """
@@ -135,7 +195,7 @@ class PollRepository:
                 rows = await conn.fetch(
                     "SELECT * FROM daily_polls WHERE status = 'active' ORDER BY poll_date, group_id"
                 )
-            return [dict(row) for row in rows]
+            return [_normalize_poll_dict(dict(row)) for row in rows]
     
     async def get_by_date_range(
         self,
@@ -176,7 +236,7 @@ class PollRepository:
                     start_date,
                     end_date
                 )
-            return [dict(row) for row in rows]
+            return [_normalize_poll_dict(dict(row)) for row in rows]
     
     async def update(
         self,
@@ -267,6 +327,24 @@ class PollRepository:
             closed_at = datetime.utcnow()
         
         return await self.update(poll_id, status="closed", closed_at=closed_at)
+
+    async def delete(self, poll_id: str) -> bool:
+        """Удалить опрос из БД."""
+        async with self.pool.acquire() as conn:
+            result = await conn.execute(
+                "DELETE FROM daily_polls WHERE id = $1",
+                poll_id,
+            )
+            return result == "DELETE 1"
+
+    async def delete_all_by_group(self, group_id: int) -> int:
+        """Удалить все опросы группы из БД."""
+        async with self.pool.acquire() as conn:
+            result = await conn.execute(
+                "DELETE FROM daily_polls WHERE group_id = $1",
+                group_id,
+            )
+            return int(result.split()[-1])
     
     async def get_statistics(
         self,

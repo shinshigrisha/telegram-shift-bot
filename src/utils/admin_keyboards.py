@@ -2,7 +2,21 @@
 Клавиатуры для админ-панели.
 """
 from typing import List, Dict, Any, Optional
-from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
+from aiogram.types import (
+    InlineKeyboardMarkup,
+    InlineKeyboardButton,
+    ReplyKeyboardMarkup,
+    KeyboardButton,
+)
+
+
+def get_admin_entry_keyboard() -> ReplyKeyboardMarkup:
+    """Постоянная кнопка входа в админ-панель."""
+    return ReplyKeyboardMarkup(
+        keyboard=[[KeyboardButton(text="👑 Админ-панель")]],
+        resize_keyboard=True,
+        is_persistent=True,
+    )
 
 
 def get_admin_panel_keyboard() -> InlineKeyboardMarkup:
@@ -11,7 +25,6 @@ def get_admin_panel_keyboard() -> InlineKeyboardMarkup:
         [InlineKeyboardButton(text="📋 Управление группами", callback_data="admin:groups_menu")],
         [InlineKeyboardButton(text="⚙️ Настройки", callback_data="admin:settings_menu")],
         [InlineKeyboardButton(text="📊 Опросы", callback_data="admin:polls_menu")],
-        [InlineKeyboardButton(text="🤖 AI куратор", callback_data="admin:curator_menu")],
         [InlineKeyboardButton(text="📢 Рассылка", callback_data="admin:broadcast_menu")],
         [InlineKeyboardButton(text="📈 Мониторинг", callback_data="admin:monitoring_menu")],
     ]
@@ -23,7 +36,7 @@ def get_groups_menu_keyboard() -> InlineKeyboardMarkup:
     keyboard = [
         [InlineKeyboardButton(text="➕ Создать группу", callback_data="admin:groups:create")],
         [InlineKeyboardButton(text="📋 Список групп", callback_data="admin:groups:list")],
-        [InlineKeyboardButton(text="📌 Установить тему", callback_data="admin:groups:set_topic")],
+        [InlineKeyboardButton(text="👥 Сотрудники", callback_data="admin:employees_menu")],
         [InlineKeyboardButton(text="✏️ Переименовать группу", callback_data="admin:groups:rename")],
         [InlineKeyboardButton(text="🗑️ Удалить группу", callback_data="admin:groups:delete")],
         [InlineKeyboardButton(text="◀️ Назад", callback_data="admin:back_to_main")],
@@ -44,7 +57,13 @@ def get_settings_menu_keyboard() -> InlineKeyboardMarkup:
 def get_polls_menu_keyboard() -> InlineKeyboardMarkup:
     """Меню управления опросами."""
     keyboard = [
-        [InlineKeyboardButton(text="📝 Создать опросы", callback_data="admin:polls:create")],
+        [InlineKeyboardButton(text="📝 Создать опросы всем", callback_data="admin:polls:create")],
+        [InlineKeyboardButton(text="📨 Отправить тестовый опрос", callback_data="admin:polls:create_one")],
+        [InlineKeyboardButton(text="🔔 Тест напоминания 17:00", callback_data="admin:polls:test_reminder")],
+        [InlineKeyboardButton(text="📊 Результаты тестового опроса", callback_data="admin:polls:test_results")],
+        [InlineKeyboardButton(text="🔒 Закрыть тестовый опрос", callback_data="admin:polls:test_close")],
+        [InlineKeyboardButton(text="🗑️ Удалить тестовый опрос", callback_data="admin:polls:test_delete")],
+        [InlineKeyboardButton(text="🧹 Удалить все тестовые опросы", callback_data="admin:polls:test_delete_all")],
         [InlineKeyboardButton(text="🔄 Пересоздать опросы", callback_data="admin:polls:recreate")],
         [InlineKeyboardButton(text="📊 Результаты опросов", callback_data="admin:polls:results")],
         [InlineKeyboardButton(text="🔒 Закрыть опрос", callback_data="admin:polls:close")],
@@ -67,13 +86,10 @@ def get_monitoring_menu_keyboard() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(inline_keyboard=keyboard)
 
 
-def get_broadcast_topic_keyboard() -> InlineKeyboardMarkup:
-    """Клавиатура для выбора темы для рассылки."""
+def get_broadcast_keyboard() -> InlineKeyboardMarkup:
+    """Клавиатура для запуска рассылки."""
     keyboard = [
-        [InlineKeyboardButton(text="📊 Отметки на слот", callback_data="admin:broadcast:topic:poll")],
-        [InlineKeyboardButton(text="🚪 Приход/уход", callback_data="admin:broadcast:topic:arrival")],
-        [InlineKeyboardButton(text="💬 Общий чат", callback_data="admin:broadcast:topic:general")],
-        [InlineKeyboardButton(text="📢 Важная информация", callback_data="admin:broadcast:topic:important")],
+        [InlineKeyboardButton(text="✉️ Новая рассылка", callback_data="admin:broadcast:create")],
         [InlineKeyboardButton(text="◀️ Назад", callback_data="admin:back_to_main")],
     ]
     return InlineKeyboardMarkup(inline_keyboard=keyboard)
@@ -165,13 +181,24 @@ def get_users_list_keyboard(
     return InlineKeyboardMarkup(inline_keyboard=keyboard)
 
 
-def get_topic_type_keyboard() -> InlineKeyboardMarkup:
-    """Клавиатура для выбора типа темы."""
+def get_employee_menu_keyboard() -> InlineKeyboardMarkup:
+    """Меню сотрудников группы."""
     keyboard = [
-        [InlineKeyboardButton(text="📊 Отметки на слот", callback_data="admin:topic_type:poll")],
-        [InlineKeyboardButton(text="🚪 Приход/уход", callback_data="admin:topic_type:arrival")],
-        [InlineKeyboardButton(text="💬 Общий чат", callback_data="admin:topic_type:general")],
-        [InlineKeyboardButton(text="📢 Важная информация", callback_data="admin:topic_type:important")],
+        [InlineKeyboardButton(text="➕ Добавить сотрудника", callback_data="admin:employees:add")],
+        [InlineKeyboardButton(text="📋 Список сотрудников", callback_data="admin:employees:list")],
+        [InlineKeyboardButton(text="✏️ Переименовать сотрудника", callback_data="admin:employees:rename")],
+        [InlineKeyboardButton(text="🔄 Перенести в другую группу", callback_data="admin:employees:move")],
+        [InlineKeyboardButton(text="🔗 Статус привязки Telegram", callback_data="admin:employees:bindings")],
+        [InlineKeyboardButton(text="🗑️ Удалить сотрудника", callback_data="admin:employees:delete")],
+        [InlineKeyboardButton(text="◀️ Назад", callback_data="admin:groups_menu")],
+    ]
+    return InlineKeyboardMarkup(inline_keyboard=keyboard)
+
+
+def get_topic_type_keyboard() -> InlineKeyboardMarkup:
+    """Устаревшая клавиатура тем."""
+    keyboard = [
+        [InlineKeyboardButton(text="Темы отключены", callback_data="admin:groups_menu")],
         [InlineKeyboardButton(text="◀️ Назад", callback_data="admin:groups_menu")],
     ]
     return InlineKeyboardMarkup(inline_keyboard=keyboard)
@@ -275,9 +302,9 @@ def get_slot_action_keyboard() -> InlineKeyboardMarkup:
 
 
 def get_slots_count_keyboard() -> InlineKeyboardMarkup:
-    """Клавиатура для выбора количества слотов (1-5)."""
+    """Клавиатура для выбора количества слотов."""
     keyboard = []
-    for i in range(1, 6):
+    for i in range(1, 11):
         keyboard.append([
             InlineKeyboardButton(text=str(i), callback_data=f"admin:slot:count:{i}")
         ])
@@ -350,8 +377,7 @@ def get_slots_list_keyboard(
     for i, slot in enumerate(slots):
         start = slot.get("start", "?")
         end = slot.get("end", "?")
-        limit = slot.get("limit", 3)
-        slot_text = f"{i+1}. {start}-{end} (лимит: {limit})"
+        slot_text = f"{i+1}. {start}-{end}"
         
         callback_data = f"admin:slot:{action}:{group_id}:{i}"
         keyboard.append([
@@ -379,20 +405,6 @@ def get_confirmation_keyboard(confirm_callback: str, cancel_callback: str) -> In
             InlineKeyboardButton(text="✅ Подтвердить", callback_data=confirm_callback),
             InlineKeyboardButton(text="❌ Отмена", callback_data=cancel_callback),
         ]
-    ]
-    return InlineKeyboardMarkup(inline_keyboard=keyboard)
-
-
-def get_curator_menu_keyboard() -> InlineKeyboardMarkup:
-    """Меню AI куратора."""
-    keyboard = [
-        [InlineKeyboardButton(text="➕ Добавить FAQ", callback_data="admin:curator:add_faq")],
-        [InlineKeyboardButton(text="🔍 Поиск FAQ", callback_data="admin:curator:search_faq")],
-        [InlineKeyboardButton(text="📢 Создать информационное сообщение", callback_data="admin:curator:create_info")],
-        [InlineKeyboardButton(text="⚠️ Создать замечание", callback_data="admin:curator:create_warning")],
-        [InlineKeyboardButton(text="🗑️ Очистить историю", callback_data="admin:curator:clear_history")],
-        [InlineKeyboardButton(text="📊 Статистика AI", callback_data="admin:curator:stats")],
-        [InlineKeyboardButton(text="◀️ Назад", callback_data="admin:back_to_main")],
     ]
     return InlineKeyboardMarkup(inline_keyboard=keyboard)
 

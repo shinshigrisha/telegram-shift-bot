@@ -2,12 +2,22 @@
 Репозиторий для работы с группами в PostgreSQL.
 """
 import logging
+from datetime import time
 from typing import List, Optional, Dict, Any
 import asyncpg
 from asyncpg import Pool, Connection
 import json
 
 logger = logging.getLogger(__name__)
+
+
+def _normalize_time_value(value: Optional[str | time]) -> Optional[time]:
+    """
+    Преобразовать строку HH:MM[:SS] в datetime.time для asyncpg.
+    """
+    if value is None or isinstance(value, time):
+        return value
+    return time.fromisoformat(value)
 
 
 def _normalize_group_dict(group_dict: Dict[str, Any]) -> Dict[str, Any]:
@@ -52,7 +62,6 @@ class GroupRepository:
         self,
         name: str,
         telegram_chat_id: int,
-        telegram_topic_id: Optional[int] = None,
         is_night: bool = False,
         poll_close_time: str = "19:00:00",
         settings: Optional[Dict[str, Any]] = None,
@@ -64,7 +73,6 @@ class GroupRepository:
         Args:
             name: Название группы
             telegram_chat_id: Chat ID группы в Telegram
-            telegram_topic_id: Topic ID для форум-групп (опционально)
             is_night: Является ли группа ночной
             poll_close_time: Время закрытия опросов (формат: HH:MM:SS)
             settings: Настройки группы в формате JSON (опционально)
@@ -74,24 +82,23 @@ class GroupRepository:
             Словарь с данными созданной группы
         """
         if settings is None:
-            settings = {"slots": [], "max_users_per_slot": 3}
+            settings = {"slots": []}
         
         async with self.pool.acquire() as conn:
             query = """
                 INSERT INTO groups (
-                    name, telegram_chat_id, telegram_topic_id, is_night,
+                    name, telegram_chat_id, is_night,
                     poll_close_time, settings, is_active
                 )
-                VALUES ($1, $2, $3, $4, $5, $6::jsonb, $7)
+                VALUES ($1, $2, $3, $4, $5::jsonb, $6)
                 RETURNING *
             """
             row = await conn.fetchrow(
                 query,
                 name,
                 telegram_chat_id,
-                telegram_topic_id,
                 is_night,
-                poll_close_time,
+                _normalize_time_value(poll_close_time),
                 json.dumps(settings),
                 is_active,
             )
@@ -177,10 +184,6 @@ class GroupRepository:
         group_id: int,
         name: Optional[str] = None,
         telegram_chat_id: Optional[int] = None,
-        telegram_topic_id: Optional[int] = None,
-        arrival_departure_topic_id: Optional[int] = None,
-        general_chat_topic_id: Optional[int] = None,
-        important_info_topic_id: Optional[int] = None,
         is_night: Optional[bool] = None,
         poll_close_time: Optional[str] = None,
         settings: Optional[Dict[str, Any]] = None,
@@ -193,10 +196,6 @@ class GroupRepository:
             group_id: ID группы для обновления
             name: Новое название (опционально)
             telegram_chat_id: Новый Chat ID (опционально)
-            telegram_topic_id: Новый Topic ID (опционально)
-            arrival_departure_topic_id: Topic ID для приход/уход (опционально)
-            general_chat_topic_id: Topic ID для общего чата (опционально)
-            important_info_topic_id: Topic ID для важной информации (опционально)
             is_night: Является ли группа ночной (опционально)
             poll_close_time: Время закрытия опросов (опционально)
             settings: Новые настройки (опционально)
@@ -219,26 +218,6 @@ class GroupRepository:
             params.append(telegram_chat_id)
             param_num += 1
         
-        if telegram_topic_id is not None:
-            updates.append(f"telegram_topic_id = ${param_num}")
-            params.append(telegram_topic_id)
-            param_num += 1
-        
-        if arrival_departure_topic_id is not None:
-            updates.append(f"arrival_departure_topic_id = ${param_num}")
-            params.append(arrival_departure_topic_id)
-            param_num += 1
-        
-        if general_chat_topic_id is not None:
-            updates.append(f"general_chat_topic_id = ${param_num}")
-            params.append(general_chat_topic_id)
-            param_num += 1
-        
-        if important_info_topic_id is not None:
-            updates.append(f"important_info_topic_id = ${param_num}")
-            params.append(important_info_topic_id)
-            param_num += 1
-        
         if is_night is not None:
             updates.append(f"is_night = ${param_num}")
             params.append(is_night)
@@ -246,7 +225,7 @@ class GroupRepository:
         
         if poll_close_time is not None:
             updates.append(f"poll_close_time = ${param_num}")
-            params.append(poll_close_time)
+            params.append(_normalize_time_value(poll_close_time))
             param_num += 1
         
         if settings is not None:

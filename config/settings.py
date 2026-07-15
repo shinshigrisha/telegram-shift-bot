@@ -4,6 +4,7 @@
 """
 import os
 from typing import List, Optional
+from urllib.parse import urlparse, urlunparse
 from dotenv import load_dotenv
 
 # Загружаем переменные окружения из .env
@@ -63,6 +64,34 @@ def _build_redis_url() -> str:
         return f"redis://{host}:{port}/{db}"
 
 
+def _build_url_candidates(url: str, docker_hostnames: set[str]) -> List[str]:
+    """
+    Вернуть список кандидатов URL для запуска из Docker и с хоста.
+    """
+    if not url:
+        return []
+
+    candidates = [url]
+    parsed = urlparse(url)
+    if parsed.hostname in docker_hostnames:
+        auth_part = ""
+        if parsed.username is not None:
+            auth_part = parsed.username
+            if parsed.password:
+                auth_part += f":{parsed.password}"
+            auth_part += "@"
+        elif parsed.password:
+            auth_part = f":{parsed.password}@"
+
+        port_part = f":{parsed.port}" if parsed.port else ""
+        localhost_netloc = f"{auth_part}localhost{port_part}"
+        localhost_url = urlunparse(parsed._replace(netloc=localhost_netloc))
+        if localhost_url not in candidates:
+            candidates.append(localhost_url)
+
+    return candidates
+
+
 class Settings:
     """Класс с настройками приложения."""
     
@@ -81,6 +110,7 @@ class Settings:
     DB_PORT: str = os.getenv("DB_PORT", "5432")
     DB_NAME: str = os.getenv("DB_NAME", "shift_bot")
     DATABASE_URL: str = _build_database_url()
+    DATABASE_URL_CANDIDATES: List[str] = _build_url_candidates(DATABASE_URL, {"postgres"})
     
     # Redis (компоненты для удобства доступа)
     REDIS_PASSWORD: str = os.getenv("REDIS_PASSWORD", "")
@@ -88,9 +118,7 @@ class Settings:
     REDIS_PORT: str = os.getenv("REDIS_PORT", "6379")
     REDIS_DB: str = os.getenv("REDIS_DB", "0")
     REDIS_URL: str = _build_redis_url()
-    
-    # AI-куратор
-    GROQ_API_KEY: str = os.getenv("GROQ_API_KEY", "")
+    REDIS_URL_CANDIDATES: List[str] = _build_url_candidates(REDIS_URL, {"redis"})
     
     # Настройки
     TZ: str = os.getenv("TZ", "Europe/Moscow")
@@ -111,7 +139,7 @@ class Settings:
     POLL_CLOSING_MINUTE: int = int(os.getenv("POLL_CLOSING_MINUTE", "0"))
     REMINDER_HOURS: List[int] = [
         int(h.strip())
-        for h in os.getenv("REMINDER_HOURS", "[18]").strip("[]").split(",")
+        for h in os.getenv("REMINDER_HOURS", "[17]").strip("[]").split(",")
         if h.strip().isdigit()
     ]
     

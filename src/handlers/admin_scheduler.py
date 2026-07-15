@@ -108,7 +108,7 @@ async def cmd_manual_close(
         /manual_close ЗИЗ-1 - закрыть опрос только для ЗИЗ-1
         /manual_close 2024-01-15 - закрыть опросы на указанную дату
     """
-    scheduler_service: Optional[SchedulerService] = main_module.scheduler_service
+    scheduler_service: Optional[SchedulerService] = get_scheduler_service()
     
     if not scheduler_service:
         await message.answer("❌ Планировщик не инициализирован")
@@ -439,7 +439,7 @@ async def cmd_scheduler_status(message: Message, bot: Bot) -> None:
     """
     Показать статус планировщика.
     """
-    scheduler_service: Optional[SchedulerService] = main_module.scheduler_service
+    scheduler_service: Optional[SchedulerService] = get_scheduler_service()
     
     if not scheduler_service:
         await message.answer("❌ Планировщик не инициализирован")

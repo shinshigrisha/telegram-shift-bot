@@ -10,6 +10,17 @@ from src.repositories.group_repository import GroupRepository
 logger = logging.getLogger(__name__)
 
 
+DEFAULT_DAY_SLOTS: List[Dict[str, str]] = [
+    {"start": "07:00", "end": "19:00"},
+    {"start": "08:00", "end": "20:00"},
+    {"start": "09:00", "end": "21:00"},
+    {"start": "10:00", "end": "22:00"},
+    {"start": "12:00", "end": "00:00"},
+]
+
+NIGHT_GROUP_MARKERS = ("ноч", "night")
+
+
 class GroupService:
     """
     Сервис для работы с группами.
@@ -31,9 +42,8 @@ class GroupService:
         self,
         name: str,
         telegram_chat_id: int,
-        telegram_topic_id: Optional[int] = None,
-        is_night: bool = False,
-        poll_close_time: str = "19:00:00",
+        is_night: Optional[bool] = None,
+        poll_close_time: Optional[str] = None,
         settings: Optional[Dict[str, Any]] = None,
     ) -> Dict[str, Any]:
         """
@@ -42,7 +52,6 @@ class GroupService:
         Args:
             name: Название группы
             telegram_chat_id: Chat ID группы в Telegram
-            telegram_topic_id: Topic ID для форум-групп (опционально)
             is_night: Является ли группа ночной
             poll_close_time: Время закрытия опросов
             settings: Настройки группы (опционально)
@@ -63,11 +72,19 @@ class GroupService:
         if existing_by_chat:
             raise ValueError(f"Группа с Chat ID '{telegram_chat_id}' уже существует")
         
+        if is_night is None:
+            is_night = self._detect_is_night_group(name)
+
+        if poll_close_time is None:
+            poll_close_time = "17:00:00" if is_night else "19:00:00"
+
+        if settings is None:
+            settings = self._build_default_settings(is_night)
+
         # Создаем группу
         group = await self.repository.create(
             name=name,
             telegram_chat_id=telegram_chat_id,
-            telegram_topic_id=telegram_topic_id,
             is_night=is_night,
             poll_close_time=poll_close_time,
             settings=settings,
@@ -75,6 +92,15 @@ class GroupService:
         )
         
         return group
+
+    def _detect_is_night_group(self, group_name: str) -> bool:
+        normalized_name = group_name.strip().lower()
+        return any(marker in normalized_name for marker in NIGHT_GROUP_MARKERS)
+
+    def _build_default_settings(self, is_night: bool) -> Dict[str, Any]:
+        if is_night:
+            return {"slots": []}
+        return {"slots": [dict(slot) for slot in DEFAULT_DAY_SLOTS]}
     
     async def get_group_by_id(self, group_id: int) -> Optional[Dict[str, Any]]:
         """
@@ -173,36 +199,6 @@ class GroupService:
             True если удаление успешно
         """
         return await self.repository.delete(group_id)
-    
-    async def set_topic_id(
-        self,
-        group_id: int,
-        topic_type: str,
-        topic_id: int
-    ) -> bool:
-        """
-        Установить Topic ID для группы.
-        
-        Args:
-            group_id: ID группы
-            topic_type: Тип темы (poll, arrival, general, important)
-            topic_id: Topic ID
-            
-        Returns:
-            True если установка успешна
-        """
-        field_map = {
-            "poll": "telegram_topic_id",
-            "arrival": "arrival_departure_topic_id",
-            "general": "general_chat_topic_id",
-            "important": "important_info_topic_id",
-        }
-        
-        field_name = field_map.get(topic_type)
-        if not field_name:
-            raise ValueError(f"Неизвестный тип темы: {topic_type}")
-        
-        return await self.repository.update(group_id, **{field_name: topic_id})
     
     async def update_slots(
         self,

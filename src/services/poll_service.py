@@ -48,9 +48,20 @@ class PollService:
         date_str = target_date.strftime('%d.%m.%Y')
         
         if is_night:
-            return f"Смена в ночь сегодня ({date_str})"
+            return f"Выходы на сегодня ({date_str})"
         else:
-            return f"Смена на завтра ({date_str})"
+            return f"Выходы на завтра ({date_str})"
+
+    def get_target_date_for_group(
+        self,
+        group: Dict[str, Any],
+        base_date: Optional[date] = None,
+    ) -> date:
+        if base_date is not None:
+            return base_date
+        if group.get("is_night", False):
+            return date.today()
+        return date.today() + timedelta(days=1)
     
     def _format_poll_options(
         self,
@@ -71,26 +82,44 @@ class PollService:
         options = []
         
         if is_night:
-            # Для ночных групп: Выхожу, Помогаю до 00:00, Выходной
             options = [
                 "Выхожу",
-                "Помогаю до 00:00",
+                "Не выхожу",
+                "Куратор",
                 "Выходной"
             ]
         else:
-            # Для дневных групп: слоты + Выходной
             for slot in slots:
                 start = slot.get('start', '?')
                 end = slot.get('end', '?')
-                limit = slot.get('limit', 3)
-                # Формат: "С 7:30 до 19:30 - [0/3]"
-                option_text = f"С {start} до {end} - [0/{limit}]"
+                option_text = f"С {start} до {end}"
                 options.append(option_text)
-            
-            # Добавляем вариант "Выходной"
+
+            options.append("Куратор")
             options.append("Выходной")
         
         return options
+
+    async def _pin_poll_message(self, chat_id: int, message_id: int, group_name: str) -> None:
+        """Закрепить сообщение с опросом с уведомлением участников."""
+        try:
+            await self.bot.pin_chat_message(
+                chat_id=chat_id,
+                message_id=message_id,
+                disable_notification=False,
+            )
+            logger.info(
+                "Опрос закреплен в группе %s: chat_id=%s, message_id=%s",
+                group_name,
+                chat_id,
+                message_id,
+            )
+        except Exception as e:
+            logger.warning(
+                "Не удалось закрепить опрос в группе %s: %s",
+                group_name,
+                e,
+            )
     
     async def create_daily_polls(self, target_date: Optional[date] = None) -> Tuple[int, List[str]]:
         """
@@ -102,14 +131,10 @@ class PollService:
         Returns:
             Кортеж (количество созданных опросов, список ошибок)
         """
-        if target_date is None:
-            target_date = date.today() + timedelta(days=1)
-        
         groups = await self.group_repo.get_all(active_only=True)
         logger.info(
-            "Найдено активных групп для создания опросов: %d на дату %s",
+            "Найдено активных групп для создания опросов: %d",
             len(groups),
-            target_date.strftime('%d.%m.%Y')
         )
         
         # Логируем список найденных групп
@@ -124,16 +149,17 @@ class PollService:
         
         for group in groups:
             try:
+                group_target_date = self.get_target_date_for_group(group, target_date)
                 # Проверяем, не создан ли уже опрос для этой группы и даты
                 existing = await self.poll_repo.get_by_group_and_date(
                     group['id'],
-                    target_date
+                    group_target_date
                 )
-                if existing:
+                if existing and existing.get("status") == "active":
                     logger.info(
-                        "Опрос уже существует для группы %s на дату %s",
+                        "Активный опрос уже существует для группы %s на дату %s",
                         group['name'],
-                        target_date
+                        group_target_date
                     )
                     continue
                 
@@ -154,10 +180,8 @@ class PollService:
                 
                 # Формируем варианты ответов для опроса
                 options = self._format_poll_options(group, slots)
-                question = self._format_poll_question(group, target_date)
+                question = self._format_poll_question(group, group_target_date)
                 
-                # Определяем topic_id для отправки опроса
-                topic_id = group.get('telegram_topic_id')
                 chat_id = group['telegram_chat_id']
                 
                 # Создаем опрос в Telegram
@@ -168,24 +192,28 @@ class PollService:
                         options=options,
                         is_anonymous=False,
                         allows_multiple_answers=False,  # Один выбор
-                        message_thread_id=topic_id,
                     )
                     
                     # Сохраняем опрос в БД
                     await self.poll_repo.create(
                         group_id=group['id'],
-                        poll_date=target_date,
+                        poll_date=group_target_date,
                         telegram_poll_id=str(poll_message.poll.id),
                         telegram_message_id=poll_message.message_id,
-                        telegram_topic_id=topic_id,
                         status="active",
+                    )
+
+                    await self._pin_poll_message(
+                        chat_id=chat_id,
+                        message_id=poll_message.message_id,
+                        group_name=group['name'],
                     )
                     
                     created_count += 1
                     logger.info(
                         "Создан опрос для группы %s на дату %s",
                         group['name'],
-                        target_date
+                        group_target_date
                     )
                     
                 except Exception as e:
@@ -215,18 +243,17 @@ class PollService:
         Returns:
             Данные созданного опроса или None при ошибке
         """
-        if target_date is None:
-            target_date = date.today() + timedelta(days=1)
-        
         group = await self.group_repo.get_by_id(group_id)
         if not group:
             logger.error("Группа %d не найдена", group_id)
             return None
         
+        target_date = self.get_target_date_for_group(group, target_date)
+        
         # Проверяем, не существует ли уже опрос
         existing = await self.poll_repo.get_by_group_and_date(group_id, target_date)
-        if existing:
-            logger.info("Опрос уже существует для группы %s на %s", group['name'], target_date)
+        if existing and existing.get("status") == "active":
+            logger.info("Активный опрос уже существует для группы %s на %s", group['name'], target_date)
             return existing
         
         settings_data = group.get('settings', {})
@@ -240,7 +267,6 @@ class PollService:
         options = self._format_poll_options(group, slots)
         question = self._format_poll_question(group, target_date)
         
-        topic_id = group.get('telegram_topic_id')
         chat_id = group['telegram_chat_id']
         
         try:
@@ -250,7 +276,6 @@ class PollService:
                 options=options,
                 is_anonymous=False,
                 allows_multiple_answers=False,
-                message_thread_id=topic_id,
             )
             
             poll = await self.poll_repo.create(
@@ -258,8 +283,13 @@ class PollService:
                 poll_date=target_date,
                 telegram_poll_id=str(poll_message.poll.id),
                 telegram_message_id=poll_message.message_id,
-                telegram_topic_id=topic_id,
                 status="active",
+            )
+
+            await self._pin_poll_message(
+                chat_id=chat_id,
+                message_id=poll_message.message_id,
+                group_name=group['name'],
             )
             
             return poll

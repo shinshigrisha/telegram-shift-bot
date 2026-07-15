@@ -1,7 +1,7 @@
 """
 Утилита для создания пула соединений PostgreSQL.
 
-Используется для работы с FAQRepository и другими репозиториями.
+Используется для работы с репозиториями PostgreSQL.
 """
 import logging
 from typing import Optional
@@ -31,25 +31,34 @@ async def get_db_pool() -> Pool:
     if _db_pool is not None:
         return _db_pool
     
-    database_url = getattr(settings, 'DATABASE_URL', None)
-    if not database_url:
+    database_urls = getattr(settings, 'DATABASE_URL_CANDIDATES', None) or [getattr(settings, 'DATABASE_URL', None)]
+    database_urls = [url for url in database_urls if url]
+    if not database_urls:
         raise ValueError(
             "DATABASE_URL не найден в настройках. "
             "Установите его в .env файле или в config/settings.py"
         )
-    
-    try:
-        _db_pool = await asyncpg.create_pool(
-            database_url,
-            min_size=2,
-            max_size=10,
-            command_timeout=60
-        )
-        logger.info("Пул соединений PostgreSQL создан успешно")
-        return _db_pool
-    except Exception as e:
-        logger.error("Ошибка при создании пула соединений PostgreSQL: %s", e, exc_info=True)
-        raise
+
+    errors = []
+    for database_url in database_urls:
+        try:
+            _db_pool = await asyncpg.create_pool(
+                database_url,
+                min_size=2,
+                max_size=10,
+                command_timeout=60,
+                ssl=False,
+            )
+            logger.info("Пул соединений PostgreSQL создан успешно: %s", database_url)
+            return _db_pool
+        except Exception as e:
+            errors.append(f"{database_url} -> {e}")
+            logger.warning("Не удалось подключиться к PostgreSQL по %s: %s", database_url, e)
+
+    raise RuntimeError(
+        "Ошибка при создании пула соединений PostgreSQL. Проверены варианты:\n- "
+        + "\n- ".join(errors)
+    )
 
 
 async def close_db_pool() -> None:

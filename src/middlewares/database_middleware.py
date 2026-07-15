@@ -1,7 +1,5 @@
 """
-Middleware для предоставления FAQRepository и Redis в handlers.
-
-Используется для dependency injection в aiogram.
+Middleware для предоставления репозиториев и сервисов в handlers.
 """
 import logging
 from typing import Callable, Dict, Any, Awaitable
@@ -11,10 +9,11 @@ from redis.asyncio import Redis
 
 from config.settings import settings
 from src.utils.db_pool import get_db_pool
-from src.repositories.faq_repository import FAQRepository
 from src.repositories.group_repository import GroupRepository
+from src.repositories.group_member_repository import GroupMemberRepository
 from src.repositories.poll_repository import PollRepository
 from src.services.group_service import GroupService
+from src.services.group_member_service import GroupMemberService
 from src.services.user_service import UserService
 
 logger = logging.getLogger(__name__)
@@ -59,32 +58,41 @@ class DatabaseMiddleware(BaseMiddleware):
             
             # Получаем или создаём Redis клиент
             if _cached_redis is None:
-                try:
-                    _cached_redis = Redis.from_url(
-                        settings.REDIS_URL,
-                        decode_responses=True
-                    )
-                    # Проверяем подключение
-                    await _cached_redis.ping()
-                    logger.debug("Redis клиент создан и подключён")
-                except Exception as redis_error:
-                    logger.error("Ошибка при создании Redis клиента: %s", redis_error, exc_info=True)
-                    _cached_redis = None
+                for redis_url in settings.REDIS_URL_CANDIDATES:
+                    try:
+                        _cached_redis = Redis.from_url(
+                            redis_url,
+                            decode_responses=True
+                        )
+                        await _cached_redis.ping()
+                        logger.debug("Redis клиент создан и подключён: %s", redis_url)
+                        break
+                    except Exception as redis_error:
+                        logger.warning(
+                            "Ошибка при создании Redis клиента по %s: %s",
+                            redis_url,
+                            redis_error,
+                        )
+                        if _cached_redis is not None:
+                            await _cached_redis.aclose()
+                            _cached_redis = None
             
             # Создаём репозитории
-            faq_repo = FAQRepository(_cached_db_pool)
             group_repo = GroupRepository(_cached_db_pool)
+            group_member_repo = GroupMemberRepository(_cached_db_pool)
             poll_repo = PollRepository(_cached_db_pool)
             
             # Создаём сервисы
             group_service = GroupService(_cached_db_pool)
+            group_member_service = GroupMemberService(_cached_db_pool)
             user_service = UserService(_cached_db_pool)
             
             # Добавляем в data для использования в handlers
-            data["faq_repo"] = faq_repo
             data["group_repo"] = group_repo
+            data["group_member_repo"] = group_member_repo
             data["poll_repo"] = poll_repo
             data["group_service"] = group_service
+            data["group_member_service"] = group_member_service
             data["user_service"] = user_service
             data["db_pool"] = _cached_db_pool
             data["redis"] = _cached_redis  # Добавляем Redis в data
@@ -92,10 +100,11 @@ class DatabaseMiddleware(BaseMiddleware):
         except Exception as e:
             logger.error("Ошибка при создании репозиториев в middleware: %s", e, exc_info=True)
             # Продолжаем без репозиториев (handler должен обработать это)
-            data["faq_repo"] = None
             data["group_repo"] = None
+            data["group_member_repo"] = None
             data["poll_repo"] = None
             data["group_service"] = None
+            data["group_member_service"] = None
             data["user_service"] = None
             data["redis"] = None
         

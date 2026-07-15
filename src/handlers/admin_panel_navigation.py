@@ -2,13 +2,18 @@
 import logging
 from typing import Optional
 
-from aiogram import Router
+from aiogram import Router, F
 from aiogram.filters import Command
 from aiogram.types import Message, CallbackQuery
 
 from config.settings import settings
 from src.utils.auth import require_admin_callback
-from src.utils.admin_keyboards import get_admin_panel_keyboard, get_curator_menu_keyboard
+from src.utils.admin_keyboards import (
+    get_admin_panel_keyboard,
+    get_admin_entry_keyboard,
+    get_broadcast_keyboard,
+    get_employee_menu_keyboard,
+)
 from src.utils.telegram_helpers import safe_edit_message, safe_answer_callback
 
 logger = logging.getLogger(__name__)
@@ -30,10 +35,30 @@ async def cmd_admin_panel(
     text = (
         "👑 <b>Админ-панель</b>\n\n"
         "Выберите раздел для управления ботом:\n\n"
-        "📋 <b>Управление группами</b> — создание, настройка, темы\n"
+        "📋 <b>Управление группами</b> — создание и настройка ЗИЗ-групп\n"
         "⚙️ <b>Настройки</b> — расписание, параметры\n"
         "📊 <b>Опросы</b> — создание, управление, результаты\n"
-        "🤖 <b>AI куратор</b> — управление базой знаний, FAQ, сообщения\n"
+        "📢 <b>Рассылка</b> — отправка сообщений в группы\n"
+        "📈 <b>Мониторинг</b> — статистика, логи, статус"
+    )
+    await message.answer(text, reply_markup=get_admin_panel_keyboard())
+    await message.answer("Кнопка входа в админку доступна снизу.", reply_markup=get_admin_entry_keyboard())
+
+
+@router.message(F.text == "👑 Админ-панель")
+async def open_admin_panel_from_button(message: Message) -> None:
+    """Открыть админ-панель по постоянной кнопке."""
+    user_id = message.from_user.id
+    if user_id not in settings.ADMIN_IDS:
+        await message.answer("⛔ У вас нет прав для доступа к админ-панели")
+        return
+
+    text = (
+        "👑 <b>Админ-панель</b>\n\n"
+        "Выберите раздел для управления ботом:\n\n"
+        "📋 <b>Управление группами</b> — создание и настройка ЗИЗ-групп\n"
+        "⚙️ <b>Настройки</b> — расписание, параметры\n"
+        "📊 <b>Опросы</b> — создание, управление, результаты\n"
         "📢 <b>Рассылка</b> — отправка сообщений в группы\n"
         "📈 <b>Мониторинг</b> — статистика, логи, статус"
     )
@@ -48,10 +73,9 @@ async def callback_back_to_main(callback: CallbackQuery) -> None:
         callback.message,
         "👑 <b>Админ-панель</b>\n\n"
         "Выберите раздел для управления ботом:\n\n"
-        "📋 <b>Управление группами</b> — создание, настройка, темы\n"
+        "📋 <b>Управление группами</b> — создание и настройка ЗИЗ-групп\n"
         "⚙️ <b>Настройки</b> — расписание, параметры\n"
         "📊 <b>Опросы</b> — создание, управление, результаты\n"
-        "🤖 <b>AI куратор</b> — управление базой знаний, FAQ, сообщения\n"
         "📢 <b>Рассылка</b> — отправка сообщений в группы\n"
         "📈 <b>Мониторинг</b> — статистика, логи, статус",
         reply_markup=get_admin_panel_keyboard(),
@@ -105,31 +129,24 @@ async def callback_polls_menu(callback: CallbackQuery) -> None:
 @require_admin_callback
 async def callback_broadcast_menu(callback: CallbackQuery) -> None:
     """Меню рассылки."""
-    from src.utils.admin_keyboards import get_broadcast_topic_keyboard
-    
     text = (
         "📢 <b>Рассылка</b>\n\n"
-        "Выберите тему для рассылки:"
+        "Рассылка отправляется прямо в выбранные группы без тем."
     )
-    await safe_edit_message(callback.message, text, reply_markup=get_broadcast_topic_keyboard())
+    await safe_edit_message(callback.message, text, reply_markup=get_broadcast_keyboard())
     await safe_answer_callback(callback)
 
 
-@router.callback_query(lambda c: c.data == "admin:curator_menu")
+@router.callback_query(lambda c: c.data == "admin:employees_menu")
 @require_admin_callback
-async def callback_curator_menu(callback: CallbackQuery) -> None:
-    """Меню AI куратора."""
+async def callback_employees_menu(callback: CallbackQuery) -> None:
+    """Меню сотрудников групп."""
     text = (
-        "🤖 <b>AI куратор</b>\n\n"
-        "Управление базой знаний и AI-функциями:\n\n"
-        "➕ <b>Добавить FAQ</b> — добавить новый вопрос-ответ в базу знаний\n"
-        "🔍 <b>Поиск FAQ</b> — найти релевантные FAQ по запросу\n"
-        "📢 <b>Создать информационное сообщение</b> — сгенерировать сообщение для рассылки\n"
-        "⚠️ <b>Создать замечание</b> — сгенерировать замечание курьеру\n"
-        "🗑️ <b>Очистить историю</b> — очистить историю диалога пользователя\n"
-        "📊 <b>Статистика AI</b> — статистика использования AI-куратора"
+        "👥 <b>Сотрудники групп</b>\n\n"
+        "Здесь хранится реестр сотрудников по каждой группе ЗИЗ.\n"
+        "Именно по нему бот считает, кто не отметился в опросе."
     )
-    await safe_edit_message(callback.message, text, reply_markup=get_curator_menu_keyboard())
+    await safe_edit_message(callback.message, text, reply_markup=get_employee_menu_keyboard())
     await safe_answer_callback(callback)
 
 
@@ -145,4 +162,3 @@ async def callback_monitoring_menu(callback: CallbackQuery) -> None:
     )
     await safe_edit_message(callback.message, text, reply_markup=get_monitoring_menu_keyboard())
     await safe_answer_callback(callback)
-
