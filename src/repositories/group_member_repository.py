@@ -108,6 +108,26 @@ class GroupMemberRepository:
             )
             return dict(row) if row else None
 
+    async def get_by_group_and_name(
+        self,
+        group_id: int,
+        full_name: str,
+    ) -> Optional[Dict[str, Any]]:
+        async with self.pool.acquire() as conn:
+            row = await conn.fetchrow(
+                """
+                SELECT * FROM group_members
+                WHERE group_id = $1
+                  AND full_name = $2
+                  AND is_active = true
+                ORDER BY id
+                LIMIT 1
+                """,
+                group_id,
+                full_name,
+            )
+            return dict(row) if row else None
+
     async def bind_telegram_user(
         self,
         member_id: int,

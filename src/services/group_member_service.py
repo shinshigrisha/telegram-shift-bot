@@ -61,6 +61,16 @@ class GroupMemberService:
             updated = await self.repository.get_by_id(member["id"])
             return updated or member
 
+        member = await self.repository.get_by_group_and_name(group_id, full_name)
+        if member:
+            await self.repository.bind_telegram_user(
+                member_id=member["id"],
+                telegram_user_id=telegram_user_id,
+                username=username,
+            )
+            updated = await self.repository.get_by_id(member["id"])
+            return updated or member
+
         created = await self.repository.create(group_id=group_id, full_name=full_name)
         await self.repository.bind_telegram_user(
             member_id=created["id"],
