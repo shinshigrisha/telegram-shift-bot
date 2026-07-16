@@ -62,10 +62,13 @@ class SchedulerService:
         self._add_reminder_jobs()
         self._add_poll_closing_job()
         self._add_night_poll_closing_job()
+        self._add_recovery_job()
         
         # Запускаем планировщик
         self.scheduler.start()
         self._is_running = True
+
+        await self._recover_missed_automation()
         
         logger.info("✅ Планировщик запущен")
         logger.info("   - Создание опросов: %s:%s", 
@@ -148,6 +151,15 @@ class SchedulerService:
             CronTrigger(hour=17, minute=0, timezone="Europe/Moscow"),
             id="close_night_polls",
             name="Закрытие ночных опросов",
+            replace_existing=True,
+        )
+
+    def _add_recovery_job(self) -> None:
+        self.scheduler.add_job(
+            self._recover_missed_automation,
+            CronTrigger(minute="*/5", timezone="Europe/Moscow"),
+            id="recover_missed_automation",
+            name="Проверка пропущенных автоматизаций",
             replace_existing=True,
         )
     
@@ -340,6 +352,44 @@ class SchedulerService:
         except Exception as e:
             logger.error("Ошибка при закрытии опросов: %s", e, exc_info=True)
             await self._notify_admins(f"❌ Ошибка при закрытии опросов: {e}")
+
+    async def _recover_missed_automation(self) -> None:
+        """Догоняющее выполнение, если бот пропустил окно по времени."""
+        try:
+            now = datetime.now()
+            current_date = date.today()
+
+            night_close_time = time(17, 0)
+            day_close_time = time(settings.POLL_CLOSING_HOUR, settings.POLL_CLOSING_MINUTE)
+
+            if now.time() >= night_close_time:
+                night_target_date = current_date
+                night_active_polls = await self.poll_service.poll_repo.get_active_polls()
+                has_pending_night = False
+                for poll in night_active_polls:
+                    group = await self.group_service.get_group_by_id(poll["group_id"])
+                    if group and group.get("is_night", False) and poll.get("poll_date") == night_target_date:
+                        has_pending_night = True
+                        break
+                if has_pending_night:
+                    logger.warning("⏱ Обнаружены незакрытые ночные опросы после 17:00. Запускаю догоняющее закрытие.")
+                    await self._close_polls(is_night=True, target_date=night_target_date)
+
+            if now.time() >= day_close_time:
+                day_target_date = current_date + timedelta(days=1)
+                day_active_polls = await self.poll_service.poll_repo.get_active_polls()
+                has_pending_day = False
+                for poll in day_active_polls:
+                    group = await self.group_service.get_group_by_id(poll["group_id"])
+                    if group and not group.get("is_night", False) and poll.get("poll_date") == day_target_date:
+                        has_pending_day = True
+                        break
+                if has_pending_day:
+                    logger.warning("⏱ Обнаружены незакрытые дневные опросы после времени закрытия. Запускаю догоняющее закрытие.")
+                    await self._close_polls(is_night=False, target_date=day_target_date)
+
+        except Exception as e:
+            logger.error("Ошибка при догоняющей проверке автоматизаций: %s", e, exc_info=True)
     
     async def _generate_poll_report(
         self,

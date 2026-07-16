@@ -44,6 +44,16 @@ from src.repositories.group_repository import GroupRepository
 logs_dir = PROJECT_ROOT / "logs"
 logs_dir.mkdir(parents=True, exist_ok=True)
 
+
+class SchedulerNoiseFilter(logging.Filter):
+    """Скрывает шумные штатные логи APScheduler для recovery-job."""
+
+    SUPPRESSED_TEXT = "Проверка пропущенных автоматизаций"
+
+    def filter(self, record: logging.LogRecord) -> bool:
+        message = record.getMessage()
+        return self.SUPPRESSED_TEXT not in message
+
 # Настройка логирования
 logging.basicConfig(
     level=getattr(logging, settings.LOG_LEVEL.upper(), logging.INFO),
@@ -53,6 +63,9 @@ logging.basicConfig(
         logging.StreamHandler(sys.stdout)
     ]
 )
+
+for scheduler_logger_name in ("apscheduler.scheduler", "apscheduler.executors.default"):
+    logging.getLogger(scheduler_logger_name).addFilter(SchedulerNoiseFilter())
 
 logger = logging.getLogger(__name__)
 
