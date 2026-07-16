@@ -60,7 +60,7 @@ def get_polls_menu_keyboard() -> InlineKeyboardMarkup:
     keyboard = [
         [InlineKeyboardButton(text="📝 Создать опросы всем", callback_data="admin:polls:create")],
         [InlineKeyboardButton(text="📨 Отправить тестовый опрос", callback_data="admin:polls:create_one")],
-        [InlineKeyboardButton(text="🔔 Тест напоминания 17:00", callback_data="admin:polls:test_reminder")],
+        [InlineKeyboardButton(text="🔔 Тест напоминания", callback_data="admin:polls:test_reminder")],
         [InlineKeyboardButton(text="📊 Результаты тестового опроса", callback_data="admin:polls:test_results")],
         [InlineKeyboardButton(text="🔒 Закрыть тестовый опрос", callback_data="admin:polls:test_close")],
         [InlineKeyboardButton(text="🗑️ Удалить тестовый опрос", callback_data="admin:polls:test_delete")],

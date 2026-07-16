@@ -112,8 +112,21 @@ class SchedulerService:
                 id=f"reminder_{hour}",
                 name=f"Напоминание в {hour}:00",
                 replace_existing=True,
-                kwargs={"reminder_hour": hour},
+                kwargs={"reminder_hour": hour, "is_night": False},
             )
+
+        self.scheduler.add_job(
+            self._send_reminders,
+            CronTrigger(
+                hour=12,
+                minute=0,
+                timezone="Europe/Moscow"
+            ),
+            id="night_reminder_12",
+            name="Напоминание для ночных групп в 12:00",
+            replace_existing=True,
+            kwargs={"reminder_hour": 12, "is_night": True},
+        )
         
     def _add_poll_closing_job(self) -> None:
         """Добавить задачу закрытия опросов."""
@@ -190,7 +203,7 @@ class SchedulerService:
             logger.error("Ошибка при создании опросов: %s", e, exc_info=True)
             await self._notify_admins(f"❌ Ошибка при создании опросов: {e}")
     
-    async def _send_reminders(self, reminder_hour: int) -> None:
+    async def _send_reminders(self, reminder_hour: int, is_night: bool = False) -> None:
         """
         Отправить напоминания о незакрытых опросах.
         
@@ -200,26 +213,36 @@ class SchedulerService:
         logger.info("🔔 Отправка напоминаний (час: %d)...", reminder_hour)
         
         try:
-            tomorrow = date.today() + timedelta(days=1)
+            today = date.today()
+            tomorrow = today + timedelta(days=1)
             active_polls = await self.poll_service.poll_repo.get_active_polls()
 
             target_polls = []
             for poll in active_polls:
                 group = await self.group_service.get_group_by_id(poll['group_id'])
-                if group and not group.get("is_night", False) and poll.get('poll_date') == tomorrow:
+                target_date = today if is_night else tomorrow
+                if (
+                    group
+                    and bool(group.get("is_night", False)) == is_night
+                    and poll.get('poll_date') == target_date
+                ):
                     target_polls.append((poll, group))
 
             if not target_polls:
-                logger.info("Нет активных опросов на завтра для напоминаний")
+                logger.info(
+                    "Нет активных опросов для напоминаний: is_night=%s, hour=%s",
+                    is_night,
+                    reminder_hour,
+                )
                 return
             
             # Рассчитываем оставшееся время до закрытия
-            closing_time = time(settings.POLL_CLOSING_HOUR, settings.POLL_CLOSING_MINUTE)
+            closing_time = time(17, 0) if is_night else time(settings.POLL_CLOSING_HOUR, settings.POLL_CLOSING_MINUTE)
             now = datetime.now()
             closing_datetime = datetime.combine(date.today(), closing_time)
             time_left = closing_datetime - now
             
-            hours_left = int(time_left.total_seconds() // 3600)
+            hours_left = max(0, int(time_left.total_seconds() // 3600))
             
             sent_count = 0
             
@@ -229,7 +252,12 @@ class SchedulerService:
                     if not not_voted:
                         continue
 
-                    message = self._build_reminder_message(not_voted, hours_left)
+                    title = (
+                        f"🌙 <b>Напоминание {reminder_hour}:00</b>"
+                        if is_night
+                        else f"⏰ <b>Напоминание {reminder_hour}:00</b>"
+                    )
+                    message = self._build_reminder_message(not_voted, hours_left, title=title)
 
                     await self.bot.send_message(
                         chat_id=group['telegram_chat_id'],
@@ -544,15 +572,19 @@ class SchedulerService:
             return f'<a href="tg://user?id={telegram_user_id}">{full_name}</a>'
         return full_name
 
-    def _build_reminder_message(self, not_voted: List[Dict[str, Any]], hours_left: int) -> str:
+    def _build_reminder_message(
+        self,
+        not_voted: List[Dict[str, Any]],
+        hours_left: int | None,
+        title: str = "⏰ <b>Напоминание 17:00</b>",
+    ) -> str:
         lines = "\n".join(f"• {self._format_member_tag(member)}" for member in not_voted[:30])
         if len(not_voted) > 30:
             lines += f"\n... и еще {len(not_voted) - 30}"
-        return (
-            f"⏰ <b>Напоминание 17:00</b>\n\n"
-            f"До закрытия опроса осталось: <b>{hours_left} ч.</b>\n\n"
-            f"<b>Еще не отметились:</b>\n{lines}"
-        )
+        time_block = ""
+        if hours_left is not None:
+            time_block = f"\nДо закрытия опроса осталось: <b>{hours_left} ч.</b>\n"
+        return f"{title}\n{time_block}\n<b>Еще не отметились:</b>\n{lines}"
 
     async def _get_not_voted_members(
         self,
@@ -564,6 +596,8 @@ class SchedulerService:
         not_voted: List[Dict[str, Any]] = []
         for member in members:
             telegram_user_id = member.get("telegram_user_id")
+            if telegram_user_id is not None and int(telegram_user_id) in settings.ADMIN_IDS:
+                continue
             if telegram_user_id is None or int(telegram_user_id) not in voted_user_ids:
                 not_voted.append(member)
         return not_voted
@@ -581,10 +615,9 @@ class SchedulerService:
         group = await self.group_service.get_group_by_id(group_id)
         if not group:
             return False, "Группа не найдена."
-        if group.get("is_night", False):
-            return False, "Для ночных групп напоминание 17:00 не используется."
 
-        target_date = date.today() + timedelta(days=1)
+        is_night = bool(group.get("is_night", False))
+        target_date = date.today() if is_night else date.today() + timedelta(days=1)
         poll = await self.poll_service.poll_repo.get_by_group_and_date(group_id, target_date)
         if not poll or poll.get("status") != "active":
             return False, f"Активный опрос на {target_date.strftime('%d.%m.%Y')} не найден."
@@ -593,14 +626,23 @@ class SchedulerService:
         if not not_voted:
             await self.bot.send_message(
                 chat_id=group['telegram_chat_id'],
-                text="✅ <b>Тест напоминания 17:00</b>\n\nВсе сотрудники из реестра уже отметились.",
+                text="✅ <b>Тест напоминания</b>\n\nВсе сотрудники из реестра уже отметились.",
                 parse_mode="HTML",
             )
             return True, "Все сотрудники уже отметились. В чат отправлено тестовое уведомление."
 
+        title = (
+            "🌙 <b>Тест напоминания 12:00 для ночной группы</b>"
+            if is_night
+            else "🔔 <b>Тест напоминания 17:00</b>"
+        )
         await self.bot.send_message(
             chat_id=group['telegram_chat_id'],
-            text=self._build_reminder_message(not_voted, hours_left=2),
+            text=self._build_reminder_message(
+                not_voted,
+                hours_left=5 if is_night else 2,
+                title=title,
+            ),
             parse_mode="HTML",
         )
         return True, f"Тест напоминания отправлен в группу {group.get('name')}."

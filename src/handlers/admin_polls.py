@@ -219,7 +219,8 @@ async def callback_test_reminder_start(
     await state.update_data(action="send_test_reminder")
 
     text = (
-        "🔔 <b>Тест напоминания 17:00</b>\n\n"
+        "🔔 <b>Тест напоминания</b>\n\n"
+        "Для дневных групп используется 17:00, для ночных — 12:00.\n"
         "Выберите группу. Бот отправит список тех, кто не отметился, с тегами."
     )
 
@@ -753,6 +754,23 @@ async def callback_select_group_for_polls(
                                 )
                                 text += f"• {voter_name}\n"
                             text += "\n"
+                    members = await group_member_service.get_group_members(group_id)
+                    voted_user_ids = _extract_voted_user_ids(results)
+                    not_voted = []
+                    for member in members:
+                        telegram_user_id = member.get("telegram_user_id")
+                        if telegram_user_id is not None and int(telegram_user_id) in settings.ADMIN_IDS:
+                            continue
+                        if telegram_user_id is None or int(telegram_user_id) not in voted_user_ids:
+                            not_voted.append(member.get("full_name", "Неизвестный сотрудник"))
+
+                    if not_voted:
+                        text += "<b>Не отметились:</b>\n"
+                        for person in not_voted[:15]:
+                            text += f"• {person}\n"
+                        if len(not_voted) > 15:
+                            text += f"... и еще {len(not_voted) - 15} человек\n"
+                        text += "\n"
                 elif slots:
                     text += "📋 <b>Результаты по выходам:</b>\n\n"
                     # Формируем структуру результатов
@@ -832,6 +850,8 @@ async def callback_select_group_for_polls(
                         not_voted = []
                         for member in members:
                             telegram_user_id = member.get("telegram_user_id")
+                            if telegram_user_id is not None and int(telegram_user_id) in settings.ADMIN_IDS:
+                                continue
                             if telegram_user_id is None or int(telegram_user_id) not in voted_user_ids:
                                 not_voted.append(member.get("full_name", "Неизвестный сотрудник"))
 
@@ -1104,36 +1124,65 @@ async def callback_close_all_polls(callback: CallbackQuery, bot: Bot, poll_repo:
 @router.callback_query(lambda c: c.data == "admin:polls:find_tomorrow")
 @require_admin_callback
 async def callback_find_tomorrow_polls(callback: CallbackQuery, poll_repo: PollRepository, group_service: GroupService) -> None:
-    """Поиск опросов на завтра."""
+    """Поиск запланированных опросов для дневных и ночных групп."""
     tomorrow = date.today() + timedelta(days=1)
+    today = date.today()
     groups = await group_service.get_all_groups()
     
-    polls_found = []
-    polls_missing = []
+    day_polls_found = []
+    day_polls_missing = []
+    night_polls_found = []
+    night_polls_missing = []
     
     for group in groups:
-        poll = await poll_repo.get_by_group_and_date(group['id'], tomorrow)
-        if poll:
-            polls_found.append(group)
+        target_date = today if group.get("is_night", False) else tomorrow
+        poll = await poll_repo.get_by_group_and_date(group['id'], target_date)
+
+        if group.get("is_night", False):
+            if poll:
+                night_polls_found.append(group)
+            else:
+                night_polls_missing.append(group)
         else:
-            polls_missing.append(group)
+            if poll:
+                day_polls_found.append(group)
+            else:
+                day_polls_missing.append(group)
     
     text = (
-        f"🔎 <b>Опросы на завтра ({tomorrow.strftime('%d.%m.%Y')})</b>\n\n"
-        f"✅ Найдено опросов: <b>{len(polls_found)}</b>\n"
-        f"❌ Отсутствует опросов: <b>{len(polls_missing)}</b>\n\n"
+        f"🔎 <b>Проверка опросов</b>\n\n"
+        f"☀️ Дневные группы: дата <b>{tomorrow.strftime('%d.%m.%Y')}</b>\n"
+        f"✅ Найдено: <b>{len(day_polls_found)}</b>\n"
+        f"❌ Отсутствует: <b>{len(day_polls_missing)}</b>\n\n"
+        f"🌙 Ночные группы: дата <b>{today.strftime('%d.%m.%Y')}</b>\n"
+        f"✅ Найдено: <b>{len(night_polls_found)}</b>\n"
+        f"❌ Отсутствует: <b>{len(night_polls_missing)}</b>\n\n"
     )
     
-    if polls_found:
-        text += "<b>✅ Группы с опросами:</b>\n"
-        for group in polls_found:
+    if day_polls_found:
+        text += "<b>✅ Дневные группы с опросами:</b>\n"
+        for group in day_polls_found:
             group_name = clean_group_name_for_display(group.get('name', 'Неизвестная группа'))
             text += f"• {group_name}\n"
         text += "\n"
     
-    if polls_missing:
-        text += "<b>❌ Группы без опросов:</b>\n"
-        for group in polls_missing:
+    if day_polls_missing:
+        text += "<b>❌ Дневные группы без опросов:</b>\n"
+        for group in day_polls_missing:
+            group_name = clean_group_name_for_display(group.get('name', 'Неизвестная группа'))
+            text += f"• {group_name}\n"
+        text += "\n"
+
+    if night_polls_found:
+        text += "<b>✅ Ночные группы с опросами:</b>\n"
+        for group in night_polls_found:
+            group_name = clean_group_name_for_display(group.get('name', 'Неизвестная группа'))
+            text += f"• {group_name}\n"
+        text += "\n"
+
+    if night_polls_missing:
+        text += "<b>❌ Ночные группы без опросов:</b>\n"
+        for group in night_polls_missing:
             group_name = clean_group_name_for_display(group.get('name', 'Неизвестная группа'))
             text += f"• {group_name}\n"
     
