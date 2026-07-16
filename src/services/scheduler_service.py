@@ -339,6 +339,7 @@ class SchedulerService:
             extra_options = []
         
         results = self._normalize_results(poll.get('results'))
+        member_names_by_id, member_names_by_user_id = await self.group_member_service.get_member_name_maps(group["id"])
         
         report = (
             f"📊 <b>Результаты опроса</b>\n"
@@ -357,7 +358,7 @@ class SchedulerService:
                 voters = results.get(key, [])
                 report += f"• <b>{title}</b> ({len(voters)}):\n"
                 for voter in voters[:20]:
-                    report += f"   • {voter.get('name', 'Неизвестно')}\n"
+                    report += f"   • {self.group_member_service.resolve_voter_display_name(voter, member_names_by_id, member_names_by_user_id)}\n"
                 report += "\n"
             custom_results = results.get("custom", {})
             if isinstance(custom_results, dict):
@@ -365,7 +366,7 @@ class SchedulerService:
                     voters = custom_results.get(f"option_{index}", [])
                     report += f"• <b>{option_text}</b> ({len(voters)}):\n"
                     for voter in voters[:20]:
-                        report += f"   • {voter.get('name', 'Неизвестно')}\n"
+                        report += f"   • {self.group_member_service.resolve_voter_display_name(voter, member_names_by_id, member_names_by_user_id)}\n"
                     report += "\n"
         elif slots:
             for i, slot in enumerate(slots):
@@ -380,7 +381,7 @@ class SchedulerService:
                 
                 if isinstance(slot_votes, list) and slot_votes:
                     for voter in slot_votes[:10]:  # Максимум 10 имен
-                        report += f"   • {voter.get('name', 'Неизвестно')}\n"
+                        report += f"   • {self.group_member_service.resolve_voter_display_name(voter, member_names_by_id, member_names_by_user_id)}\n"
                     if len(slot_votes) > 10:
                         report += f"   ... и еще {len(slot_votes) - 10}\n"
                 report += "\n"
@@ -390,7 +391,7 @@ class SchedulerService:
             if curator_votes:
                 report += f"👤 <b>Куратор</b> ({len(curator_votes)}):\n"
                 for voter in curator_votes[:10]:
-                    report += f"   • {voter.get('name', 'Неизвестно')}\n"
+                    report += f"   • {self.group_member_service.resolve_voter_display_name(voter, member_names_by_id, member_names_by_user_id)}\n"
                 if len(curator_votes) > 10:
                     report += f"   ... и еще {len(curator_votes) - 10}\n"
                 report += "\n"
@@ -399,7 +400,7 @@ class SchedulerService:
             if dayoff_votes:
                 report += f"🏖 <b>Выходной</b> ({len(dayoff_votes)}):\n"
                 for voter in dayoff_votes[:10]:
-                    report += f"   • {voter.get('name', 'Неизвестно')}\n"
+                    report += f"   • {self.group_member_service.resolve_voter_display_name(voter, member_names_by_id, member_names_by_user_id)}\n"
                 if len(dayoff_votes) > 10:
                     report += f"   ... и еще {len(dayoff_votes) - 10}\n"
                 report += "\n"
@@ -411,7 +412,7 @@ class SchedulerService:
                     if voters:
                         report += f"📝 <b>{option_text}</b> ({len(voters)}):\n"
                         for voter in voters[:10]:
-                            report += f"   • {voter.get('name', 'Неизвестно')}\n"
+                            report += f"   • {self.group_member_service.resolve_voter_display_name(voter, member_names_by_id, member_names_by_user_id)}\n"
                         if len(voters) > 10:
                             report += f"   ... и еще {len(voters) - 10}\n"
                         report += "\n"

@@ -720,6 +720,7 @@ async def callback_select_group_for_polls(
             try:
                 slots = group_service.get_slots_config(group)
                 extra_options = group_service.get_extra_options(group)
+                member_names_by_id, member_names_by_user_id = await group_member_service.get_member_name_maps(group_id)
                 
                 if group.get("is_night", False):
                     results = poll.get('results', {}) if isinstance(poll.get('results'), dict) else {}
@@ -732,7 +733,11 @@ async def callback_select_group_for_polls(
                         voters = results.get(key, [])
                         text += f"<b>{title}:</b> {len(voters)}\n"
                         for voter in voters[:20]:
-                            voter_name = voter.get('name', 'Неизвестный') if isinstance(voter, dict) else str(voter)
+                            voter_name = group_member_service.resolve_voter_display_name(
+                                voter,
+                                member_names_by_id,
+                                member_names_by_user_id,
+                            )
                             text += f"• {voter_name}\n"
                         text += "\n"
                     custom_results = results.get("custom", {}) if isinstance(results, dict) else {}
@@ -741,7 +746,11 @@ async def callback_select_group_for_polls(
                             voters = custom_results.get(f"option_{index}", [])
                             text += f"<b>{option_text}:</b> {len(voters)}\n"
                             for voter in voters[:20]:
-                                voter_name = voter.get('name', 'Неизвестный') if isinstance(voter, dict) else str(voter)
+                                voter_name = group_member_service.resolve_voter_display_name(
+                                    voter,
+                                    member_names_by_id,
+                                    member_names_by_user_id,
+                                )
                                 text += f"• {voter_name}\n"
                             text += "\n"
                 elif slots:
@@ -765,7 +774,11 @@ async def callback_select_group_for_polls(
                             
                             if voters and isinstance(voters, list):
                                 for voter in voters[:50]:
-                                    voter_name = voter.get('name', 'Неизвестный') if isinstance(voter, dict) else str(voter)
+                                    voter_name = group_member_service.resolve_voter_display_name(
+                                        voter,
+                                        member_names_by_id,
+                                        member_names_by_user_id,
+                                    )
                                     text += f"• {voter_name}\n"
                             
                             text += "\n"
@@ -774,7 +787,11 @@ async def callback_select_group_for_polls(
                         if curator:
                             text += f"<b>Куратор:</b> {len(curator)}\n"
                             for person in curator[:20]:
-                                person_name = person.get('name', 'Неизвестный') if isinstance(person, dict) else str(person)
+                                person_name = group_member_service.resolve_voter_display_name(
+                                    person,
+                                    member_names_by_id,
+                                    member_names_by_user_id,
+                                )
                                 text += f"• {person_name}\n"
                             text += "\n"
                         
@@ -785,7 +802,11 @@ async def callback_select_group_for_polls(
                             text += f"<b>Выходной:</b> {day_off_count}\n"
                             if isinstance(day_off, list):
                                 for person in day_off[:10]:  # Показываем первые 10
-                                    person_name = person.get('name', 'Неизвестный') if isinstance(person, dict) else str(person)
+                                    person_name = group_member_service.resolve_voter_display_name(
+                                        person,
+                                        member_names_by_id,
+                                        member_names_by_user_id,
+                                    )
                                     text += f"• {person_name}\n"
                                 if len(day_off) > 10:
                                     text += f"... и еще {len(day_off) - 10} человек\n"
@@ -798,7 +819,11 @@ async def callback_select_group_for_polls(
                                 if voters:
                                     text += f"<b>{option_text}:</b> {len(voters)}\n"
                                     for person in voters[:20]:
-                                        person_name = person.get('name', 'Неизвестный') if isinstance(person, dict) else str(person)
+                                        person_name = group_member_service.resolve_voter_display_name(
+                                            person,
+                                            member_names_by_id,
+                                            member_names_by_user_id,
+                                        )
                                         text += f"• {person_name}\n"
                                     text += "\n"
 
