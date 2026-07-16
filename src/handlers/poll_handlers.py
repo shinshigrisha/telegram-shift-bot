@@ -30,8 +30,9 @@ def _normalize_results(results: Optional[Dict[str, Any]]) -> Dict[str, Any]:
         results.setdefault("day_off", [])
         results.setdefault("night_out", [])
         results.setdefault("not_going", [])
+        results.setdefault("custom", {})
         return results
-    return {"slots": {}, "curator": [], "day_off": [], "night_out": [], "not_going": []}
+    return {"slots": {}, "curator": [], "day_off": [], "night_out": [], "not_going": [], "custom": {}}
 
 
 def _member_payload(member: Dict[str, Any], user_id: int, fallback_name: str) -> Dict[str, Any]:
@@ -51,6 +52,12 @@ def _clear_previous_vote(results: Dict[str, Any], user_id: int) -> None:
         bucket = results.get(key)
         if isinstance(bucket, list):
             results[key] = [item for item in bucket if item.get("user_id") != user_id]
+
+    custom_buckets = results.get("custom", {})
+    if isinstance(custom_buckets, dict):
+        for bucket_key, bucket in custom_buckets.items():
+            if isinstance(bucket, list):
+                custom_buckets[bucket_key] = [item for item in bucket if item.get("user_id") != user_id]
 
 
 @router.poll_answer()
@@ -103,6 +110,9 @@ async def handle_poll_answer(
 
         member_data = _member_payload(member, user.id, full_name)
         slots = (group.get("settings") or {}).get("slots", [])
+        extra_options = (group.get("settings") or {}).get("extra_options", [])
+        if not isinstance(extra_options, list):
+            extra_options = []
 
         async with pool.acquire() as conn:
             async with conn.transaction():
@@ -124,16 +134,28 @@ async def handle_poll_answer(
                             results["not_going"].append(member_data)
                         elif selected_option == 2:
                             results["curator"].append(member_data)
-                        else:
+                        elif selected_option == 3:
                             results["day_off"].append(member_data)
+                        else:
+                            custom_index = selected_option - 4
+                            if 0 <= custom_index < len(extra_options):
+                                custom_key = f"option_{custom_index}"
+                                custom_bucket = results["custom"].setdefault(custom_key, [])
+                                custom_bucket.append(member_data)
                     elif selected_option < len(slots):
                         slot_key = f"slot_{selected_option}"
                         current = results["slots"].setdefault(slot_key, [])
                         current.append(member_data)
                     elif selected_option == len(slots):
                         results["curator"].append(member_data)
-                    else:
+                    elif selected_option == len(slots) + 1:
                         results["day_off"].append(member_data)
+                    else:
+                        custom_index = selected_option - (len(slots) + 2)
+                        if 0 <= custom_index < len(extra_options):
+                            custom_key = f"option_{custom_index}"
+                            custom_bucket = results["custom"].setdefault(custom_key, [])
+                            custom_bucket.append(member_data)
 
                 await conn.execute(
                     """

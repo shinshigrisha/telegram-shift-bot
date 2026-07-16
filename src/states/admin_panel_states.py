@@ -36,6 +36,8 @@ class AdminPanelStates(StatesGroup):
     waiting_for_slot_end_hour = State()  # Выбор часа окончания слота
     waiting_for_slot_end_minute = State()  # Выбор минуты окончания слота (00 или 30)
     waiting_for_slot_courier_limit = State()  # Ввод количества курьеров для слота
+    waiting_for_extra_options_group = State()  # Выбор группы для доп. ответов
+    waiting_for_extra_options_input = State()  # Ввод доп. ответов
     
     # Рассылка
     waiting_for_broadcast_message = State()  # Ожидание текста или фото для рассылки

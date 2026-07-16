@@ -334,6 +334,9 @@ class SchedulerService:
         # Получаем настройки слотов
         settings_data = group.get('settings', {})
         slots = settings_data.get('slots', [])
+        extra_options = settings_data.get('extra_options', [])
+        if not isinstance(extra_options, list):
+            extra_options = []
         
         results = self._normalize_results(poll.get('results'))
         
@@ -356,6 +359,14 @@ class SchedulerService:
                 for voter in voters[:20]:
                     report += f"   • {voter.get('name', 'Неизвестно')}\n"
                 report += "\n"
+            custom_results = results.get("custom", {})
+            if isinstance(custom_results, dict):
+                for index, option_text in enumerate(extra_options):
+                    voters = custom_results.get(f"option_{index}", [])
+                    report += f"• <b>{option_text}</b> ({len(voters)}):\n"
+                    for voter in voters[:20]:
+                        report += f"   • {voter.get('name', 'Неизвестно')}\n"
+                    report += "\n"
         elif slots:
             for i, slot in enumerate(slots):
                 start = slot.get('start', '?')
@@ -391,6 +402,19 @@ class SchedulerService:
                     report += f"   • {voter.get('name', 'Неизвестно')}\n"
                 if len(dayoff_votes) > 10:
                     report += f"   ... и еще {len(dayoff_votes) - 10}\n"
+                report += "\n"
+
+            custom_results = results.get("custom", {})
+            if isinstance(custom_results, dict):
+                for index, option_text in enumerate(extra_options):
+                    voters = custom_results.get(f"option_{index}", [])
+                    if voters:
+                        report += f"📝 <b>{option_text}</b> ({len(voters)}):\n"
+                        for voter in voters[:10]:
+                            report += f"   • {voter.get('name', 'Неизвестно')}\n"
+                        if len(voters) > 10:
+                            report += f"   ... и еще {len(voters) - 10}\n"
+                        report += "\n"
         
         return report
     
@@ -480,8 +504,9 @@ class SchedulerService:
             results.setdefault("day_off", [])
             results.setdefault("night_out", [])
             results.setdefault("not_going", [])
+            results.setdefault("custom", {})
             return results
-        return {"slots": {}, "curator": [], "day_off": [], "night_out": [], "not_going": []}
+        return {"slots": {}, "curator": [], "day_off": [], "night_out": [], "not_going": [], "custom": {}}
 
     def _extract_voted_user_ids(self, poll: Dict[str, Any]) -> set[int]:
         results = self._normalize_results(poll.get("results"))
@@ -498,6 +523,13 @@ class SchedulerService:
             for voter in results.get(key, []):
                 if isinstance(voter, dict) and voter.get("user_id"):
                     user_ids.add(int(voter["user_id"]))
+        custom_results = results.get("custom", {})
+        if isinstance(custom_results, dict):
+            for voters in custom_results.values():
+                if isinstance(voters, list):
+                    for voter in voters:
+                        if isinstance(voter, dict) and voter.get("user_id"):
+                            user_ids.add(int(voter["user_id"]))
         return user_ids
 
     def _format_member_tag(self, member: Dict[str, Any]) -> str:

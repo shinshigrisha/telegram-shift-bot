@@ -19,6 +19,8 @@ DEFAULT_DAY_SLOTS: List[Dict[str, str]] = [
 ]
 
 NIGHT_GROUP_MARKERS = ("ноч", "night")
+DEFAULT_DAY_OPTION_KEYS = ("curator", "day_off")
+DEFAULT_NIGHT_OPTION_KEYS = ("night_out", "not_going", "curator", "day_off")
 
 
 class GroupService:
@@ -227,6 +229,22 @@ class GroupService:
         settings["slots"] = slots
         
         return await self.repository.update(group_id, settings=settings)
+
+    async def update_extra_options(
+        self,
+        group_id: int,
+        extra_options: List[str],
+    ) -> bool:
+        group = await self.repository.get_by_id(group_id)
+        if not group:
+            return False
+
+        settings = group.get("settings", {})
+        if not isinstance(settings, dict):
+            settings = {}
+
+        settings["extra_options"] = [option.strip() for option in extra_options if option.strip()]
+        return await self.repository.update(group_id, settings=settings)
     
     def get_slots_config(self, group: Dict[str, Any]) -> List[Dict[str, Any]]:
         """
@@ -247,6 +265,17 @@ class GroupService:
             return []
         
         return slots
+
+    def get_extra_options(self, group: Dict[str, Any]) -> List[str]:
+        settings = group.get("settings", {})
+        if not isinstance(settings, dict):
+            return []
+
+        extra_options = settings.get("extra_options", [])
+        if not isinstance(extra_options, list):
+            return []
+
+        return [str(option).strip() for option in extra_options if str(option).strip()]
     
     async def get_system_stats(self) -> Dict[str, Any]:
         """

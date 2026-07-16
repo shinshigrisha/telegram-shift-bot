@@ -395,6 +395,141 @@ async def callback_slots_menu(callback: CallbackQuery, state: FSMContext) -> Non
     await safe_answer_callback(callback)
 
 
+@router.callback_query(lambda c: c.data == "admin:settings:extra_options")
+@require_admin_callback
+async def callback_extra_options_menu(
+    callback: CallbackQuery,
+    state: FSMContext,
+    group_service: GroupService,
+) -> None:
+    groups = await group_service.get_all_groups()
+
+    if not groups:
+        await safe_edit_message(
+            callback.message,
+            "❌ Нет зарегистрированных групп.",
+            reply_markup=get_back_keyboard("admin:settings_menu"),
+            parse_mode="HTML",
+        )
+        await safe_answer_callback(callback)
+        return
+
+    await state.set_state(AdminPanelStates.waiting_for_extra_options_group)
+
+    from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
+    keyboard_buttons = []
+    for group in groups:
+        group_name = clean_group_name_for_display(group.get("name", f"Группа {group.get('id', '?')}"))
+        if len(group_name) > 30:
+            group_name = group_name[:27] + "..."
+        keyboard_buttons.append([
+            InlineKeyboardButton(
+                text=group_name,
+                callback_data=f"admin:extra_options_group:{group['id']}"
+            )
+        ])
+    keyboard_buttons.append([InlineKeyboardButton(text="◀️ Назад", callback_data="admin:settings_menu")])
+
+    await safe_edit_message(
+        callback.message,
+        "📝 <b>Дополнительные ответы в опросе</b>\n\nВыберите группу:",
+        reply_markup=InlineKeyboardMarkup(inline_keyboard=keyboard_buttons),
+        parse_mode="HTML",
+    )
+    await safe_answer_callback(callback)
+
+
+@router.callback_query(lambda c: c.data and c.data.startswith("admin:extra_options_group:"))
+@require_admin_callback
+async def callback_extra_options_group(
+    callback: CallbackQuery,
+    state: FSMContext,
+    group_service: GroupService,
+) -> None:
+    group_id = int(callback.data.split(":")[-1])
+    group = await group_service.get_group_by_id(group_id)
+    if not group:
+        await safe_edit_message(
+            callback.message,
+            "❌ Группа не найдена.",
+            reply_markup=get_back_keyboard("admin:settings:extra_options"),
+            parse_mode="HTML",
+        )
+        await safe_answer_callback(callback)
+        return
+
+    extra_options = group_service.get_extra_options(group)
+    current_text = "\n".join(f"• {option}" for option in extra_options) if extra_options else "— нет"
+
+    await state.set_state(AdminPanelStates.waiting_for_extra_options_input)
+    await state.update_data(group_id=group_id)
+
+    text = (
+        f"📝 <b>Дополнительные ответы</b>\n\n"
+        f"Группа: <b>{clean_group_name_for_display(group.get('name', 'Без названия'))}</b>\n\n"
+        f"Текущие ответы:\n{current_text}\n\n"
+        "Отправьте новые варианты, каждый с новой строки.\n"
+        "Пример:\n"
+        "<code>Болею\nОпоздаю\nНа обучении</code>\n\n"
+        "Чтобы очистить список, отправьте <code>нет</code>.\n"
+        "Для отмены: <code>отмена</code>"
+    )
+
+    await safe_edit_message(
+        callback.message,
+        text,
+        reply_markup=get_back_keyboard("admin:settings:extra_options"),
+        parse_mode="HTML",
+    )
+    await safe_answer_callback(callback)
+
+
+@router.message(AdminPanelStates.waiting_for_extra_options_input)
+async def process_extra_options_input(
+    message: Message,
+    state: FSMContext,
+    group_service: GroupService,
+) -> None:
+    text_value = (message.text or "").strip()
+
+    if text_value.lower() == "отмена":
+        await state.clear()
+        await message.answer("❌ Настройка дополнительных ответов отменена", parse_mode="HTML")
+        return
+
+    data = await state.get_data()
+    group_id = data.get("group_id")
+    group = await group_service.get_group_by_id(group_id)
+    if not group:
+        await state.clear()
+        await message.answer("❌ Группа не найдена", parse_mode="HTML")
+        return
+
+    if text_value.lower() == "нет":
+        extra_options: list[str] = []
+    else:
+        extra_options = [line.strip() for line in text_value.splitlines() if line.strip()]
+        if not extra_options:
+            await message.answer(
+                "❌ Не удалось прочитать варианты. Отправьте каждый вариант с новой строки.",
+                parse_mode="HTML",
+            )
+            return
+
+    await group_service.update_extra_options(group_id, extra_options)
+    group_name = clean_group_name_for_display(group.get("name", "Без названия"))
+    saved_text = "\n".join(f"• {option}" for option in extra_options) if extra_options else "— нет"
+
+    await message.answer(
+        f"✅ <b>Дополнительные ответы сохранены</b>\n\n"
+        f"Группа: <b>{group_name}</b>\n\n"
+        f"{saved_text}",
+        parse_mode="HTML",
+        reply_markup=get_back_keyboard("admin:settings_menu"),
+    )
+    await state.clear()
+
+
 @router.callback_query(lambda c: c.data and c.data.startswith("admin:slot:action:"))
 @require_admin_callback
 async def callback_slot_action(callback: CallbackQuery, state: FSMContext, group_service: GroupService) -> None:

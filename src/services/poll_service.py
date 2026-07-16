@@ -1,11 +1,13 @@
 """
 Сервис для работы с опросами.
 """
+import asyncio
 import logging
 from typing import List, Optional, Dict, Any, Tuple
 from datetime import date, datetime, timedelta
 from asyncpg import Pool
 from aiogram import Bot
+from aiogram.exceptions import TelegramNetworkError
 
 from src.repositories.poll_repository import PollRepository
 from src.repositories.group_repository import GroupRepository
@@ -79,6 +81,9 @@ class PollService:
             Список вариантов ответов
         """
         is_night = group.get('is_night', False)
+        extra_options = (group.get("settings") or {}).get("extra_options", [])
+        if not isinstance(extra_options, list):
+            extra_options = []
         options = []
         
         if is_night:
@@ -97,6 +102,8 @@ class PollService:
 
             options.append("Куратор")
             options.append("Выходной")
+
+        options.extend(str(option).strip() for option in extra_options if str(option).strip())
         
         return options
 
@@ -120,6 +127,46 @@ class PollService:
                 group_name,
                 e,
             )
+
+    async def _send_poll_with_retry(
+        self,
+        chat_id: int,
+        question: str,
+        options: List[str],
+        group_name: str,
+        attempts: int = 3,
+    ):
+        """Отправить опрос в Telegram с повтором при временной сетевой ошибке."""
+        last_error: Optional[Exception] = None
+
+        for attempt in range(1, attempts + 1):
+            try:
+                return await self.bot.send_poll(
+                    chat_id=chat_id,
+                    question=question,
+                    options=options,
+                    is_anonymous=False,
+                    allows_multiple_answers=False,
+                )
+            except TelegramNetworkError as e:
+                last_error = e
+                if attempt >= attempts:
+                    break
+
+                delay_seconds = attempt
+                logger.warning(
+                    "Сетевая ошибка при создании опроса для группы %s, попытка %d/%d: %s. Повтор через %d сек.",
+                    group_name,
+                    attempt,
+                    attempts,
+                    e,
+                    delay_seconds,
+                )
+                await asyncio.sleep(delay_seconds)
+
+        if last_error:
+            raise last_error
+        raise RuntimeError(f"Не удалось отправить опрос для группы {group_name}")
     
     async def create_daily_polls(self, target_date: Optional[date] = None) -> Tuple[int, List[str]]:
         """
@@ -186,12 +233,11 @@ class PollService:
                 
                 # Создаем опрос в Telegram
                 try:
-                    poll_message = await self.bot.send_poll(
+                    poll_message = await self._send_poll_with_retry(
                         chat_id=chat_id,
                         question=question,
                         options=options,
-                        is_anonymous=False,
-                        allows_multiple_answers=False,  # Один выбор
+                        group_name=group['name'],
                     )
                     
                     # Сохраняем опрос в БД
@@ -270,12 +316,11 @@ class PollService:
         chat_id = group['telegram_chat_id']
         
         try:
-            poll_message = await self.bot.send_poll(
+            poll_message = await self._send_poll_with_retry(
                 chat_id=chat_id,
                 question=question,
                 options=options,
-                is_anonymous=False,
-                allows_multiple_answers=False,
+                group_name=group['name'],
             )
             
             poll = await self.poll_repo.create(

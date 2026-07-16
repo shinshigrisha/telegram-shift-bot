@@ -59,6 +59,8 @@ def format_group_info(group: Dict[str, Any]) -> str:
     
     slots = settings.get("slots", []) if isinstance(settings, dict) else []
     slots_count = len(slots) if isinstance(slots, list) else 0
+    extra_options = settings.get("extra_options", []) if isinstance(settings, dict) else []
+    extra_options_count = len(extra_options) if isinstance(extra_options, list) else 0
     
     poll_close_time = group.get("poll_close_time", "19:00")
     if poll_close_time and isinstance(poll_close_time, str) and len(poll_close_time) > 8:
@@ -68,7 +70,7 @@ def format_group_info(group: Dict[str, Any]) -> str:
     text = (
         f"{status} {night} <b>{name}</b>\n"
         f"   ID: {group_id} | Chat: {chat_id}\n"
-        f"   Слотов: {slots_count} | Закрытие: {poll_close_time}"
+        f"   Слотов: {slots_count} | Доп. ответов: {extra_options_count} | Закрытие: {poll_close_time}"
     )
     
     return text

@@ -48,6 +48,14 @@ def _extract_voted_user_ids(results: dict) -> set[int]:
             if isinstance(voter, dict) and voter.get("user_id"):
                 voted_user_ids.add(int(voter["user_id"]))
 
+    custom_buckets = results.get("custom", {}) if isinstance(results, dict) else {}
+    if isinstance(custom_buckets, dict):
+        for voters in custom_buckets.values():
+            if isinstance(voters, list):
+                for voter in voters:
+                    if isinstance(voter, dict) and voter.get("user_id"):
+                        voted_user_ids.add(int(voter["user_id"]))
+
     return voted_user_ids
 
 
@@ -711,6 +719,7 @@ async def callback_select_group_for_polls(
             # Получаем слоты группы для форматирования
             try:
                 slots = group_service.get_slots_config(group)
+                extra_options = group_service.get_extra_options(group)
                 
                 if group.get("is_night", False):
                     results = poll.get('results', {}) if isinstance(poll.get('results'), dict) else {}
@@ -726,6 +735,15 @@ async def callback_select_group_for_polls(
                             voter_name = voter.get('name', 'Неизвестный') if isinstance(voter, dict) else str(voter)
                             text += f"• {voter_name}\n"
                         text += "\n"
+                    custom_results = results.get("custom", {}) if isinstance(results, dict) else {}
+                    if isinstance(custom_results, dict):
+                        for index, option_text in enumerate(extra_options):
+                            voters = custom_results.get(f"option_{index}", [])
+                            text += f"<b>{option_text}:</b> {len(voters)}\n"
+                            for voter in voters[:20]:
+                                voter_name = voter.get('name', 'Неизвестный') if isinstance(voter, dict) else str(voter)
+                                text += f"• {voter_name}\n"
+                            text += "\n"
                 elif slots:
                     text += "📋 <b>Результаты по выходам:</b>\n\n"
                     # Формируем структуру результатов
@@ -771,6 +789,18 @@ async def callback_select_group_for_polls(
                                     text += f"• {person_name}\n"
                                 if len(day_off) > 10:
                                     text += f"... и еще {len(day_off) - 10} человек\n"
+                            text += "\n"
+
+                        custom_results = results.get("custom", {}) if isinstance(results, dict) else {}
+                        if isinstance(custom_results, dict):
+                            for index, option_text in enumerate(extra_options):
+                                voters = custom_results.get(f"option_{index}", [])
+                                if voters:
+                                    text += f"<b>{option_text}:</b> {len(voters)}\n"
+                                    for person in voters[:20]:
+                                        person_name = person.get('name', 'Неизвестный') if isinstance(person, dict) else str(person)
+                                        text += f"• {person_name}\n"
+                                    text += "\n"
 
                         members = await group_member_service.get_group_members(group_id)
                         voted_user_ids = _extract_voted_user_ids(results)
@@ -795,6 +825,10 @@ async def callback_select_group_for_polls(
                             slot_start = slot.get('start', '?')
                             slot_end = slot.get('end', '?')
                             text += f"• {slot_start} - {slot_end}\n"
+                        if extra_options:
+                            text += "\n📝 <b>Дополнительные ответы:</b>\n"
+                            for option_text in extra_options:
+                                text += f"• {option_text}\n"
                 else:
                     text += "⚠️ У группы не настроены выходы."
                     

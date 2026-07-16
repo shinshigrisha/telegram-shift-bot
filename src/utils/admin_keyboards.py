@@ -49,6 +49,7 @@ def get_settings_menu_keyboard() -> InlineKeyboardMarkup:
     keyboard = [
         [InlineKeyboardButton(text="⏰ Настроить расписание", callback_data="admin:settings:schedule")],
         [InlineKeyboardButton(text="⚙️ Настроить слоты", callback_data="admin:settings:slots")],
+        [InlineKeyboardButton(text="📝 Доп. ответы в опросе", callback_data="admin:settings:extra_options")],
         [InlineKeyboardButton(text="◀️ Назад", callback_data="admin:back_to_main")],
     ]
     return InlineKeyboardMarkup(inline_keyboard=keyboard)
