@@ -1,5 +1,5 @@
 """
-Обработчики сотрудников групп.
+Обработчики курьеров групп.
 """
 import logging
 
@@ -36,7 +36,7 @@ def _build_groups_keyboard(groups: list[dict], action: str) -> InlineKeyboardMar
 def _build_members_keyboard(members: list[dict], group_id: int) -> InlineKeyboardMarkup:
     keyboard = []
     for member in members:
-        title = member.get("full_name", f"Сотрудник {member['id']}")
+        title = member.get("full_name", f"Курьер {member['id']}")
         keyboard.append([
             InlineKeyboardButton(
                 text=title,
@@ -50,7 +50,7 @@ def _build_members_keyboard(members: list[dict], group_id: int) -> InlineKeyboar
 def _build_members_action_keyboard(members: list[dict], action: str) -> InlineKeyboardMarkup:
     keyboard = []
     for member in members:
-        title = member.get("full_name", f"Сотрудник {member['id']}")
+        title = member.get("full_name", f"Курьер {member['id']}")
         keyboard.append([
             InlineKeyboardButton(
                 text=title,
@@ -63,7 +63,7 @@ def _build_members_action_keyboard(members: list[dict], action: str) -> InlineKe
 
 def _format_bindings_text(group_name: str, members: list[dict]) -> str:
     if not members:
-        return f"🔗 <b>{group_name}</b>\n\nСписок сотрудников пуст."
+        return f"🔗 <b>{group_name}</b>\n\nСписок курьеров пуст."
 
     linked = [member for member in members if member.get("telegram_user_id")]
     unlinked = [member for member in members if not member.get("telegram_user_id")]
@@ -71,7 +71,7 @@ def _format_bindings_text(group_name: str, members: list[dict]) -> str:
     lines = [
         f"🔗 <b>{group_name}</b>",
         "",
-        f"Всего сотрудников: <b>{len(members)}</b>",
+        f"Всего курьеров: <b>{len(members)}</b>",
         f"Привязаны к Telegram: <b>{len(linked)}</b>",
         f"Не привязаны: <b>{len(unlinked)}</b>",
         "",
@@ -98,7 +98,7 @@ def _format_bindings_text(group_name: str, members: list[dict]) -> str:
         lines.append("")
 
     lines.append(
-        "💡 Привязка появляется после голосования сотрудника в опросе "
+        "💡 Привязка появляется после голосования курьера в опросе "
         "или если запись уже была связана ранее."
     )
     return "\n".join(lines)
@@ -125,7 +125,7 @@ async def callback_employee_add_start(
     await state.set_state(AdminPanelStates.waiting_for_employee_group)
     await safe_edit_message(
         callback.message,
-        "👥 <b>Добавление сотрудника</b>\n\nВыберите группу ЗИЗ:",
+        "👥 <b>Добавление курьера</b>\n\nВыберите группу ЗИЗ:",
         reply_markup=_build_groups_keyboard(groups, "add"),
     )
     await safe_answer_callback(callback)
@@ -152,7 +152,7 @@ async def callback_employee_list_start(
     await state.set_state(AdminPanelStates.waiting_for_employee_group)
     await safe_edit_message(
         callback.message,
-        "👥 <b>Список сотрудников</b>\n\nВыберите группу ЗИЗ:",
+        "👥 <b>Список курьеров</b>\n\nВыберите группу ЗИЗ:",
         reply_markup=_build_groups_keyboard(groups, "list"),
     )
     await safe_answer_callback(callback)
@@ -206,7 +206,7 @@ async def callback_employee_rename_start(
     await state.set_state(AdminPanelStates.waiting_for_employee_group)
     await safe_edit_message(
         callback.message,
-        "✏️ <b>Переименование сотрудника</b>\n\nВыберите группу ЗИЗ:",
+        "✏️ <b>Переименование курьера</b>\n\nВыберите группу ЗИЗ:",
         reply_markup=_build_groups_keyboard(groups, "rename"),
     )
     await safe_answer_callback(callback)
@@ -233,7 +233,7 @@ async def callback_employee_move_start(
     await state.set_state(AdminPanelStates.waiting_for_employee_group)
     await safe_edit_message(
         callback.message,
-        "🔄 <b>Перенос сотрудника</b>\n\nСначала выберите текущую группу ЗИЗ:",
+        "🔄 <b>Перенос курьера</b>\n\nСначала выберите текущую группу ЗИЗ:",
         reply_markup=_build_groups_keyboard(groups, "move"),
     )
     await safe_answer_callback(callback)
@@ -260,7 +260,7 @@ async def callback_employee_delete_start(
     await state.set_state(AdminPanelStates.waiting_for_employee_group)
     await safe_edit_message(
         callback.message,
-        "🗑️ <b>Удаление сотрудника</b>\n\nВыберите группу ЗИЗ:",
+        "🗑️ <b>Удаление курьера</b>\n\nВыберите группу ЗИЗ:",
         reply_markup=_build_groups_keyboard(groups, "delete"),
     )
     await safe_answer_callback(callback)
@@ -296,14 +296,14 @@ async def callback_employee_group_action(
             await state.clear()
             await safe_edit_message(
                 callback.message,
-                "❌ Сотрудник не найден.",
+                "❌ Курьер не найден.",
                 reply_markup=get_back_keyboard("admin:employees_menu"),
             )
         else:
             success = await group_member_service.move_member(member_id=member_id, group_id=group_id)
             text = (
-                f"✅ Сотрудник <b>{member.get('full_name')}</b> перенесен в группу <b>{group.get('name')}</b>."
-                if success else "❌ Не удалось перенести сотрудника."
+                f"✅ Курьер <b>{member.get('full_name')}</b> перенесен в группу <b>{group.get('name')}</b>."
+                if success else "❌ Не удалось перенести курьера."
             )
             await state.clear()
             await safe_edit_message(
@@ -315,7 +315,7 @@ async def callback_employee_group_action(
         await state.set_state(AdminPanelStates.waiting_for_employee_name)
         await safe_edit_message(
             callback.message,
-            f"👥 <b>Добавление сотрудника</b>\n\nГруппа: <b>{group['name']}</b>\n\n"
+            f"👥 <b>Добавление курьера</b>\n\nГруппа: <b>{group['name']}</b>\n\n"
             "Введите Фамилию и Имя одним сообщением.\n"
             "Пример: <code>Иванов Иван</code>",
             reply_markup=get_back_keyboard("admin:employees_menu"),
@@ -325,7 +325,7 @@ async def callback_employee_group_action(
         inactive_members = await group_member_service.get_group_members(group_id, active_only=False)
         inactive_members = [member for member in inactive_members if not member.get("is_active", True)]
         if not active_members and not inactive_members:
-            text = f"📋 <b>{group['name']}</b>\n\nСписок сотрудников пуст."
+            text = f"📋 <b>{group['name']}</b>\n\nСписок курьеров пуст."
         else:
             lines = [f"📋 <b>{group['name']}</b>", ""]
             if active_members:
@@ -357,13 +357,13 @@ async def callback_employee_group_action(
             await state.clear()
             await safe_edit_message(
                 callback.message,
-                f"📋 <b>{group['name']}</b>\n\nСписок сотрудников пуст.",
+                f"📋 <b>{group['name']}</b>\n\nСписок курьеров пуст.",
                 reply_markup=get_back_keyboard("admin:employees_menu"),
             )
         else:
             await safe_edit_message(
                 callback.message,
-                f"✏️ <b>{group['name']}</b>\n\nВыберите сотрудника для переименования:",
+                f"✏️ <b>{group['name']}</b>\n\nВыберите курьера для переименования:",
                 reply_markup=_build_members_action_keyboard(members, "rename"),
             )
     elif action == "move":
@@ -372,13 +372,13 @@ async def callback_employee_group_action(
             await state.clear()
             await safe_edit_message(
                 callback.message,
-                f"📋 <b>{group['name']}</b>\n\nСписок сотрудников пуст.",
+                f"📋 <b>{group['name']}</b>\n\nСписок курьеров пуст.",
                 reply_markup=get_back_keyboard("admin:employees_menu"),
             )
         else:
             await safe_edit_message(
                 callback.message,
-                f"🔄 <b>{group['name']}</b>\n\nВыберите сотрудника для переноса:",
+                f"🔄 <b>{group['name']}</b>\n\nВыберите курьера для переноса:",
                 reply_markup=_build_members_action_keyboard(members, "move"),
             )
     else:
@@ -387,13 +387,13 @@ async def callback_employee_group_action(
             await state.clear()
             await safe_edit_message(
                 callback.message,
-                f"📋 <b>{group['name']}</b>\n\nСписок сотрудников пуст.",
+                f"📋 <b>{group['name']}</b>\n\nСписок курьеров пуст.",
                 reply_markup=get_back_keyboard("admin:employees_menu"),
             )
         else:
             await safe_edit_message(
                 callback.message,
-                f"🗑️ <b>{group['name']}</b>\n\nВыберите сотрудника для удаления:",
+                f"🗑️ <b>{group['name']}</b>\n\nВыберите курьера для удаления:",
                 reply_markup=_build_members_keyboard(members, group_id),
             )
 
@@ -409,7 +409,7 @@ async def process_employee_name(
 ) -> None:
     if message.text and message.text.lower() == "отмена":
         await state.clear()
-        await message.answer("❌ Добавление сотрудника отменено", parse_mode="HTML")
+        await message.answer("❌ Добавление курьера отменено", parse_mode="HTML")
         return
 
     full_name = (message.text or "").strip()
@@ -428,7 +428,7 @@ async def process_employee_name(
     member = await group_member_service.add_member(group_id=group_id, full_name=full_name)
     await state.clear()
     await message.answer(
-        f"✅ Сотрудник <b>{member['full_name']}</b> добавлен в группу <b>{group['name']}</b>.",
+        f"✅ Курьер <b>{member['full_name']}</b> добавлен в группу <b>{group['name']}</b>.",
         parse_mode="HTML",
         reply_markup=get_back_keyboard("admin:employees_menu"),
     )
@@ -446,7 +446,7 @@ async def callback_rename_member_select(
     if not member:
         await safe_edit_message(
             callback.message,
-            "❌ Сотрудник не найден.",
+            "❌ Курьер не найден.",
             reply_markup=get_back_keyboard("admin:employees_menu"),
         )
         await safe_answer_callback(callback)
@@ -456,7 +456,7 @@ async def callback_rename_member_select(
     await state.set_state(AdminPanelStates.waiting_for_employee_rename)
     await safe_edit_message(
         callback.message,
-        f"✏️ <b>Переименование сотрудника</b>\n\n"
+        f"✏️ <b>Переименование курьера</b>\n\n"
         f"Текущее имя: <b>{member.get('full_name')}</b>\n\n"
         f"Введите новое <b>Имя и Фамилию</b> одним сообщением.",
         reply_markup=get_back_keyboard("admin:employees_menu"),
@@ -472,7 +472,7 @@ async def process_employee_rename(
 ) -> None:
     if message.text and message.text.lower() == "отмена":
         await state.clear()
-        await message.answer("❌ Переименование сотрудника отменено", parse_mode="HTML")
+        await message.answer("❌ Переименование курьера отменено", parse_mode="HTML")
         return
 
     full_name = (message.text or "").strip()
@@ -484,7 +484,7 @@ async def process_employee_rename(
     member_id = data.get("member_id")
     success = await group_member_service.rename_member(member_id=member_id, full_name=full_name)
     await state.clear()
-    text = f"✅ Сотрудник переименован в <b>{full_name}</b>." if success else "❌ Сотрудник не найден."
+    text = f"✅ Курьер переименован в <b>{full_name}</b>." if success else "❌ Курьер не найден."
     await message.answer(text, parse_mode="HTML", reply_markup=get_back_keyboard("admin:employees_menu"))
 
 
@@ -501,7 +501,7 @@ async def callback_move_member_select(
     if not member:
         await safe_edit_message(
             callback.message,
-            "❌ Сотрудник не найден.",
+            "❌ Курьер не найден.",
             reply_markup=get_back_keyboard("admin:employees_menu"),
         )
         await safe_answer_callback(callback)
@@ -523,8 +523,8 @@ async def callback_move_member_select(
     await state.set_state(AdminPanelStates.waiting_for_employee_transfer_group)
     await safe_edit_message(
         callback.message,
-        f"🔄 <b>Перенос сотрудника</b>\n\n"
-        f"Сотрудник: <b>{member.get('full_name')}</b>\n"
+        f"🔄 <b>Перенос курьера</b>\n\n"
+        f"Курьер: <b>{member.get('full_name')}</b>\n"
         f"Выберите новую группу:",
         reply_markup=_build_groups_keyboard(target_groups, "transfer_to"),
     )
@@ -540,7 +540,7 @@ async def callback_delete_member(
     _, _, _, _, member_id_text = callback.data.split(":")
     member_id = int(member_id_text)
     success = await group_member_service.delete_member(member_id)
-    text = "✅ Сотрудник удален из группы и отмечен как неактивный." if success else "❌ Сотрудник не найден."
+    text = "✅ Курьер удален из группы и отмечен как неактивный." if success else "❌ Курьер не найден."
     await safe_edit_message(
         callback.message,
         text,

@@ -328,6 +328,39 @@ class PollRepository:
         
         return await self.update(poll_id, status="closed", closed_at=closed_at)
 
+    async def claim_for_closing(self, poll_id: str) -> bool:
+        """
+        Атомарно забрать активный опрос в обработку закрытия.
+
+        Returns:
+            True, если текущий процесс первым забрал опрос.
+        """
+        async with self.pool.acquire() as conn:
+            result = await conn.execute(
+                """
+                UPDATE daily_polls
+                SET status = 'closing'
+                WHERE id = $1 AND status = 'active'
+                """,
+                poll_id,
+            )
+            return result == "UPDATE 1"
+
+    async def release_closing_claim(self, poll_id: str) -> bool:
+        """
+        Вернуть опрос из промежуточного статуса closing обратно в active.
+        """
+        async with self.pool.acquire() as conn:
+            result = await conn.execute(
+                """
+                UPDATE daily_polls
+                SET status = 'active'
+                WHERE id = $1 AND status = 'closing'
+                """,
+                poll_id,
+            )
+            return result == "UPDATE 1"
+
     async def delete(self, poll_id: str) -> bool:
         """Удалить опрос из БД."""
         async with self.pool.acquire() as conn:

@@ -762,7 +762,7 @@ async def callback_select_group_for_polls(
                         if telegram_user_id is not None and int(telegram_user_id) in settings.ADMIN_IDS:
                             continue
                         if telegram_user_id is None or int(telegram_user_id) not in voted_user_ids:
-                            not_voted.append(member.get("full_name", "Неизвестный сотрудник"))
+                            not_voted.append(member.get("full_name", "Неизвестный курьер"))
 
                     if not_voted:
                         text += "<b>Не отметились:</b>\n"
@@ -853,7 +853,7 @@ async def callback_select_group_for_polls(
                             if telegram_user_id is not None and int(telegram_user_id) in settings.ADMIN_IDS:
                                 continue
                             if telegram_user_id is None or int(telegram_user_id) not in voted_user_ids:
-                                not_voted.append(member.get("full_name", "Неизвестный сотрудник"))
+                                not_voted.append(member.get("full_name", "Неизвестный курьер"))
 
                         if not_voted:
                             text += "\n<b>Не отметились:</b>\n"

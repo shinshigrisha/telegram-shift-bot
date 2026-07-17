@@ -140,10 +140,10 @@ async def callback_broadcast_menu(callback: CallbackQuery) -> None:
 @router.callback_query(lambda c: c.data == "admin:employees_menu")
 @require_admin_callback
 async def callback_employees_menu(callback: CallbackQuery) -> None:
-    """Меню сотрудников групп."""
+    """Меню курьеров групп."""
     text = (
-        "👥 <b>Сотрудники групп</b>\n\n"
-        "Здесь хранится реестр сотрудников по каждой группе ЗИЗ.\n"
+        "👥 <b>Курьеры групп</b>\n\n"
+        "Здесь хранится реестр курьеров по каждой группе ЗИЗ.\n"
         "Именно по нему бот считает, кто не отметился в опросе."
     )
     await safe_edit_message(callback.message, text, reply_markup=get_employee_menu_keyboard())

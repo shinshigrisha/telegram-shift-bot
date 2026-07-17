@@ -19,6 +19,14 @@ from src.services.group_member_service import GroupMemberService
 logger = logging.getLogger(__name__)
 
 
+def _format_people_count(count: int) -> str:
+    if count % 10 == 1 and count % 100 != 11:
+        return f"{count} человек"
+    if count % 10 in (2, 3, 4) and count % 100 not in (12, 13, 14):
+        return f"{count} человека"
+    return f"{count} человек"
+
+
 class SchedulerService:
     """
     Сервис планировщика для автоматизации опросов.
@@ -421,32 +429,48 @@ class SchedulerService:
         
         report = (
             f"📊 <b>Результаты опроса</b>\n"
-            f"📅 Дата: {poll_date.strftime('%d.%m.%Y') if poll_date else 'N/A'}\n"
+            f"\n📅 Дата: {poll_date.strftime('%d.%m.%Y') if poll_date else 'N/A'}\n"
             f"📍 Группа: {group_name}\n"
-            f"⏰ Закрыт: {datetime.now().strftime('%H:%M')}\n\n"
+            f"⏰ Опрос закрыт: в {datetime.now().strftime('%H:%M')}\n\n"
         )
         
         if group.get("is_night", False):
+            report += "Рабочие смены\n\n"
             for title, key in (
                 ("Выхожу", "night_out"),
                 ("Не выхожу", "not_going"),
-                ("Куратор", "curator"),
-                ("Выходной", "day_off"),
             ):
                 voters = results.get(key, [])
-                report += f"• <b>{title}</b> ({len(voters)}):\n"
-                for voter in voters[:20]:
-                    report += f"   • {self.group_member_service.resolve_voter_display_name(voter, member_names_by_id, member_names_by_user_id)}\n"
+                if voters:
+                    report += f"✅ {title} — {_format_people_count(len(voters))}\n"
+                    for voter in voters[:20]:
+                        report += f"• {self.group_member_service.resolve_voter_display_name(voter, member_names_by_id, member_names_by_user_id)}\n"
+                else:
+                    report += f"❌ {title} — нет курьеров\n"
                 report += "\n"
+            report += "Дополнительно\n\n"
+            for title, key, icon in (
+                ("Куратор", "curator", "👤"),
+                ("Выходной", "day_off", "🏖"),
+            ):
+                voters = results.get(key, [])
+                if voters:
+                    suffix = ":" if key == "curator" else f" — {_format_people_count(len(voters))}"
+                    report += f"{icon} {title}{suffix}\n"
+                    for voter in voters[:20]:
+                        report += f"• {self.group_member_service.resolve_voter_display_name(voter, member_names_by_id, member_names_by_user_id)}\n"
+                    report += "\n"
             custom_results = results.get("custom", {})
             if isinstance(custom_results, dict):
                 for index, option_text in enumerate(extra_options):
                     voters = custom_results.get(f"option_{index}", [])
-                    report += f"• <b>{option_text}</b> ({len(voters)}):\n"
-                    for voter in voters[:20]:
-                        report += f"   • {self.group_member_service.resolve_voter_display_name(voter, member_names_by_id, member_names_by_user_id)}\n"
-                    report += "\n"
+                    if voters:
+                        report += f"📝 {option_text} — {_format_people_count(len(voters))}\n"
+                        for voter in voters[:20]:
+                            report += f"• {self.group_member_service.resolve_voter_display_name(voter, member_names_by_id, member_names_by_user_id)}\n"
+                        report += "\n"
         elif slots:
+            report += "Рабочие смены\n\n"
             for i, slot in enumerate(slots):
                 start = slot.get('start', '?')
                 end = slot.get('end', '?')
@@ -455,32 +479,43 @@ class SchedulerService:
                 current_count = len(slot_votes) if isinstance(slot_votes, list) else 0
 
                 status = "✅" if current_count > 0 else "❌"
-                report += f"{status} <b>{start}-{end}</b> ({current_count})\n"
+                dash = "–"
+                if current_count > 0:
+                    report += f"{status} {start}{dash}{end} — {_format_people_count(current_count)}\n"
+                else:
+                    report += f"{status} {start}{dash}{end} — нет курьеров\n"
                 
                 if isinstance(slot_votes, list) and slot_votes:
                     for voter in slot_votes[:10]:  # Максимум 10 имен
-                        report += f"   • {self.group_member_service.resolve_voter_display_name(voter, member_names_by_id, member_names_by_user_id)}\n"
+                        report += f"• {self.group_member_service.resolve_voter_display_name(voter, member_names_by_id, member_names_by_user_id)}\n"
                     if len(slot_votes) > 10:
-                        report += f"   ... и еще {len(slot_votes) - 10}\n"
+                        report += f"... и еще {len(slot_votes) - 10}\n"
                 report += "\n"
         
         if not group.get("is_night", False):
+            has_additional = False
             curator_votes = results.get('curator', [])
             if curator_votes:
-                report += f"👤 <b>Куратор</b> ({len(curator_votes)}):\n"
+                if not has_additional:
+                    report += "Дополнительно\n\n"
+                    has_additional = True
+                report += "👤 Куратор:\n"
                 for voter in curator_votes[:10]:
-                    report += f"   • {self.group_member_service.resolve_voter_display_name(voter, member_names_by_id, member_names_by_user_id)}\n"
+                    report += f"• {self.group_member_service.resolve_voter_display_name(voter, member_names_by_id, member_names_by_user_id)}\n"
                 if len(curator_votes) > 10:
-                    report += f"   ... и еще {len(curator_votes) - 10}\n"
+                    report += f"... и еще {len(curator_votes) - 10}\n"
                 report += "\n"
 
             dayoff_votes = results.get('day_off', [])
             if dayoff_votes:
-                report += f"🏖 <b>Выходной</b> ({len(dayoff_votes)}):\n"
+                if not has_additional:
+                    report += "Дополнительно\n\n"
+                    has_additional = True
+                report += f"🏖 Выходной — {_format_people_count(len(dayoff_votes))}\n"
                 for voter in dayoff_votes[:10]:
-                    report += f"   • {self.group_member_service.resolve_voter_display_name(voter, member_names_by_id, member_names_by_user_id)}\n"
+                    report += f"• {self.group_member_service.resolve_voter_display_name(voter, member_names_by_id, member_names_by_user_id)}\n"
                 if len(dayoff_votes) > 10:
-                    report += f"   ... и еще {len(dayoff_votes) - 10}\n"
+                    report += f"... и еще {len(dayoff_votes) - 10}\n"
                 report += "\n"
 
             custom_results = results.get("custom", {})
@@ -488,11 +523,14 @@ class SchedulerService:
                 for index, option_text in enumerate(extra_options):
                     voters = custom_results.get(f"option_{index}", [])
                     if voters:
-                        report += f"📝 <b>{option_text}</b> ({len(voters)}):\n"
+                        if not has_additional:
+                            report += "Дополнительно\n\n"
+                            has_additional = True
+                        report += f"📝 {option_text} — {_format_people_count(len(voters))}\n"
                         for voter in voters[:10]:
-                            report += f"   • {self.group_member_service.resolve_voter_display_name(voter, member_names_by_id, member_names_by_user_id)}\n"
+                            report += f"• {self.group_member_service.resolve_voter_display_name(voter, member_names_by_id, member_names_by_user_id)}\n"
                         if len(voters) > 10:
-                            report += f"   ... и еще {len(voters) - 10}\n"
+                            report += f"... и еще {len(voters) - 10}\n"
                         report += "\n"
         
         return report
@@ -544,6 +582,16 @@ class SchedulerService:
         group: Dict[str, Any],
     ) -> None:
         """Закрыть один опрос, отправить итоги в чат и сохранить отчет."""
+        poll_id = str(poll["id"])
+        claimed = await self.poll_service.poll_repo.claim_for_closing(poll_id)
+        if not claimed:
+            logger.info(
+                "Пропуск повторного закрытия опроса %s для группы %s: уже обрабатывается или закрыт",
+                poll_id,
+                group.get("name"),
+            )
+            return
+
         try:
             await self.bot.stop_poll(
                 chat_id=group['telegram_chat_id'],
@@ -551,30 +599,33 @@ class SchedulerService:
             )
         except Exception as e:
             logger.warning("Не удалось закрыть опрос в Telegram: %s", e)
+        try:
+            fresh_poll = await self.poll_service.poll_repo.get_by_id(poll_id) or poll
+            report = await self._generate_poll_report(fresh_poll, group)
+            not_voted = await self._get_not_voted_members(fresh_poll, group)
+            not_voted_report = self._format_not_voted_report(not_voted)
+            screenshot_path = await self._save_poll_report(fresh_poll, group, report)
 
-        fresh_poll = await self.poll_service.poll_repo.get_by_id(str(poll["id"])) or poll
-        report = await self._generate_poll_report(fresh_poll, group)
-        not_voted = await self._get_not_voted_members(fresh_poll, group)
-        not_voted_report = self._format_not_voted_report(not_voted)
-        screenshot_path = await self._save_poll_report(fresh_poll, group, report)
+            await self.bot.send_message(
+                chat_id=group['telegram_chat_id'],
+                text=report,
+                parse_mode="HTML",
+            )
+            await self.bot.send_message(
+                chat_id=group['telegram_chat_id'],
+                text=not_voted_report,
+                parse_mode="HTML",
+            )
 
-        await self.bot.send_message(
-            chat_id=group['telegram_chat_id'],
-            text=report,
-            parse_mode="HTML",
-        )
-        await self.bot.send_message(
-            chat_id=group['telegram_chat_id'],
-            text=not_voted_report,
-            parse_mode="HTML",
-        )
-
-        await self.poll_service.poll_repo.update(
-            poll_id=fresh_poll['id'],
-            status="closed",
-            screenshot_path=screenshot_path,
-            closed_at=datetime.now(),
-        )
+            await self.poll_service.poll_repo.update(
+                poll_id=fresh_poll['id'],
+                status="closed",
+                screenshot_path=screenshot_path,
+                closed_at=datetime.now(),
+            )
+        except Exception:
+            await self.poll_service.poll_repo.release_closing_claim(poll_id)
+            raise
 
     def _normalize_results(self, results: Dict[str, Any] | None) -> Dict[str, Any]:
         if isinstance(results, dict):
@@ -612,7 +663,7 @@ class SchedulerService:
         return user_ids
 
     def _format_member_tag(self, member: Dict[str, Any]) -> str:
-        full_name = escape(member.get("full_name", "Неизвестный сотрудник"))
+        full_name = escape(member.get("full_name", "Неизвестный курьер"))
         username = member.get("username")
         if username:
             username = str(username)
@@ -654,7 +705,7 @@ class SchedulerService:
 
     def _format_not_voted_report(self, not_voted: List[Dict[str, Any]]) -> str:
         if not not_voted:
-            return "✅ <b>Все сотрудники из реестра отметились в опросе.</b>"
+            return "✅ <b>Все курьеры из реестра отметились в опросе.</b>"
 
         lines = "\n".join(f"• {self._format_member_tag(member)}" for member in not_voted[:50])
         if len(not_voted) > 50:
@@ -676,10 +727,10 @@ class SchedulerService:
         if not not_voted:
             await self.bot.send_message(
                 chat_id=group['telegram_chat_id'],
-                text="✅ <b>Тест напоминания</b>\n\nВсе сотрудники из реестра уже отметились.",
+                text="✅ <b>Тест напоминания</b>\n\nВсе курьеры из реестра уже отметились.",
                 parse_mode="HTML",
             )
-            return True, "Все сотрудники уже отметились. В чат отправлено тестовое уведомление."
+            return True, "Все курьеры уже отметились. В чат отправлено тестовое уведомление."
 
         title = (
             "🌙 <b>Тест напоминания 12:00 для ночной группы</b>"

@@ -36,7 +36,7 @@ def get_groups_menu_keyboard() -> InlineKeyboardMarkup:
     keyboard = [
         [InlineKeyboardButton(text="➕ Создать группу", callback_data="admin:groups:create")],
         [InlineKeyboardButton(text="📋 Список групп", callback_data="admin:groups:list")],
-        [InlineKeyboardButton(text="👥 Сотрудники", callback_data="admin:employees_menu")],
+        [InlineKeyboardButton(text="👥 Курьеры", callback_data="admin:employees_menu")],
         [InlineKeyboardButton(text="✏️ Переименовать группу", callback_data="admin:groups:rename")],
         [InlineKeyboardButton(text="🗑️ Удалить группу", callback_data="admin:groups:delete")],
         [InlineKeyboardButton(text="◀️ Назад", callback_data="admin:back_to_main")],
@@ -183,14 +183,14 @@ def get_users_list_keyboard(
 
 
 def get_employee_menu_keyboard() -> InlineKeyboardMarkup:
-    """Меню сотрудников группы."""
+    """Меню курьеров группы."""
     keyboard = [
-        [InlineKeyboardButton(text="➕ Добавить сотрудника", callback_data="admin:employees:add")],
-        [InlineKeyboardButton(text="📋 Список сотрудников", callback_data="admin:employees:list")],
-        [InlineKeyboardButton(text="✏️ Переименовать сотрудника", callback_data="admin:employees:rename")],
+        [InlineKeyboardButton(text="➕ Добавить курьера", callback_data="admin:employees:add")],
+        [InlineKeyboardButton(text="📋 Список курьеров", callback_data="admin:employees:list")],
+        [InlineKeyboardButton(text="✏️ Переименовать курьера", callback_data="admin:employees:rename")],
         [InlineKeyboardButton(text="🔄 Перенести в другую группу", callback_data="admin:employees:move")],
         [InlineKeyboardButton(text="🔗 Статус привязки Telegram", callback_data="admin:employees:bindings")],
-        [InlineKeyboardButton(text="🗑️ Удалить сотрудника", callback_data="admin:employees:delete")],
+        [InlineKeyboardButton(text="🗑️ Удалить курьера", callback_data="admin:employees:delete")],
         [InlineKeyboardButton(text="◀️ Назад", callback_data="admin:groups_menu")],
     ]
     return InlineKeyboardMarkup(inline_keyboard=keyboard)
