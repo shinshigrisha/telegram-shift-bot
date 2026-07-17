@@ -15,6 +15,7 @@ from src.repositories.poll_repository import PollRepository
 from src.services.group_service import GroupService
 from src.services.group_member_service import GroupMemberService
 from src.services.user_service import UserService
+from src.utils.redis_client import create_redis_client
 
 logger = logging.getLogger(__name__)
 
@@ -58,24 +59,11 @@ class DatabaseMiddleware(BaseMiddleware):
             
             # Получаем или создаём Redis клиент
             if _cached_redis is None:
-                for redis_url in settings.REDIS_URL_CANDIDATES:
-                    try:
-                        _cached_redis = Redis.from_url(
-                            redis_url,
-                            decode_responses=True
-                        )
-                        await _cached_redis.ping()
-                        logger.debug("Redis клиент создан и подключён: %s", redis_url)
-                        break
-                    except Exception as redis_error:
-                        logger.warning(
-                            "Ошибка при создании Redis клиента по %s: %s",
-                            redis_url,
-                            redis_error,
-                        )
-                        if _cached_redis is not None:
-                            await _cached_redis.aclose()
-                            _cached_redis = None
+                try:
+                    _cached_redis = await create_redis_client(log_success=False)
+                    logger.debug("Redis клиент создан и подключён")
+                except Exception as redis_error:
+                    logger.warning("Ошибка при создании Redis клиента: %s", redis_error)
             
             # Создаём репозитории
             group_repo = GroupRepository(_cached_db_pool)

@@ -13,8 +13,8 @@ if str(PROJECT_ROOT) not in sys.path:
 from aiogram import Bot, Dispatcher
 from aiogram.client.default import DefaultBotProperties
 from aiogram.enums import ParseMode
+from aiogram.exceptions import TelegramNetworkError
 from aiogram.fsm.storage.redis import RedisStorage
-from redis.asyncio import Redis
 
 from config.settings import settings
 from src.middlewares.auth_middleware import AdminMiddleware
@@ -38,6 +38,7 @@ from src.services.group_service import GroupService
 from src.services.service_registry import set_scheduler_service, set_poll_service
 from src.repositories.poll_repository import PollRepository
 from src.repositories.group_repository import GroupRepository
+from src.utils.redis_client import create_redis_client
 
 # Создаём директорию для логов перед настройкой логирования
 # Используем абсолютный путь для надежности
@@ -80,29 +81,10 @@ async def main() -> None:
         sys.exit(1)
     
     # Инициализируем Redis для FSM storage
-    redis = None
-    redis_errors = []
-    for redis_url in settings.REDIS_URL_CANDIDATES:
-        try:
-            redis = Redis.from_url(
-                redis_url,
-                decode_responses=True
-            )
-            await redis.ping()
-            logger.info("Подключение к Redis установлено: %s", redis_url)
-            break
-        except Exception as e:
-            redis_errors.append(f"{redis_url} -> {e}")
-            logger.warning("Ошибка подключения к Redis по %s: %s", redis_url, e)
-            if redis is not None:
-                await redis.aclose()
-                redis = None
-
-    if redis is None:
-        logger.error(
-            "Ошибка подключения к Redis. Проверены варианты:\n- %s",
-            "\n- ".join(redis_errors),
-        )
+    try:
+        redis = await create_redis_client(log_success=True)
+    except Exception as e:
+        logger.error("%s", e)
         sys.exit(1)
     
     # Создаём storage для FSM
@@ -183,11 +165,23 @@ async def main() -> None:
             logger.error("Ошибка инициализации планировщика: %s", e, exc_info=True)
     
     # Запускаем бота
+    polling_retry_delay = 5
     try:
         logger.info("Бот запущен и готов к работе")
-        await dp.start_polling(bot, allowed_updates=dp.resolve_used_update_types())
-    except Exception as e:
-        logger.error("Критическая ошибка при работе бота: %s", e, exc_info=True)
+        while True:
+            try:
+                await dp.start_polling(bot, allowed_updates=dp.resolve_used_update_types())
+                break
+            except TelegramNetworkError as e:
+                logger.warning(
+                    "Нет подключения к Telegram API. Повтор запуска polling через %d сек.: %s",
+                    polling_retry_delay,
+                    e,
+                )
+                await asyncio.sleep(polling_retry_delay)
+            except Exception as e:
+                logger.error("Критическая ошибка при работе бота: %s", e, exc_info=True)
+                raise
     finally:
         # Останавливаем планировщик
         from src.services.service_registry import get_scheduler_service
