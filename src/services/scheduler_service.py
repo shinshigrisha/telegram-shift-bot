@@ -304,7 +304,7 @@ class SchedulerService:
             is_night=is_night,
         )
         if reminder_already_sent:
-            logger.info(
+            logger.debug(
                 "Пропуск повторного напоминания для группы %s: уже отправлено",
                 group.get("name", group["id"]),
             )
@@ -426,6 +426,30 @@ class SchedulerService:
                 e,
             )
 
+    async def _has_pending_reminders(
+        self,
+        reminder_hour: int,
+        is_night: bool,
+        target_date: date,
+    ) -> bool:
+        active_polls = await self.poll_service.poll_repo.get_active_polls()
+        for poll in active_polls:
+            if poll.get("poll_date") != target_date:
+                continue
+
+            group = await self.group_service.get_group_by_id(poll["group_id"])
+            if not group or bool(group.get("is_night", False)) != is_night:
+                continue
+
+            reminder_already_sent = await self.poll_service.poll_repo.reminder_already_sent(
+                poll_id=str(poll["id"]),
+                reminder_hour=reminder_hour,
+                is_night=is_night,
+            )
+            if not reminder_already_sent:
+                return True
+        return False
+
     async def _close_daily_polls(self) -> None:
         """Закрыть дневные опросы на завтра."""
         await self._close_polls(is_night=False, target_date=date.today() + timedelta(days=1))
@@ -497,6 +521,7 @@ class SchedulerService:
 
             night_close_time = time(17, 0)
             day_close_time = time(settings.POLL_CLOSING_HOUR, settings.POLL_CLOSING_MINUTE)
+            day_target_date = current_date + timedelta(days=1)
 
             if now.time() >= night_close_time:
                 night_target_date = current_date
@@ -511,10 +536,15 @@ class SchedulerService:
                     logger.warning("⏱ Обнаружены незакрытые ночные опросы после 17:00. Запускаю догоняющее закрытие.")
                     await self._close_polls(is_night=True, target_date=night_target_date)
             elif now.time() >= time(12, 0):
-                await self._send_reminders(reminder_hour=12, is_night=True)
+                has_pending_night_reminders = await self._has_pending_reminders(
+                    reminder_hour=12,
+                    is_night=True,
+                    target_date=current_date,
+                )
+                if has_pending_night_reminders:
+                    await self._send_reminders(reminder_hour=12, is_night=True)
 
             if now.time() >= day_close_time:
-                day_target_date = current_date + timedelta(days=1)
                 day_active_polls = await self.poll_service.poll_repo.get_active_polls()
                 has_pending_day = False
                 for poll in day_active_polls:
@@ -528,7 +558,13 @@ class SchedulerService:
             else:
                 for reminder_hour in sorted(settings.REMINDER_HOURS):
                     if now.time() >= time(reminder_hour, 0):
-                        await self._send_reminders(reminder_hour=reminder_hour, is_night=False)
+                        has_pending_day_reminders = await self._has_pending_reminders(
+                            reminder_hour=reminder_hour,
+                            is_night=False,
+                            target_date=day_target_date,
+                        )
+                        if has_pending_day_reminders:
+                            await self._send_reminders(reminder_hour=reminder_hour, is_night=False)
 
         except Exception as e:
             logger.error("Ошибка при догоняющей проверке автоматизаций: %s", e, exc_info=True)
