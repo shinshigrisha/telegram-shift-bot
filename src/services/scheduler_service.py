@@ -268,23 +268,15 @@ class SchedulerService:
             
             for poll, group in target_polls:
                 try:
-                    not_voted = await self._get_not_voted_members(poll, group)
-                    if not not_voted:
-                        continue
-
-                    title = (
-                        f"🌙 <b>Напоминание {reminder_hour}:00</b>"
-                        if is_night
-                        else f"⏰ <b>Напоминание {reminder_hour}:00</b>"
+                    reminder_sent = await self._send_reminder_for_poll(
+                        poll=poll,
+                        group=group,
+                        reminder_hour=reminder_hour,
+                        hours_left=hours_left,
+                        is_night=is_night,
                     )
-                    message = self._build_reminder_message(not_voted, hours_left, title=title)
-
-                    await self.bot.send_message(
-                        chat_id=group['telegram_chat_id'],
-                        text=message,
-                        parse_mode="HTML",
-                    )
-                    sent_count += 1
+                    if reminder_sent:
+                        sent_count += 1
                     
                 except Exception as e:
                     logger.error(
@@ -297,7 +289,143 @@ class SchedulerService:
             
         except Exception as e:
             logger.error("Ошибка при отправке напоминаний: %s", e, exc_info=True)
-    
+
+    async def _send_reminder_for_poll(
+        self,
+        poll: Dict[str, Any],
+        group: Dict[str, Any],
+        reminder_hour: int,
+        hours_left: int,
+        is_night: bool,
+    ) -> bool:
+        reminder_already_sent = await self.poll_service.poll_repo.reminder_already_sent(
+            poll_id=str(poll["id"]),
+            reminder_hour=reminder_hour,
+            is_night=is_night,
+        )
+        if reminder_already_sent:
+            logger.info(
+                "Пропуск повторного напоминания для группы %s: уже отправлено",
+                group.get("name", group["id"]),
+            )
+            return False
+
+        not_voted = await self._get_not_voted_members(poll, group)
+        if not not_voted:
+            return False
+
+        title = (
+            f"🌙 <b>Напоминание {reminder_hour}:00</b>"
+            if is_night
+            else f"⏰ <b>Напоминание {reminder_hour}:00</b>"
+        )
+        message = self._build_reminder_message(not_voted, hours_left, title=title)
+
+        try:
+            await self.bot.send_message(
+                chat_id=group['telegram_chat_id'],
+                text=message,
+                parse_mode="HTML",
+            )
+            await self.poll_service.poll_repo.mark_reminder_sent(
+                poll_id=str(poll["id"]),
+                reminder_hour=reminder_hour,
+                is_night=is_night,
+            )
+            return True
+        except Exception:
+            self._schedule_reminder_retry(
+                poll=poll,
+                group=group,
+                reminder_hour=reminder_hour,
+                is_night=is_night,
+            )
+            raise
+
+    def _build_reminder_retry_job_id(
+        self,
+        group_id: int,
+        target_date: date,
+        reminder_hour: int,
+        is_night: bool,
+    ) -> str:
+        poll_kind = "night" if is_night else "day"
+        return f"retry_reminder_{poll_kind}_{group_id}_{target_date.isoformat()}_{reminder_hour}"
+
+    def _schedule_reminder_retry(
+        self,
+        poll: Dict[str, Any],
+        group: Dict[str, Any],
+        reminder_hour: int,
+        is_night: bool,
+    ) -> None:
+        target_date = poll.get("poll_date")
+        if not target_date:
+            return
+
+        job_id = self._build_reminder_retry_job_id(
+            group_id=group["id"],
+            target_date=target_date,
+            reminder_hour=reminder_hour,
+            is_night=is_night,
+        )
+
+        run_at = datetime.now() + timedelta(minutes=2)
+        self.scheduler.add_job(
+            self._retry_single_reminder,
+            DateTrigger(run_date=run_at, timezone="Europe/Moscow"),
+            id=job_id,
+            name=f"Повтор напоминания для группы {group.get('name', group['id'])}",
+            replace_existing=True,
+            kwargs={
+                "poll_id": poll["id"],
+                "group_id": group["id"],
+                "reminder_hour": reminder_hour,
+                "is_night": is_night,
+            },
+        )
+        logger.warning(
+            "Запланирован повтор напоминания для группы %s на %s",
+            group.get("name", group["id"]),
+            run_at.strftime("%H:%M:%S"),
+        )
+
+    async def _retry_single_reminder(
+        self,
+        poll_id: str,
+        group_id: int,
+        reminder_hour: int,
+        is_night: bool,
+    ) -> None:
+        try:
+            poll = await self.poll_service.poll_repo.get_by_id(poll_id)
+            group = await self.group_service.get_group_by_id(group_id)
+            if not poll or not group or poll.get("status") != "active":
+                return
+
+            closing_time = time(17, 0) if is_night else time(settings.POLL_CLOSING_HOUR, settings.POLL_CLOSING_MINUTE)
+            time_left = datetime.combine(date.today(), closing_time) - datetime.now()
+            hours_left = max(0, int(time_left.total_seconds() // 3600))
+
+            reminder_sent = await self._send_reminder_for_poll(
+                poll=poll,
+                group=group,
+                reminder_hour=reminder_hour,
+                hours_left=hours_left,
+                is_night=is_night,
+            )
+            if reminder_sent:
+                logger.info(
+                    "Повторное напоминание успешно отправлено в группу %s",
+                    group.get("name", group_id),
+                )
+        except Exception as e:
+            logger.error(
+                "Ошибка повторной отправки напоминания для группы %s: %s",
+                group_id,
+                e,
+            )
+
     async def _close_daily_polls(self) -> None:
         """Закрыть дневные опросы на завтра."""
         await self._close_polls(is_night=False, target_date=date.today() + timedelta(days=1))
@@ -382,6 +510,8 @@ class SchedulerService:
                 if has_pending_night:
                     logger.warning("⏱ Обнаружены незакрытые ночные опросы после 17:00. Запускаю догоняющее закрытие.")
                     await self._close_polls(is_night=True, target_date=night_target_date)
+            elif now.time() >= time(12, 0):
+                await self._send_reminders(reminder_hour=12, is_night=True)
 
             if now.time() >= day_close_time:
                 day_target_date = current_date + timedelta(days=1)
@@ -395,6 +525,10 @@ class SchedulerService:
                 if has_pending_day:
                     logger.warning("⏱ Обнаружены незакрытые дневные опросы после времени закрытия. Запускаю догоняющее закрытие.")
                     await self._close_polls(is_night=False, target_date=day_target_date)
+            else:
+                for reminder_hour in sorted(settings.REMINDER_HOURS):
+                    if now.time() >= time(reminder_hour, 0):
+                        await self._send_reminders(reminder_hour=reminder_hour, is_night=False)
 
         except Exception as e:
             logger.error("Ошибка при догоняющей проверке автоматизаций: %s", e, exc_info=True)

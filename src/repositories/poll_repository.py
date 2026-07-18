@@ -361,6 +361,46 @@ class PollRepository:
             )
             return result == "UPDATE 1"
 
+    async def reminder_already_sent(
+        self,
+        poll_id: str,
+        reminder_hour: int,
+        is_night: bool,
+    ) -> bool:
+        """Проверить, отправлялось ли уже автоматическое напоминание."""
+        async with self.pool.acquire() as conn:
+            row = await conn.fetchrow(
+                """
+                SELECT 1
+                FROM poll_reminder_dispatches
+                WHERE poll_id = $1 AND reminder_hour = $2 AND is_night = $3
+                """,
+                poll_id,
+                reminder_hour,
+                is_night,
+            )
+            return row is not None
+
+    async def mark_reminder_sent(
+        self,
+        poll_id: str,
+        reminder_hour: int,
+        is_night: bool,
+    ) -> bool:
+        """Зафиксировать факт автоматической отправки напоминания."""
+        async with self.pool.acquire() as conn:
+            result = await conn.execute(
+                """
+                INSERT INTO poll_reminder_dispatches (poll_id, reminder_hour, is_night)
+                VALUES ($1, $2, $3)
+                ON CONFLICT (poll_id, reminder_hour, is_night) DO NOTHING
+                """,
+                poll_id,
+                reminder_hour,
+                is_night,
+            )
+            return result == "INSERT 0 1"
+
     async def delete(self, poll_id: str) -> bool:
         """Удалить опрос из БД."""
         async with self.pool.acquire() as conn:
