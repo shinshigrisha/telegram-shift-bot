@@ -837,7 +837,8 @@ class SchedulerService:
         username = member.get("username")
         if username:
             username = str(username)
-            return username if username.startswith("@") else f"@{username}"
+            username = username if username.startswith("@") else f"@{username}"
+            return f"{full_name} ({escape(username)})"
         telegram_user_id = member.get("telegram_user_id")
         if telegram_user_id:
             return f'<a href="tg://user?id={telegram_user_id}">{full_name}</a>'
