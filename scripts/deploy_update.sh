@@ -19,6 +19,9 @@ fi
 echo "🔨 Пересборка образа бота..."
 docker compose build --no-cache bot
 
+echo "🧪 Preflight-проверка Python-кода..."
+docker compose run --rm bot python3 -m compileall src config scripts
+
 echo "🗄️ Инициализация рабочей схемы БД..."
 docker compose run --rm bot python3 scripts/init_runtime_database.py
 

@@ -12,6 +12,8 @@ python3 scripts/init_runtime_database.py
 docker compose up -d bot
 ```
 
+`scripts/init_runtime_database.py` не только создает базовую схему, но и автоматически применяет новые SQL-миграции из папки `migrations/`.
+
 ## Что проверить перед боевым запуском
 
 - бот добавлен в нужные группы и назначен администратором;
@@ -41,3 +43,8 @@ python3 scripts/init_runtime_database.py
 ```bash
 bash scripts/deploy_update.sh
 ```
+
+Скрипт обновления делает три обязательных шага перед запуском:
+- пересобирает контейнер бота;
+- выполняет `python3 -m compileall src config scripts`;
+- применяет новые миграции через `python3 scripts/init_runtime_database.py`.

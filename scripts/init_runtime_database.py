@@ -13,6 +13,9 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
+BASE_DIR = Path(__file__).parent.parent
+MIGRATIONS_DIR = BASE_DIR / "migrations"
+
 
 CORE_SCHEMA_SQL = """
 CREATE EXTENSION IF NOT EXISTS pgcrypto;
@@ -84,6 +87,14 @@ CREATE INDEX IF NOT EXISTS idx_poll_reminder_dispatches_poll_id
     ON poll_reminder_dispatches (poll_id);
 """
 
+SCHEMA_MIGRATIONS_SQL = """
+CREATE TABLE IF NOT EXISTS schema_migrations (
+    id SERIAL PRIMARY KEY,
+    migration_name VARCHAR(255) NOT NULL UNIQUE,
+    applied_at TIMESTAMP NOT NULL DEFAULT NOW()
+);
+"""
+
 
 def _build_connection_candidates(database_url: str) -> list[str]:
     candidates = [database_url]
@@ -98,10 +109,54 @@ def _build_connection_candidates(database_url: str) -> list[str]:
     return candidates
 
 
+def _get_migration_files() -> list[Path]:
+    if not MIGRATIONS_DIR.exists():
+        return []
+    return sorted(
+        path for path in MIGRATIONS_DIR.glob("*.sql")
+        if path.is_file()
+    )
+
+
+async def _ensure_schema_migrations(conn: asyncpg.Connection) -> None:
+    await conn.execute(SCHEMA_MIGRATIONS_SQL)
+
+
+async def _get_applied_migrations(conn: asyncpg.Connection) -> set[str]:
+    rows = await conn.fetch("SELECT migration_name FROM schema_migrations")
+    return {row["migration_name"] for row in rows}
+
+
+async def _apply_migrations(conn: asyncpg.Connection) -> list[str]:
+    await _ensure_schema_migrations(conn)
+    applied = await _get_applied_migrations(conn)
+    applied_now: list[str] = []
+
+    for migration_path in _get_migration_files():
+        migration_name = migration_path.name
+        if migration_name in applied:
+            continue
+
+        migration_sql = migration_path.read_text(encoding="utf-8")
+        async with conn.transaction():
+            await conn.execute(migration_sql)
+            await conn.execute(
+                """
+                INSERT INTO schema_migrations (migration_name)
+                VALUES ($1)
+                ON CONFLICT (migration_name) DO NOTHING
+                """,
+                migration_name,
+            )
+        applied_now.append(migration_name)
+
+    return applied_now
+
+
 async def main() -> None:
     database_url = os.getenv("DATABASE_URL")
     if not database_url:
-        sys.path.insert(0, str(Path(__file__).parent.parent))
+        sys.path.insert(0, str(BASE_DIR))
         from config.settings import settings
         database_url = settings.DATABASE_URL
 
@@ -115,7 +170,14 @@ async def main() -> None:
             conn = await asyncpg.connect(candidate, ssl=False)
             try:
                 await conn.execute(CORE_SCHEMA_SQL)
+                applied_migrations = await _apply_migrations(conn)
                 print(f"✅ Рабочая схема БД инициализирована: {candidate}")
+                if applied_migrations:
+                    print("📦 Применены миграции:")
+                    for migration_name in applied_migrations:
+                        print(f"  - {migration_name}")
+                else:
+                    print("ℹ️ Новых миграций нет")
                 return
             finally:
                 await conn.close()

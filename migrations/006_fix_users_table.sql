@@ -31,7 +31,7 @@ BEGIN
         END IF;
         
         -- Устанавливаем значение последовательности на максимальный id + 1
-        SELECT setval('users_id_seq', COALESCE((SELECT MAX(id) FROM users), 0) + 1);
+        PERFORM setval('users_id_seq', COALESCE((SELECT MAX(id) FROM users), 0) + 1);
         
         -- Устанавливаем default для id
         ALTER TABLE users ALTER COLUMN id SET DEFAULT nextval('users_id_seq');

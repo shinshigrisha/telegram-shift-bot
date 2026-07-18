@@ -21,6 +21,12 @@
 python3 -m compileall src config scripts
 ```
 
+## Миграции
+
+- Все изменения схемы БД оформляются отдельными файлами в `migrations/`.
+- Рабочий способ применения миграций — `python3 scripts/init_runtime_database.py`.
+- Скрипт сам ведет учет через таблицу `schema_migrations`, поэтому повторный запуск безопасен.
+
 ## Актуальные служебные скрипты
 
 - `scripts/init_runtime_database.py` — инициализация рабочей схемы БД

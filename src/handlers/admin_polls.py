@@ -2,12 +2,12 @@
 Обработчики для раздела "Опросы" админ-панели.
 """
 import logging
-from typing import Optional
+from typing import Optional, Any
 from datetime import date, timedelta
 
 from aiogram import Router, Bot
 from aiogram.fsm.context import FSMContext
-from aiogram.types import Message, CallbackQuery
+from aiogram.types import Message, CallbackQuery, InlineKeyboardMarkup, InlineKeyboardButton
 
 from src.states.admin_panel_states import AdminPanelStates
 from src.services.group_member_service import GroupMemberService
@@ -29,6 +29,82 @@ from config.settings import settings
 
 logger = logging.getLogger(__name__)
 router = Router()
+
+
+def _format_group_button_name(group: dict) -> str:
+    group_name = clean_group_name_for_display(group.get("name", f"Группа {group.get('id', '?')}"))
+    if len(group_name) > 30:
+        return group_name[:27] + "..."
+    return group_name
+
+
+def _build_group_selection_keyboard(groups: list[dict]) -> InlineKeyboardMarkup:
+    keyboard_buttons = []
+    for group in groups:
+        keyboard_buttons.append([
+            InlineKeyboardButton(
+                text=_format_group_button_name(group),
+                callback_data=f"admin:poll_group:{group['id']}"
+            )
+        ])
+    keyboard_buttons.append([InlineKeyboardButton(text="◀️ Назад", callback_data="admin:polls_menu")])
+    return InlineKeyboardMarkup(inline_keyboard=keyboard_buttons)
+
+
+def _format_voter_name(
+    voter: dict,
+    group_member_service: GroupMemberService,
+    member_names_by_id: dict[int, str],
+    member_names_by_user_id: dict[int, str],
+) -> str:
+    return group_member_service.resolve_voter_display_name(
+        voter,
+        member_names_by_id,
+        member_names_by_user_id,
+    )
+
+
+def _build_voter_block(
+    title: str,
+    voters: list[dict],
+    *,
+    group_member_service: GroupMemberService,
+    member_names_by_id: dict[int, str],
+    member_names_by_user_id: dict[int, str],
+    limit: int = 20,
+    show_remaining: bool = False,
+) -> str:
+    text = f"<b>{title}:</b> {len(voters)}\n"
+    for voter in voters[:limit]:
+        text += f"• {_format_voter_name(voter, group_member_service, member_names_by_id, member_names_by_user_id)}\n"
+    if show_remaining and len(voters) > limit:
+        text += f"... и еще {len(voters) - limit} человек\n"
+    return text + "\n"
+
+
+def _collect_not_voted_names(
+    members: list[dict[str, Any]],
+    voted_user_ids: set[int],
+    *,
+    limit: int = 15,
+) -> str:
+    not_voted = []
+    for member in members:
+        telegram_user_id = member.get("telegram_user_id")
+        if telegram_user_id is not None and int(telegram_user_id) in settings.ADMIN_IDS:
+            continue
+        if telegram_user_id is None or int(telegram_user_id) not in voted_user_ids:
+            not_voted.append(member.get("full_name", "Неизвестный курьер"))
+
+    if not not_voted:
+        return ""
+
+    text = "<b>Не отметились:</b>\n"
+    for person in not_voted[:limit]:
+        text += f"• {person}\n"
+    if len(not_voted) > limit:
+        text += f"... и еще {len(not_voted) - limit} человек\n"
+    return text + "\n"
 
 
 def _extract_voted_user_ids(results: dict) -> set[int]:
@@ -178,22 +254,7 @@ async def callback_create_single_poll_start(
         "Выберите группу. Опрос будет отправлен на завтрашнюю дату."
     )
 
-    from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
-    keyboard_buttons = []
-    for group in groups:
-        group_name = clean_group_name_for_display(group.get("name", f"Группа {group.get('id', '?')}"))
-        if len(group_name) > 30:
-            group_name = group_name[:27] + "..."
-        keyboard_buttons.append([
-            InlineKeyboardButton(
-                text=group_name,
-                callback_data=f"admin:poll_group:{group['id']}"
-            )
-        ])
-    keyboard_buttons.append([InlineKeyboardButton(text="◀️ Назад", callback_data="admin:polls_menu")])
-    keyboard = InlineKeyboardMarkup(inline_keyboard=keyboard_buttons)
-
-    await safe_edit_message(callback.message, text, reply_markup=keyboard)
+    await safe_edit_message(callback.message, text, reply_markup=_build_group_selection_keyboard(groups))
     await safe_answer_callback(callback)
 
 
@@ -224,17 +285,7 @@ async def callback_test_reminder_start(
         "Выберите группу. Бот отправит список тех, кто не отметился, с тегами."
     )
 
-    from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
-    keyboard_buttons = []
-    for group in groups:
-        group_name = clean_group_name_for_display(group.get("name", f"Группа {group.get('id', '?')}"))
-        if len(group_name) > 30:
-            group_name = group_name[:27] + "..."
-        keyboard_buttons.append([
-            InlineKeyboardButton(text=group_name, callback_data=f"admin:poll_group:{group['id']}")
-        ])
-    keyboard_buttons.append([InlineKeyboardButton(text="◀️ Назад", callback_data="admin:polls_menu")])
-    await safe_edit_message(callback.message, text, reply_markup=InlineKeyboardMarkup(inline_keyboard=keyboard_buttons))
+    await safe_edit_message(callback.message, text, reply_markup=_build_group_selection_keyboard(groups))
     await safe_answer_callback(callback)
 
 
@@ -359,22 +410,7 @@ async def callback_polls_results_start(callback: CallbackQuery, state: FSMContex
     )
     
     # Создаем клавиатуру с модифицированными callback_data для опросов
-    from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
-    keyboard_buttons = []
-    for group in groups:
-        group_name = clean_group_name_for_display(group.get("name", f"Группа {group.get('id', '?')}"))
-        if len(group_name) > 30:
-            group_name = group_name[:27] + "..."
-        keyboard_buttons.append([
-            InlineKeyboardButton(
-                text=group_name,
-                callback_data=f"admin:poll_group:{group['id']}"
-            )
-        ])
-    keyboard_buttons.append([InlineKeyboardButton(text="◀️ Назад", callback_data="admin:polls_menu")])
-    keyboard = InlineKeyboardMarkup(inline_keyboard=keyboard_buttons)
-    
-    await safe_edit_message(callback.message, text, reply_markup=keyboard)
+    await safe_edit_message(callback.message, text, reply_markup=_build_group_selection_keyboard(groups))
     await safe_answer_callback(callback)
 
 
@@ -400,17 +436,7 @@ async def callback_test_polls_results_start(callback: CallbackQuery, state: FSMC
         "Выберите группу:"
     )
 
-    from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
-    keyboard_buttons = []
-    for group in groups:
-        group_name = clean_group_name_for_display(group.get("name", f"Группа {group.get('id', '?')}"))
-        if len(group_name) > 30:
-            group_name = group_name[:27] + "..."
-        keyboard_buttons.append([
-            InlineKeyboardButton(text=group_name, callback_data=f"admin:poll_group:{group['id']}")
-        ])
-    keyboard_buttons.append([InlineKeyboardButton(text="◀️ Назад", callback_data="admin:polls_menu")])
-    await safe_edit_message(callback.message, text, reply_markup=InlineKeyboardMarkup(inline_keyboard=keyboard_buttons))
+    await safe_edit_message(callback.message, text, reply_markup=_build_group_selection_keyboard(groups))
     await safe_answer_callback(callback)
 
 
@@ -436,17 +462,7 @@ async def callback_test_close_poll_start(callback: CallbackQuery, state: FSMCont
         "Выберите группу:"
     )
 
-    from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
-    keyboard_buttons = []
-    for group in groups:
-        group_name = clean_group_name_for_display(group.get("name", f"Группа {group.get('id', '?')}"))
-        if len(group_name) > 30:
-            group_name = group_name[:27] + "..."
-        keyboard_buttons.append([
-            InlineKeyboardButton(text=group_name, callback_data=f"admin:poll_group:{group['id']}")
-        ])
-    keyboard_buttons.append([InlineKeyboardButton(text="◀️ Назад", callback_data="admin:polls_menu")])
-    await safe_edit_message(callback.message, text, reply_markup=InlineKeyboardMarkup(inline_keyboard=keyboard_buttons))
+    await safe_edit_message(callback.message, text, reply_markup=_build_group_selection_keyboard(groups))
     await safe_answer_callback(callback)
 
 
@@ -473,17 +489,7 @@ async def callback_test_delete_poll_start(callback: CallbackQuery, state: FSMCon
         "Выберите группу:"
     )
 
-    from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
-    keyboard_buttons = []
-    for group in groups:
-        group_name = clean_group_name_for_display(group.get("name", f"Группа {group.get('id', '?')}"))
-        if len(group_name) > 30:
-            group_name = group_name[:27] + "..."
-        keyboard_buttons.append([
-            InlineKeyboardButton(text=group_name, callback_data=f"admin:poll_group:{group['id']}")
-        ])
-    keyboard_buttons.append([InlineKeyboardButton(text="◀️ Назад", callback_data="admin:polls_menu")])
-    await safe_edit_message(callback.message, text, reply_markup=InlineKeyboardMarkup(inline_keyboard=keyboard_buttons))
+    await safe_edit_message(callback.message, text, reply_markup=_build_group_selection_keyboard(groups))
     await safe_answer_callback(callback)
 
 
@@ -510,17 +516,7 @@ async def callback_test_delete_all_polls_start(callback: CallbackQuery, state: F
         "Выберите группу:"
     )
 
-    from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
-    keyboard_buttons = []
-    for group in groups:
-        group_name = clean_group_name_for_display(group.get("name", f"Группа {group.get('id', '?')}"))
-        if len(group_name) > 30:
-            group_name = group_name[:27] + "..."
-        keyboard_buttons.append([
-            InlineKeyboardButton(text=group_name, callback_data=f"admin:poll_group:{group['id']}")
-        ])
-    keyboard_buttons.append([InlineKeyboardButton(text="◀️ Назад", callback_data="admin:polls_menu")])
-    await safe_edit_message(callback.message, text, reply_markup=InlineKeyboardMarkup(inline_keyboard=keyboard_buttons))
+    await safe_edit_message(callback.message, text, reply_markup=_build_group_selection_keyboard(groups))
     await safe_answer_callback(callback)
 
 
@@ -732,45 +728,27 @@ async def callback_select_group_for_polls(
                         ("Выходной", "day_off"),
                     ):
                         voters = results.get(key, [])
-                        text += f"<b>{title}:</b> {len(voters)}\n"
-                        for voter in voters[:20]:
-                            voter_name = group_member_service.resolve_voter_display_name(
-                                voter,
-                                member_names_by_id,
-                                member_names_by_user_id,
-                            )
-                            text += f"• {voter_name}\n"
-                        text += "\n"
+                        text += _build_voter_block(
+                            title,
+                            voters,
+                            group_member_service=group_member_service,
+                            member_names_by_id=member_names_by_id,
+                            member_names_by_user_id=member_names_by_user_id,
+                        )
                     custom_results = results.get("custom", {}) if isinstance(results, dict) else {}
                     if isinstance(custom_results, dict):
                         for index, option_text in enumerate(extra_options):
                             voters = custom_results.get(f"option_{index}", [])
-                            text += f"<b>{option_text}:</b> {len(voters)}\n"
-                            for voter in voters[:20]:
-                                voter_name = group_member_service.resolve_voter_display_name(
-                                    voter,
-                                    member_names_by_id,
-                                    member_names_by_user_id,
-                                )
-                                text += f"• {voter_name}\n"
-                            text += "\n"
+                            text += _build_voter_block(
+                                option_text,
+                                voters,
+                                group_member_service=group_member_service,
+                                member_names_by_id=member_names_by_id,
+                                member_names_by_user_id=member_names_by_user_id,
+                            )
                     members = await group_member_service.get_group_members(group_id)
                     voted_user_ids = _extract_voted_user_ids(results)
-                    not_voted = []
-                    for member in members:
-                        telegram_user_id = member.get("telegram_user_id")
-                        if telegram_user_id is not None and int(telegram_user_id) in settings.ADMIN_IDS:
-                            continue
-                        if telegram_user_id is None or int(telegram_user_id) not in voted_user_ids:
-                            not_voted.append(member.get("full_name", "Неизвестный курьер"))
-
-                    if not_voted:
-                        text += "<b>Не отметились:</b>\n"
-                        for person in not_voted[:15]:
-                            text += f"• {person}\n"
-                        if len(not_voted) > 15:
-                            text += f"... и еще {len(not_voted) - 15} человек\n"
-                        text += "\n"
+                    text += _collect_not_voted_names(members, voted_user_ids)
                 elif slots:
                     text += "📋 <b>Результаты по выходам:</b>\n\n"
                     # Формируем структуру результатов
@@ -792,75 +770,51 @@ async def callback_select_group_for_polls(
                             
                             if voters and isinstance(voters, list):
                                 for voter in voters[:50]:
-                                    voter_name = group_member_service.resolve_voter_display_name(
-                                        voter,
-                                        member_names_by_id,
-                                        member_names_by_user_id,
-                                    )
-                                    text += f"• {voter_name}\n"
+                                    text += f"• {_format_voter_name(voter, group_member_service, member_names_by_id, member_names_by_user_id)}\n"
                             
                             text += "\n"
 
                         curator = results.get('curator', [])
                         if curator:
-                            text += f"<b>Куратор:</b> {len(curator)}\n"
-                            for person in curator[:20]:
-                                person_name = group_member_service.resolve_voter_display_name(
-                                    person,
-                                    member_names_by_id,
-                                    member_names_by_user_id,
-                                )
-                                text += f"• {person_name}\n"
-                            text += "\n"
+                            text += _build_voter_block(
+                                "Куратор",
+                                curator,
+                                group_member_service=group_member_service,
+                                member_names_by_id=member_names_by_id,
+                                member_names_by_user_id=member_names_by_user_id,
+                            )
                         
                         # Выходной
                         day_off = results.get('day_off', [])
                         if day_off:
-                            day_off_count = len(day_off) if isinstance(day_off, list) else 0
-                            text += f"<b>Выходной:</b> {day_off_count}\n"
-                            if isinstance(day_off, list):
-                                for person in day_off[:10]:  # Показываем первые 10
-                                    person_name = group_member_service.resolve_voter_display_name(
-                                        person,
-                                        member_names_by_id,
-                                        member_names_by_user_id,
-                                    )
-                                    text += f"• {person_name}\n"
-                                if len(day_off) > 10:
-                                    text += f"... и еще {len(day_off) - 10} человек\n"
-                            text += "\n"
+                            text += _build_voter_block(
+                                "Выходной",
+                                day_off if isinstance(day_off, list) else [],
+                                group_member_service=group_member_service,
+                                member_names_by_id=member_names_by_id,
+                                member_names_by_user_id=member_names_by_user_id,
+                                limit=10,
+                                show_remaining=True,
+                            )
 
                         custom_results = results.get("custom", {}) if isinstance(results, dict) else {}
                         if isinstance(custom_results, dict):
                             for index, option_text in enumerate(extra_options):
                                 voters = custom_results.get(f"option_{index}", [])
                                 if voters:
-                                    text += f"<b>{option_text}:</b> {len(voters)}\n"
-                                    for person in voters[:20]:
-                                        person_name = group_member_service.resolve_voter_display_name(
-                                            person,
-                                            member_names_by_id,
-                                            member_names_by_user_id,
-                                        )
-                                        text += f"• {person_name}\n"
-                                    text += "\n"
+                                    text += _build_voter_block(
+                                        option_text,
+                                        voters,
+                                        group_member_service=group_member_service,
+                                        member_names_by_id=member_names_by_id,
+                                        member_names_by_user_id=member_names_by_user_id,
+                                    )
 
                         members = await group_member_service.get_group_members(group_id)
                         voted_user_ids = _extract_voted_user_ids(results)
-                        not_voted = []
-                        for member in members:
-                            telegram_user_id = member.get("telegram_user_id")
-                            if telegram_user_id is not None and int(telegram_user_id) in settings.ADMIN_IDS:
-                                continue
-                            if telegram_user_id is None or int(telegram_user_id) not in voted_user_ids:
-                                not_voted.append(member.get("full_name", "Неизвестный курьер"))
-
-                        if not_voted:
-                            text += "\n<b>Не отметились:</b>\n"
-                            for person in not_voted[:15]:
-                                text += f"• {person}\n"
-                            if len(not_voted) > 15:
-                                text += f"... и еще {len(not_voted) - 15} человек\n"
+                        not_voted_block = _collect_not_voted_names(members, voted_user_ids)
+                        if not_voted_block:
+                            text += "\n" + not_voted_block.rstrip() + "\n"
                     else:
                         # Если результатов нет, показываем структуру слотов
                         text += "⚠️ <b>Результаты еще не получены.</b>\n\n"
@@ -1025,23 +979,7 @@ async def callback_close_poll_start(callback: CallbackQuery, state: FSMContext, 
         "Выберите группу:"
     )
     
-    # Создаем клавиатуру с модифицированными callback_data для закрытия опросов
-    from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
-    keyboard_buttons = []
-    for group in groups:
-        group_name = clean_group_name_for_display(group.get("name", f"Группа {group.get('id', '?')}"))
-        if len(group_name) > 30:
-            group_name = group_name[:27] + "..."
-        keyboard_buttons.append([
-            InlineKeyboardButton(
-                text=group_name,
-                callback_data=f"admin:poll_group:{group['id']}"
-            )
-        ])
-    keyboard_buttons.append([InlineKeyboardButton(text="◀️ Назад", callback_data="admin:polls_menu")])
-    keyboard = InlineKeyboardMarkup(inline_keyboard=keyboard_buttons)
-    
-    await safe_edit_message(callback.message, text, reply_markup=keyboard)
+    await safe_edit_message(callback.message, text, reply_markup=_build_group_selection_keyboard(groups))
     await safe_answer_callback(callback)
 
 

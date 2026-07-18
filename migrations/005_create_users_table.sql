@@ -13,7 +13,15 @@ CREATE TABLE IF NOT EXISTS users (
 );
 
 -- Индекс для быстрого поиска по telegram_user_id
-CREATE INDEX IF NOT EXISTS idx_users_telegram_user_id ON users (telegram_user_id);
+DO $$
+BEGIN
+    IF EXISTS (
+        SELECT 1 FROM information_schema.columns
+        WHERE table_name = 'users' AND column_name = 'telegram_user_id'
+    ) THEN
+        CREATE INDEX IF NOT EXISTS idx_users_telegram_user_id ON users (telegram_user_id);
+    END IF;
+END $$;
 
 -- Индекс для поиска по статусу верификации
 CREATE INDEX IF NOT EXISTS idx_users_is_verified ON users (is_verified);

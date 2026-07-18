@@ -251,6 +251,8 @@ REMINDER_HOURS=[17]
 
 Если бот запускается с хоста, а PostgreSQL и Redis подняты через `docker compose`, текущая логика умеет пробовать и Docker-хосты (`postgres`, `redis`), и `localhost`.
 
+Скрипт `scripts/init_runtime_database.py` безопасен для повторного запуска: он создает базовую схему и автоматически применяет новые SQL-миграции из `migrations/`.
+
 ---
 
 ## 🚀 Деплой
