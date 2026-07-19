@@ -4,8 +4,7 @@
 import asyncio
 import logging
 from typing import List, Optional, Dict, Any, Tuple
-from datetime import date, datetime, timedelta
-from asyncpg import Pool
+from datetime import date, datetime, timedelta, time
 from aiogram import Bot
 from aiogram.exceptions import TelegramNetworkError
 
@@ -106,6 +105,47 @@ class PollService:
         options.extend(str(option).strip() for option in extra_options if str(option).strip())
         
         return options
+
+    def _build_poll_option_rows(
+        self,
+        group: Dict[str, Any],
+        slots: List[Dict[str, Any]],
+        options: List[str],
+    ) -> List[Dict[str, Any]]:
+        """
+        Подготовить строки для таблицы poll_options.
+        """
+        is_night = group.get("is_night", False)
+        option_rows: List[Dict[str, Any]] = []
+
+        for index, option_text in enumerate(options):
+            slot_start = None
+            slot_end = None
+            max_users = None
+
+            if not is_night and index < len(slots):
+                slot = slots[index]
+                start_value = slot.get("start")
+                end_value = slot.get("end")
+                try:
+                    if isinstance(start_value, str):
+                        slot_start = time.fromisoformat(start_value)
+                    if isinstance(end_value, str):
+                        slot_end = time.fromisoformat(end_value)
+                except ValueError:
+                    slot_start = None
+                    slot_end = None
+
+            option_rows.append(
+                {
+                    "option_text": option_text,
+                    "slot_start": slot_start,
+                    "slot_end": slot_end,
+                    "max_users": max_users,
+                }
+            )
+
+        return option_rows
 
     async def _pin_poll_message(self, chat_id: int, message_id: int, group_name: str) -> None:
         """Закрепить сообщение с опросом с уведомлением участников."""
@@ -241,12 +281,17 @@ class PollService:
                     )
                     
                     # Сохраняем опрос в БД
-                    await self.poll_repo.create(
+                    poll = await self.poll_repo.create(
                         group_id=group['id'],
                         poll_date=group_target_date,
                         telegram_poll_id=str(poll_message.poll.id),
                         telegram_message_id=poll_message.message_id,
                         status="active",
+                    )
+
+                    await self.poll_repo.replace_poll_options(
+                        str(poll["id"]),
+                        self._build_poll_option_rows(group, slots, options),
                     )
 
                     await self._pin_poll_message(
@@ -329,6 +374,11 @@ class PollService:
                 telegram_poll_id=str(poll_message.poll.id),
                 telegram_message_id=poll_message.message_id,
                 status="active",
+            )
+
+            await self.poll_repo.replace_poll_options(
+                str(poll["id"]),
+                self._build_poll_option_rows(group, slots, options),
             )
 
             await self._pin_poll_message(

@@ -14,6 +14,7 @@ from aiogram import Bot, Dispatcher
 from aiogram.client.default import DefaultBotProperties
 from aiogram.enums import ParseMode
 from aiogram.exceptions import TelegramNetworkError
+from aiogram.fsm.storage.memory import MemoryStorage
 from aiogram.fsm.storage.redis import RedisStorage
 
 from config.settings import settings
@@ -80,20 +81,24 @@ async def main() -> None:
         logger.error("BOT_TOKEN не установлен! Установите его в .env файле.")
         sys.exit(1)
     
-    # Инициализируем Redis для FSM storage
+    redis = None
+    storage = None
+
+    # Инициализируем Redis для FSM storage.
+    # Если Redis временно недоступен, продолжаем работу на MemoryStorage,
+    # чтобы бот не падал целиком.
     try:
         redis = await create_redis_client(log_success=True)
+        try:
+            storage = RedisStorage(redis=redis)
+        except TypeError:
+            storage = RedisStorage.from_url(settings.REDIS_URL)
     except Exception as e:
-        logger.error("%s", e)
-        sys.exit(1)
-    
-    # Создаём storage для FSM
-    # В aiogram 3.x RedisStorage может принимать redis объект или redis_url
-    try:
-        storage = RedisStorage(redis=redis)
-    except TypeError:
-        # Если не поддерживается redis объект, используем URL
-        storage = RedisStorage.from_url(settings.REDIS_URL)
+        logger.warning(
+            "Redis недоступен, переключаюсь на MemoryStorage. Причина: %s",
+            e,
+        )
+        storage = MemoryStorage()
     
     # Инициализируем бота
     bot = Bot(
@@ -191,7 +196,8 @@ async def main() -> None:
         
         # Закрываем соединения
         await close_db_pool()
-        await redis.aclose()
+        if redis is not None:
+            await redis.aclose()
         await bot.session.close()
         logger.info("Бот остановлен")
 

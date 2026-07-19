@@ -93,7 +93,13 @@ async def handle_poll_answer(
 
         poll = await poll_repo.get_by_telegram_poll_id(poll_id)
         if not poll:
-            logger.warning("Опрос с telegram_poll_id=%s не найден", poll_id)
+            if await poll_repo.is_telegram_poll_obsolete(poll_id):
+                logger.info(
+                    "Получен поздний голос по устаревшему опросу telegram_poll_id=%s, игнорируем",
+                    poll_id,
+                )
+            else:
+                logger.warning("Опрос с telegram_poll_id=%s не найден", poll_id)
             return
 
         group = await group_repo.get_by_id(poll["group_id"])
@@ -166,6 +172,14 @@ async def handle_poll_answer(
                     json.dumps(results),
                     poll["id"],
                 )
+
+        await poll_repo.sync_user_vote(
+            poll_id=str(poll["id"]),
+            user_id=user.id,
+            user_name=username,
+            full_name=member_data["name"],
+            option_indexes=list(option_ids),
+        )
 
         persisted_member = await member_repo.get_by_group_and_telegram_id(group["id"], user.id)
         logger.info(

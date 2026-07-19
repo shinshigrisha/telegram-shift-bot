@@ -4,7 +4,6 @@
 import logging
 from typing import List, Optional, Dict, Any
 from datetime import date, datetime
-import asyncpg
 from asyncpg import Pool
 import json
 
@@ -327,6 +326,153 @@ class PollRepository:
             closed_at = datetime.utcnow()
         
         return await self.update(poll_id, status="closed", closed_at=closed_at)
+
+    async def mark_telegram_poll_obsolete(
+        self,
+        telegram_poll_id: str,
+        group_id: Optional[int] = None,
+        poll_date: Optional[date] = None,
+        reason: str = "recreated",
+    ) -> bool:
+        """
+        Сохранить старый telegram_poll_id как устаревший, чтобы поздние update'ы
+        не считались ошибкой после пересоздания/удаления опроса.
+        """
+        async with self.pool.acquire() as conn:
+            result = await conn.execute(
+                """
+                INSERT INTO obsolete_telegram_polls (
+                    telegram_poll_id, group_id, poll_date, reason
+                )
+                VALUES ($1, $2, $3, $4)
+                ON CONFLICT (telegram_poll_id) DO UPDATE
+                SET group_id = EXCLUDED.group_id,
+                    poll_date = EXCLUDED.poll_date,
+                    reason = EXCLUDED.reason,
+                    retired_at = NOW()
+                """,
+                telegram_poll_id,
+                group_id,
+                poll_date,
+                reason,
+            )
+            return result in {"INSERT 0 1", "UPDATE 1"}
+
+    async def is_telegram_poll_obsolete(self, telegram_poll_id: str) -> bool:
+        """Проверить, помечен ли telegram_poll_id как устаревший."""
+        async with self.pool.acquire() as conn:
+            row = await conn.fetchrow(
+                """
+                SELECT 1
+                FROM obsolete_telegram_polls
+                WHERE telegram_poll_id = $1
+                """,
+                telegram_poll_id,
+            )
+            return row is not None
+
+    async def replace_poll_options(
+        self,
+        poll_id: str,
+        options: List[Dict[str, Any]],
+    ) -> None:
+        """
+        Полностью пересоздать список вариантов для опроса в poll_options.
+        """
+        async with self.pool.acquire() as conn:
+            async with conn.transaction():
+                await conn.execute("DELETE FROM poll_options WHERE poll_id = $1", poll_id)
+                for index, option in enumerate(options):
+                    await conn.execute(
+                        """
+                        INSERT INTO poll_options (
+                            poll_id, option_index, option_text, slot_start, slot_end, max_users, current_count
+                        )
+                        VALUES ($1, $2, $3, $4, $5, $6, 0)
+                        """,
+                        poll_id,
+                        index,
+                        option.get("option_text"),
+                        option.get("slot_start"),
+                        option.get("slot_end"),
+                        option.get("max_users"),
+                    )
+
+    async def sync_user_vote(
+        self,
+        poll_id: str,
+        user_id: int,
+        user_name: Optional[str],
+        full_name: Optional[str],
+        option_indexes: List[int],
+    ) -> None:
+        """
+        Обновить детальный учет голосов пользователя в user_votes.
+        """
+        async with self.pool.acquire() as conn:
+            async with conn.transaction():
+                await conn.execute(
+                    "DELETE FROM user_votes WHERE poll_id = $1 AND user_id = $2",
+                    poll_id,
+                    user_id,
+                )
+
+                for option_index in option_indexes:
+                    option_row = await conn.fetchrow(
+                        """
+                        SELECT id
+                        FROM poll_options
+                        WHERE poll_id = $1 AND option_index = $2
+                        """,
+                        poll_id,
+                        option_index,
+                    )
+                    if option_row is None:
+                        continue
+
+                    await conn.execute(
+                        """
+                        INSERT INTO user_votes (poll_id, option_id, user_id, user_name, full_name)
+                        VALUES ($1, $2, $3, $4, $5)
+                        ON CONFLICT (poll_id, user_id, option_id) DO UPDATE
+                        SET user_name = EXCLUDED.user_name,
+                            full_name = EXCLUDED.full_name,
+                            voted_at = NOW()
+                        """,
+                        poll_id,
+                        option_row["id"],
+                        user_id,
+                        user_name,
+                        full_name,
+                    )
+
+                await conn.execute(
+                    """
+                    UPDATE poll_options AS po
+                    SET current_count = COALESCE(v.cnt, 0)
+                    FROM (
+                        SELECT option_id, COUNT(*)::int AS cnt
+                        FROM user_votes
+                        WHERE poll_id = $1
+                        GROUP BY option_id
+                    ) AS v
+                    WHERE po.id = v.option_id
+                    """,
+                    poll_id,
+                )
+                await conn.execute(
+                    """
+                    UPDATE poll_options
+                    SET current_count = 0
+                    WHERE poll_id = $1
+                      AND id NOT IN (
+                          SELECT option_id
+                          FROM user_votes
+                          WHERE poll_id = $1
+                      )
+                    """,
+                    poll_id,
+                )
 
     async def claim_for_closing(self, poll_id: str) -> bool:
         """

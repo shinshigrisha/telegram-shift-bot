@@ -314,7 +314,8 @@ async def callback_recreate_polls_start(callback: CallbackQuery, state: FSMConte
 async def callback_recreate_polls_confirm(callback: CallbackQuery, bot: Bot, poll_repo: PollRepository, group_repo: GroupRepository, state: FSMContext) -> None:
     """Подтверждение пересоздания опросов."""
     try:
-        # Удаляем все активные опросы
+        # Удаляем все активные опросы, но перед этим сохраняем их telegram_poll_id
+        # в реестре устаревших, чтобы поздние poll_answer от Telegram не считались ошибкой.
         active_polls = await poll_repo.get_active_polls()
         deleted_count = 0
         
@@ -338,7 +339,13 @@ async def callback_recreate_polls_confirm(callback: CallbackQuery, bot: Bot, pol
                     except Exception as e:
                         logger.warning("Ошибка при закрытии опроса в Telegram: %s", e)
                 
-                # Удаляем запись опроса из БД, чтобы можно было создать новый заново
+                if poll.get("telegram_poll_id"):
+                    await poll_repo.mark_telegram_poll_obsolete(
+                        telegram_poll_id=str(poll["telegram_poll_id"]),
+                        group_id=poll.get("group_id"),
+                        poll_date=poll.get("poll_date"),
+                        reason="recreated",
+                    )
                 await poll_repo.delete(str(poll['id']))
                 deleted_count += 1
             except Exception as e:
@@ -542,6 +549,15 @@ async def callback_test_delete_all_polls_confirm(
         return
 
     group = await group_service.get_group_by_id(int(group_id))
+    group_polls = await poll_repo.get_by_date_range(date(2000, 1, 1), date(2100, 1, 1), int(group_id))
+    for poll in group_polls:
+        if poll.get("telegram_poll_id"):
+            await poll_repo.mark_telegram_poll_obsolete(
+                telegram_poll_id=str(poll["telegram_poll_id"]),
+                group_id=poll.get("group_id"),
+                poll_date=poll.get("poll_date"),
+                reason="deleted_from_admin",
+            )
     deleted_count = await poll_repo.delete_all_by_group(int(group_id))
 
     if deleted_count == 0:
@@ -923,6 +939,13 @@ async def callback_select_group_for_polls(
         
         try:
             if action == "delete_test_poll":
+                if poll.get("telegram_poll_id"):
+                    await poll_repo.mark_telegram_poll_obsolete(
+                        telegram_poll_id=str(poll["telegram_poll_id"]),
+                        group_id=poll.get("group_id"),
+                        poll_date=poll.get("poll_date"),
+                        reason="deleted_from_admin",
+                    )
                 deleted = await poll_repo.delete(str(poll['id']))
                 if not deleted:
                     raise RuntimeError("Не удалось удалить опрос из БД")
