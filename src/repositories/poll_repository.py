@@ -434,10 +434,6 @@ class PollRepository:
                         """
                         INSERT INTO user_votes (poll_id, option_id, user_id, user_name, full_name)
                         VALUES ($1, $2, $3, $4, $5)
-                        ON CONFLICT (poll_id, user_id, option_id) DO UPDATE
-                        SET user_name = EXCLUDED.user_name,
-                            full_name = EXCLUDED.full_name,
-                            voted_at = NOW()
                         """,
                         poll_id,
                         option_row["id"],
@@ -473,6 +469,51 @@ class PollRepository:
                     """,
                     poll_id,
                 )
+
+    async def claim_reminder_dispatch(
+        self,
+        poll_id: str,
+        reminder_hour: int,
+        is_night: bool,
+    ) -> bool:
+        """
+        Атомарно забрать отправку напоминания в обработку.
+
+        Возвращает True только для первого процесса/корутины.
+        """
+        async with self.pool.acquire() as conn:
+            result = await conn.execute(
+                """
+                INSERT INTO poll_reminder_dispatches (poll_id, reminder_hour, is_night)
+                VALUES ($1, $2, $3)
+                ON CONFLICT (poll_id, reminder_hour, is_night) DO NOTHING
+                """,
+                poll_id,
+                reminder_hour,
+                is_night,
+            )
+            return result == "INSERT 0 1"
+
+    async def release_reminder_dispatch(
+        self,
+        poll_id: str,
+        reminder_hour: int,
+        is_night: bool,
+    ) -> bool:
+        """
+        Освободить claim напоминания, если отправка сорвалась.
+        """
+        async with self.pool.acquire() as conn:
+            result = await conn.execute(
+                """
+                DELETE FROM poll_reminder_dispatches
+                WHERE poll_id = $1 AND reminder_hour = $2 AND is_night = $3
+                """,
+                poll_id,
+                reminder_hour,
+                is_night,
+            )
+            return result == "DELETE 1"
 
     async def claim_for_closing(self, poll_id: str) -> bool:
         """

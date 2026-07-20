@@ -298,12 +298,12 @@ class SchedulerService:
         hours_left: int,
         is_night: bool,
     ) -> bool:
-        reminder_already_sent = await self.poll_service.poll_repo.reminder_already_sent(
+        reminder_claimed = await self.poll_service.poll_repo.claim_reminder_dispatch(
             poll_id=str(poll["id"]),
             reminder_hour=reminder_hour,
             is_night=is_night,
         )
-        if reminder_already_sent:
+        if not reminder_claimed:
             logger.debug(
                 "Пропуск повторного напоминания для группы %s: уже отправлено",
                 group.get("name", group["id"]),
@@ -327,13 +327,13 @@ class SchedulerService:
                 text=message,
                 parse_mode="HTML",
             )
-            await self.poll_service.poll_repo.mark_reminder_sent(
+            return True
+        except Exception:
+            await self.poll_service.poll_repo.release_reminder_dispatch(
                 poll_id=str(poll["id"]),
                 reminder_hour=reminder_hour,
                 is_night=is_night,
             )
-            return True
-        except Exception:
             self._schedule_reminder_retry(
                 poll=poll,
                 group=group,
