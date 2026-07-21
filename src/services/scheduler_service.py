@@ -5,13 +5,14 @@ import logging
 import asyncio
 from html import escape
 from datetime import date, datetime, time, timedelta
-from typing import Optional, List, Dict, Any, Callable
+from typing import Optional, List, Dict, Any, Callable, Awaitable
 from pathlib import Path
 
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from apscheduler.triggers.cron import CronTrigger
 from apscheduler.triggers.date import DateTrigger
 from aiogram import Bot
+from aiogram.exceptions import TelegramBadRequest, TelegramNetworkError
 
 from config.settings import settings
 from src.services.group_member_service import GroupMemberService
@@ -58,6 +59,7 @@ class SchedulerService:
         self.group_member_service = GroupMemberService(group_service.db_pool)
         self.scheduler = AsyncIOScheduler(timezone="Europe/Moscow")
         self._is_running = False
+        self._close_lock = asyncio.Lock()
     
     async def start(self) -> None:
         """Запуск планировщика с основными задачами."""
@@ -460,6 +462,18 @@ class SchedulerService:
 
     async def _close_polls(self, is_night: bool, target_date: date) -> None:
         """Закрыть активные опросы по типу группы и дате."""
+        if self._close_lock.locked():
+            logger.info(
+                "Пропуск параллельного закрытия опросов на %s: закрытие уже выполняется",
+                target_date,
+            )
+            return
+
+        async with self._close_lock:
+            await self._close_polls_locked(is_night=is_night, target_date=target_date)
+
+    async def _close_polls_locked(self, is_night: bool, target_date: date) -> None:
+        """Выполнить закрытие опросов под общей блокировкой планировщика."""
         logger.info("🔒 Запуск автоматического закрытия опросов...")
         
         try:
@@ -479,14 +493,14 @@ class SchedulerService:
             
             for poll, group in selected_polls:
                 try:
-                    await self.close_single_poll_with_reporting(poll, group)
-                    
-                    closed_count += 1
-                    logger.info("Закрыт опрос для группы %s", group['name'])
+                    closed = await self.close_single_poll_with_reporting(poll, group)
+                    if closed:
+                        closed_count += 1
+                        logger.info("Закрыт опрос для группы %s", group['name'])
                     
                 except Exception as e:
                     error_msg = f"Группа {group.get('name', poll['group_id'])}: {e}"
-                    logger.error("Ошибка закрытия опроса: %s", e, exc_info=True)
+                    logger.error("Ошибка закрытия опроса для группы %s: %s", group.get('name'), e, exc_info=True)
                     errors.append(error_msg)
             
             # Отчет для админов
@@ -746,29 +760,76 @@ class SchedulerService:
             logger.error("Ошибка сохранения отчета: %s", e, exc_info=True)
             return ""
 
+    async def _call_telegram_with_retry(
+        self,
+        operation: Callable[[], Awaitable[Any]],
+        operation_name: str,
+        group_name: str,
+        attempts: int = 3,
+    ) -> Any:
+        """Повторить запрос к Telegram при временной сетевой ошибке."""
+        last_error: Optional[TelegramNetworkError] = None
+
+        for attempt in range(1, attempts + 1):
+            try:
+                return await operation()
+            except TelegramNetworkError as e:
+                last_error = e
+                if attempt >= attempts:
+                    break
+
+                delay_seconds = attempt
+                logger.warning(
+                    "Сетевая ошибка Telegram при операции '%s' для группы %s, попытка %d/%d: %s. "
+                    "Повтор через %d сек.",
+                    operation_name,
+                    group_name,
+                    attempt,
+                    attempts,
+                    e,
+                    delay_seconds,
+                )
+                await asyncio.sleep(delay_seconds)
+
+        if last_error:
+            raise last_error
+        raise RuntimeError(f"Операция Telegram '{operation_name}' не выполнена для группы {group_name}")
+
     async def close_single_poll_with_reporting(
         self,
         poll: Dict[str, Any],
         group: Dict[str, Any],
-    ) -> None:
+    ) -> bool:
         """Закрыть один опрос, отправить итоги в чат и сохранить отчет."""
         poll_id = str(poll["id"])
+        group_name = group.get("name", str(poll["group_id"]))
         claimed = await self.poll_service.poll_repo.claim_for_closing(poll_id)
         if not claimed:
             logger.info(
                 "Пропуск повторного закрытия опроса %s для группы %s: уже обрабатывается или закрыт",
                 poll_id,
-                group.get("name"),
+                group_name,
             )
-            return
+            return False
 
         try:
-            await self.bot.stop_poll(
-                chat_id=group['telegram_chat_id'],
-                message_id=poll['telegram_message_id'],
+            await self._call_telegram_with_retry(
+                lambda: self.bot.stop_poll(
+                    chat_id=group['telegram_chat_id'],
+                    message_id=poll['telegram_message_id'],
+                ),
+                operation_name="закрытие опроса",
+                group_name=group_name,
             )
-        except Exception as e:
-            logger.warning("Не удалось закрыть опрос в Telegram: %s", e)
+        except TelegramBadRequest as e:
+            if "poll can't be stopped" not in str(e).lower():
+                await self.poll_service.poll_repo.release_closing_claim(poll_id)
+                raise
+            logger.info("Опрос для группы %s уже закрыт в Telegram", group_name)
+        except Exception:
+            await self.poll_service.poll_repo.release_closing_claim(poll_id)
+            raise
+
         try:
             fresh_poll = await self.poll_service.poll_repo.get_by_id(poll_id) or poll
             report = await self._generate_poll_report(fresh_poll, group)
@@ -776,23 +837,34 @@ class SchedulerService:
             not_voted_report = self._format_not_voted_report(not_voted)
             screenshot_path = await self._save_poll_report(fresh_poll, group, report)
 
-            await self.bot.send_message(
-                chat_id=group['telegram_chat_id'],
-                text=report,
-                parse_mode="HTML",
+            await self._call_telegram_with_retry(
+                lambda: self.bot.send_message(
+                    chat_id=group['telegram_chat_id'],
+                    text=report,
+                    parse_mode="HTML",
+                ),
+                operation_name="отправка итогов опроса",
+                group_name=group_name,
             )
-            await self.bot.send_message(
-                chat_id=group['telegram_chat_id'],
-                text=not_voted_report,
-                parse_mode="HTML",
+            await self._call_telegram_with_retry(
+                lambda: self.bot.send_message(
+                    chat_id=group['telegram_chat_id'],
+                    text=not_voted_report,
+                    parse_mode="HTML",
+                ),
+                operation_name="отправка списка неотметившихся",
+                group_name=group_name,
             )
 
-            await self.poll_service.poll_repo.update(
+            updated = await self.poll_service.poll_repo.update(
                 poll_id=fresh_poll['id'],
                 status="closed",
                 screenshot_path=screenshot_path,
                 closed_at=datetime.now(),
             )
+            if not updated:
+                raise RuntimeError(f"Не удалось сохранить закрытие опроса для группы {group_name}")
+            return True
         except Exception:
             await self.poll_service.poll_repo.release_closing_claim(poll_id)
             raise

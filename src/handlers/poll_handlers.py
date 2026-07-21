@@ -102,6 +102,14 @@ async def handle_poll_answer(
                 logger.warning("Опрос с telegram_poll_id=%s не найден", poll_id)
             return
 
+        if poll.get("status") != "active":
+            logger.info(
+                "Получен поздний голос по опросу telegram_poll_id=%s со статусом %s, игнорируем",
+                poll_id,
+                poll.get("status"),
+            )
+            return
+
         group = await group_repo.get_by_id(poll["group_id"])
         if not group:
             logger.warning("Группа для опроса %s не найдена", poll.get("id"))
@@ -127,6 +135,13 @@ async def handle_poll_answer(
                     poll["id"],
                 )
                 locked_poll = dict(locked_row) if locked_row else {}
+                if locked_poll.get("status") != "active":
+                    logger.info(
+                        "Статус опроса %s изменился на %s во время обработки голоса, голос игнорируем",
+                        poll.get("id"),
+                        locked_poll.get("status"),
+                    )
+                    return
                 results = _normalize_results(locked_poll.get("results"))
 
                 _clear_previous_vote(results, user.id)
