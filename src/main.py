@@ -1,3 +1,4 @@
+# ruff: noqa: E402
 """
 Главный файл для запуска Telegram бота.
 """
@@ -136,42 +137,42 @@ async def main() -> None:
     logger.info("Роутеры зарегистрированы")
     
     # Инициализируем пул соединений с БД
-    db_pool = None
     try:
         db_pool = await get_db_pool()
         logger.info("Пул соединений PostgreSQL инициализирован")
     except Exception as e:
         logger.error("Ошибка инициализации пула соединений PostgreSQL: %s", e, exc_info=True)
-        # Не завершаем работу, так как некоторые функции могут работать без БД
+        raise RuntimeError("PostgreSQL недоступен: безопасный запуск бота невозможен") from e
     
     # Инициализируем планировщик
-    if db_pool:
-        try:
-            poll_repo = PollRepository(db_pool)
-            group_repo = GroupRepository(db_pool)
-            group_service = GroupService(db_pool)
-            poll_service = PollService(bot, poll_repo, group_repo)
+    try:
+        poll_repo = PollRepository(db_pool)
+        group_repo = GroupRepository(db_pool)
+        group_service = GroupService(db_pool)
+        poll_service = PollService(bot, poll_repo, group_repo)
             
-            scheduler_service = SchedulerService(
-                bot=bot,
-                poll_service=poll_service,
-                group_service=group_service,
-            )
+        scheduler_service = SchedulerService(
+            bot=bot,
+            poll_service=poll_service,
+            group_service=group_service,
+        )
             
-            # Сохраняем в глобальный реестр для доступа из handlers
-            set_scheduler_service(scheduler_service)
-            set_poll_service(poll_service)
+        # Сохраняем в глобальный реестр для доступа из handlers
+        set_scheduler_service(scheduler_service)
+        set_poll_service(poll_service)
             
-            # Запускаем планировщик
-            await scheduler_service.start()
-            logger.info("Планировщик задач инициализирован")
-            
-        except Exception as e:
-            logger.error("Ошибка инициализации планировщика: %s", e, exc_info=True)
+        # Запускаем планировщик
+        await scheduler_service.start()
+        logger.info("Планировщик задач инициализирован")
+    except Exception as e:
+        logger.error("Ошибка инициализации планировщика: %s", e, exc_info=True)
+        raise RuntimeError("Планировщик не запущен: бот не будет работать частично") from e
     
     # Запускаем бота
     polling_retry_delay = 5
+    ready_path = Path("/tmp/telegram-shift-bot-ready")
     try:
+        ready_path.touch()
         logger.info("Бот запущен и готов к работе")
         while True:
             try:
@@ -188,6 +189,7 @@ async def main() -> None:
                 logger.error("Критическая ошибка при работе бота: %s", e, exc_info=True)
                 raise
     finally:
+        ready_path.unlink(missing_ok=True)
         # Останавливаем планировщик
         from src.services.service_registry import get_scheduler_service
         scheduler_service = get_scheduler_service()

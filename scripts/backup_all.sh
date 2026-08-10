@@ -1,72 +1,32 @@
-#!/bin/bash
+#!/usr/bin/env bash
 
-# Комплексный скрипт для бекапа всех данных
-# Использование: ./scripts/backup_all.sh
+set -Eeuo pipefail
 
-# Настройки
-BACKUP_DIR="${BACKUP_DIR:-./backups}"
-DATE=$(date +%Y%m%d_%H%M%S)
-BACKUP_DIR_DATE="$BACKUP_DIR/backup_$DATE"
+PROJECT_ROOT="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)"
+cd "$PROJECT_ROOT"
 
-# Настройки БД
-DB_NAME="${DB_NAME:-telegram_shift_bot}"
-DB_USER="${DB_USER:-postgres}"
+BACKUP_ROOT="${BACKUP_DIR:-$PROJECT_ROOT/backups}"
+COMPOSE_FILE="${COMPOSE_FILE:-docker-compose.yml}"
+DATE="$(date -u +%Y%m%dT%H%M%SZ)"
+BACKUP_SET="$BACKUP_ROOT/backup_$DATE"
 
-# Создаем директорию для бекапа
-mkdir -p "$BACKUP_DIR_DATE"
+mkdir -p "$BACKUP_SET"
 
-echo "🔄 Начинаю комплексное резервное копирование..."
-echo "📁 Директория бекапа: $BACKUP_DIR_DATE"
-echo ""
+echo "Создаю полный комплект резервных копий: $BACKUP_SET"
+COMPOSE_FILE="$COMPOSE_FILE" BACKUP_DIR="$BACKUP_SET" "$PROJECT_ROOT/scripts/backup_postgres.sh"
+COMPOSE_FILE="$COMPOSE_FILE" BACKUP_DIR="$BACKUP_SET" "$PROJECT_ROOT/scripts/backup_redis.sh"
 
-# PostgreSQL
-echo "📊 Бекап PostgreSQL..."
-if pg_dump -U "$DB_USER" -d "$DB_NAME" > "$BACKUP_DIR_DATE/postgres_backup.sql" 2>/dev/null; then
-    gzip "$BACKUP_DIR_DATE/postgres_backup.sql"
-    echo "  ✅ PostgreSQL: $BACKUP_DIR_DATE/postgres_backup.sql.gz"
-else
-    echo "  ❌ Ошибка при бекапе PostgreSQL"
+if [ -d logs ]; then
+  tar -czf "$BACKUP_SET/logs.tar.gz" logs/
 fi
 
-# Redis
-echo "💾 Бекап Redis..."
-if redis-cli --rdb "$BACKUP_DIR_DATE/redis_backup.rdb" > /dev/null 2>&1; then
-    echo "  ✅ Redis: $BACKUP_DIR_DATE/redis_backup.rdb"
-else
-    echo "  ❌ Ошибка при бекапе Redis"
-fi
+cp -R config migrations "$BACKUP_SET/"
+cp .env.example "$BACKUP_SET/"
 
-# Логи
-echo "📝 Бекап логов..."
-if [ -d "logs" ]; then
-    tar -czf "$BACKUP_DIR_DATE/logs.tar.gz" logs/ 2>/dev/null
-    echo "  ✅ Логи: $BACKUP_DIR_DATE/logs.tar.gz"
-else
-    echo "  ⚠️  Директория logs не найдена"
-fi
+cat > "$BACKUP_SET/README.txt" <<'EOF'
+Файл .env намеренно не включён: он содержит токены и пароли.
+Для восстановления используйте отдельную защищённую копию секретов.
+EOF
 
-# Конфигурация
-echo "⚙️ Бекап конфигурации..."
-if [ -f ".env" ]; then
-    cp .env "$BACKUP_DIR_DATE/.env"
-    echo "  ✅ .env скопирован"
-fi
-
-if [ -d "config" ]; then
-    cp -r config/ "$BACKUP_DIR_DATE/config/"
-    echo "  ✅ config/ скопирован"
-fi
-
-# Миграции
-if [ -d "migrations" ]; then
-    cp -r migrations/ "$BACKUP_DIR_DATE/migrations/"
-    echo "  ✅ migrations/ скопирован"
-fi
-
-echo ""
-echo "✅ Все бекапы созданы в: $BACKUP_DIR_DATE"
-
-# Удаляем старые бекапы (старше 7 дней)
-echo "🗑️  Удаление старых бекапов (старше 7 дней)..."
-find "$BACKUP_DIR" -name "backup_*" -type d -mtime +7 -exec rm -rf {} \; 2>/dev/null
-echo "✅ Готово!"
+find "$BACKUP_ROOT" -mindepth 1 -maxdepth 1 -type d -name 'backup_*' -mtime +7 -exec rm -rf -- {} +
+echo "Полный комплект резервных копий создан: $BACKUP_SET"

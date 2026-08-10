@@ -1,31 +1,26 @@
-#!/bin/bash
+#!/usr/bin/env bash
 
-# Скрипт для автоматического бекапа PostgreSQL
-# Использование: ./scripts/backup_postgres.sh
+set -Eeuo pipefail
 
-# Настройки (можно переопределить через переменные окружения)
-DB_NAME="${DB_NAME:-telegram_shift_bot}"
-DB_USER="${DB_USER:-postgres}"
-BACKUP_DIR="${BACKUP_DIR:-./backups}"
-DATE=$(date +%Y%m%d_%H%M%S)
-BACKUP_FILE="$BACKUP_DIR/postgres_backup_$DATE.sql"
+PROJECT_ROOT="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)"
+cd "$PROJECT_ROOT"
 
-# Создаем директорию для бекапов
+BACKUP_DIR="${BACKUP_DIR:-$PROJECT_ROOT/backups}"
+COMPOSE_FILE="${COMPOSE_FILE:-docker-compose.yml}"
+DATE="$(date -u +%Y%m%dT%H%M%SZ)"
+BACKUP_FILE="$BACKUP_DIR/shift_bot-$DATE.sql.gz"
+TEMP_FILE="$BACKUP_FILE.tmp"
+
 mkdir -p "$BACKUP_DIR"
+trap 'rm -f "$TEMP_FILE"' EXIT
 
-echo "🔄 Начинаю бекап PostgreSQL..."
+echo "Создаю резервную копию PostgreSQL..."
+docker compose -f "$COMPOSE_FILE" exec -T postgres sh -ec 'pg_dump -U "$POSTGRES_USER" -d "$POSTGRES_DB"' \
+  | gzip -9 > "$TEMP_FILE"
 
-# Создаем бекап
-if pg_dump -U "$DB_USER" -d "$DB_NAME" > "$BACKUP_FILE" 2>/dev/null; then
-    # Сжимаем
-    gzip "$BACKUP_FILE"
-    
-    echo "✅ Бекап создан: $BACKUP_FILE.gz"
-    
-    # Удаляем старые бекапы (старше 30 дней)
-    find "$BACKUP_DIR" -name "postgres_backup_*.sql.gz" -mtime +30 -delete 2>/dev/null
-    echo "🗑️  Старые бекапы (старше 30 дней) удалены"
-else
-    echo "❌ Ошибка при создании бекапа"
-    exit 1
-fi
+test -s "$TEMP_FILE"
+mv "$TEMP_FILE" "$BACKUP_FILE"
+trap - EXIT
+
+find "$BACKUP_DIR" -maxdepth 1 -type f -name 'shift_bot-*.sql.gz' -mtime +30 -delete
+echo "Резервная копия PostgreSQL создана: $BACKUP_FILE"

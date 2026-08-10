@@ -171,7 +171,14 @@ async def main() -> None:
             try:
                 await conn.execute(CORE_SCHEMA_SQL)
                 applied_migrations = await _apply_migrations(conn)
-                print(f"✅ Рабочая схема БД инициализирована: {candidate}")
+                parsed_candidate = urlparse(candidate)
+                safe_host = parsed_candidate.hostname or "unknown-host"
+                safe_port = parsed_candidate.port or 5432
+                safe_database = parsed_candidate.path.lstrip("/") or "unknown-db"
+                print(
+                    "✅ Рабочая схема БД инициализирована: "
+                    f"{safe_host}:{safe_port}/{safe_database}"
+                )
                 if applied_migrations:
                     print("📦 Применены миграции:")
                     for migration_name in applied_migrations:
@@ -182,7 +189,11 @@ async def main() -> None:
             finally:
                 await conn.close()
         except Exception as exc:
-            errors.append(f"{candidate} -> {exc}")
+            parsed_candidate = urlparse(candidate)
+            safe_host = parsed_candidate.hostname or "unknown-host"
+            safe_port = parsed_candidate.port or 5432
+            safe_database = parsed_candidate.path.lstrip("/") or "unknown-db"
+            errors.append(f"{safe_host}:{safe_port}/{safe_database} -> {exc}")
 
     raise RuntimeError(
         "Не удалось подключиться к PostgreSQL. Проверены варианты:\n- "

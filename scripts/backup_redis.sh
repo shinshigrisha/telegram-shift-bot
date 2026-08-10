@@ -1,28 +1,27 @@
-#!/bin/bash
+#!/usr/bin/env bash
 
-# Скрипт для автоматического бекапа Redis
-# Использование: ./scripts/backup_redis.sh
+set -Eeuo pipefail
 
-# Настройки
-REDIS_HOST="${REDIS_HOST:-localhost}"
-REDIS_PORT="${REDIS_PORT:-6379}"
-BACKUP_DIR="${BACKUP_DIR:-./backups}"
-DATE=$(date +%Y%m%d_%H%M%S)
-BACKUP_FILE="$BACKUP_DIR/redis_backup_$DATE.rdb"
+PROJECT_ROOT="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)"
+cd "$PROJECT_ROOT"
 
-# Создаем директорию для бекапов
+BACKUP_DIR="${BACKUP_DIR:-$PROJECT_ROOT/backups}"
+COMPOSE_FILE="${COMPOSE_FILE:-docker-compose.yml}"
+DATE="$(date -u +%Y%m%dT%H%M%SZ)"
+BACKUP_FILE="$BACKUP_DIR/redis-$DATE.rdb"
+TEMP_FILE="$BACKUP_FILE.tmp"
+
 mkdir -p "$BACKUP_DIR"
+trap 'rm -f "$TEMP_FILE"' EXIT
 
-echo "🔄 Начинаю бекап Redis..."
+echo "Создаю резервную копию Redis..."
+docker compose -f "$COMPOSE_FILE" exec -T redis sh -ec \
+  'redis-cli --no-auth-warning -a "$REDIS_PASSWORD" SAVE >/dev/null'
+docker compose -f "$COMPOSE_FILE" cp redis:/data/dump.rdb "$TEMP_FILE" >/dev/null
 
-# Сохраняем данные Redis
-if redis-cli -h "$REDIS_HOST" -p "$REDIS_PORT" --rdb "$BACKUP_FILE" > /dev/null 2>&1; then
-    echo "✅ Бекап создан: $BACKUP_FILE"
-    
-    # Удаляем старые бекапы (старше 30 дней)
-    find "$BACKUP_DIR" -name "redis_backup_*.rdb" -mtime +30 -delete 2>/dev/null
-    echo "🗑️  Старые бекапы (старше 30 дней) удалены"
-else
-    echo "❌ Ошибка при создании бекапа"
-    exit 1
-fi
+test -s "$TEMP_FILE"
+mv "$TEMP_FILE" "$BACKUP_FILE"
+trap - EXIT
+
+find "$BACKUP_DIR" -maxdepth 1 -type f -name 'redis-*.rdb' -mtime +30 -delete
+echo "Резервная копия Redis создана: $BACKUP_FILE"

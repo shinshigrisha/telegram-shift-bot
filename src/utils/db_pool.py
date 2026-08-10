@@ -5,6 +5,7 @@
 """
 import logging
 from typing import Optional
+from urllib.parse import urlparse
 import asyncpg
 from asyncpg import Pool
 
@@ -14,6 +15,14 @@ logger = logging.getLogger(__name__)
 
 # Глобальный пул соединений
 _db_pool: Optional[Pool] = None
+
+
+def _safe_database_endpoint(database_url: str) -> str:
+    parsed = urlparse(database_url)
+    host = parsed.hostname or "unknown-host"
+    port = parsed.port or 5432
+    database = parsed.path.lstrip("/") or "unknown-db"
+    return f"{host}:{port}/{database}"
 
 
 async def get_db_pool() -> Pool:
@@ -41,6 +50,7 @@ async def get_db_pool() -> Pool:
 
     errors = []
     for database_url in database_urls:
+        safe_endpoint = _safe_database_endpoint(database_url)
         try:
             _db_pool = await asyncpg.create_pool(
                 database_url,
@@ -49,11 +59,11 @@ async def get_db_pool() -> Pool:
                 command_timeout=60,
                 ssl=False,
             )
-            logger.info("Пул соединений PostgreSQL создан успешно: %s", database_url)
+            logger.info("Пул соединений PostgreSQL создан успешно: %s", safe_endpoint)
             return _db_pool
         except Exception as e:
-            errors.append(f"{database_url} -> {e}")
-            logger.warning("Не удалось подключиться к PostgreSQL по %s: %s", database_url, e)
+            errors.append(f"{safe_endpoint} -> {e}")
+            logger.warning("Не удалось подключиться к PostgreSQL по %s: %s", safe_endpoint, e)
 
     raise RuntimeError(
         "Ошибка при создании пула соединений PostgreSQL. Проверены варианты:\n- "

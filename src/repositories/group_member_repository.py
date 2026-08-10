@@ -135,19 +135,37 @@ class GroupMemberRepository:
         username: Optional[str],
     ) -> bool:
         async with self.pool.acquire() as conn:
-            result = await conn.execute(
-                """
-                UPDATE group_members
-                SET telegram_user_id = $1,
-                    username = $2,
-                    updated_at = CURRENT_TIMESTAMP
-                WHERE id = $3
-                """,
-                telegram_user_id,
-                username,
-                member_id,
-            )
-            return result == "UPDATE 1"
+            async with conn.transaction():
+                # Один Telegram-аккаунт должен соответствовать ровно одной
+                # актуальной карточке курьера, даже если он сменил группу.
+                # Advisory lock не позволяет двум одновременным голосам
+                # создать конкурирующие привязки.
+                await conn.execute("SELECT pg_advisory_xact_lock($1)", telegram_user_id)
+                await conn.execute(
+                    """
+                    UPDATE group_members
+                    SET telegram_user_id = NULL,
+                        username = NULL,
+                        updated_at = CURRENT_TIMESTAMP
+                    WHERE telegram_user_id = $1
+                      AND id <> $2
+                    """,
+                    telegram_user_id,
+                    member_id,
+                )
+                result = await conn.execute(
+                    """
+                    UPDATE group_members
+                    SET telegram_user_id = $1,
+                        username = $2,
+                        updated_at = CURRENT_TIMESTAMP
+                    WHERE id = $3
+                    """,
+                    telegram_user_id,
+                    username,
+                    member_id,
+                )
+                return result == "UPDATE 1"
 
     async def update_name(self, member_id: int, full_name: str) -> bool:
         async with self.pool.acquire() as conn:

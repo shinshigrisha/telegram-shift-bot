@@ -12,7 +12,7 @@ services:
       - postgres_data:/var/lib/postgresql/data
       - ./backups:/backups:ro
     ports:
-      - "5432:5432"
+      - "127.0.0.1:5432:5432"
     restart: unless-stopped
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U bot_user"]
@@ -30,7 +30,7 @@ services:
       - redis_data:/data
       - ./backups:/backups:ro
     ports:
-      - "6379:6379"
+      - "127.0.0.1:6379:6379"
     restart: unless-stopped
     healthcheck:
       test: ["CMD-SHELL", "redis-cli -a \"$${REDIS_PASSWORD}\" ping | grep PONG"]
@@ -52,7 +52,13 @@ services:
       - ./logs:/app/logs
       - ./backups:/app/backups
     restart: unless-stopped
-    command: ["python", "src/main.py"]
+    command: ["sh", "scripts/start_bot.sh"]
+    healthcheck:
+      test: ["CMD-SHELL", "test -f /tmp/telegram-shift-bot-ready && kill -0 1"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
 
 volumes:
   postgres_data:

@@ -1,44 +1,44 @@
-#!/bin/bash
-# Скрипт для обновления бота на сервере и выполнения миграций
+#!/usr/bin/env bash
 
-set -e  # Остановка при ошибке
+set -Eeuo pipefail
 
-echo "🚀 Начало обновления бота..."
+PROJECT_ROOT="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)"
+cd "$PROJECT_ROOT"
 
-# Переходим в директорию проекта
-cd /opt/telegram-shift-bot || { echo "❌ Директория /opt/telegram-shift-bot не найдена"; exit 1; }
-
-echo "📦 Обновление кода из Git..."
-# Обновляем код (если используется git)
-if [ -d .git ]; then
-    git pull || echo "⚠️ Не удалось обновить через git (возможно, нет изменений)"
+if [ -f compose.prod.yml ]; then
+  COMPOSE_FILE="${COMPOSE_FILE:-compose.prod.yml}"
 else
-    echo "ℹ️ Git репозиторий не найден, пропускаем git pull"
+  COMPOSE_FILE="${COMPOSE_FILE:-docker-compose.yml}"
 fi
 
-echo "🔨 Пересборка образа бота..."
-docker compose build --no-cache bot
+compose() {
+  docker compose -f "$COMPOSE_FILE" "$@"
+}
 
-echo "🧪 Preflight-проверка Python-кода..."
-docker compose run --rm bot python3 -m compileall src config scripts
+echo "Начинаю обновление Telegram Shift Bot из $PROJECT_ROOT"
 
-echo "🗄️ Инициализация рабочей схемы БД..."
-docker compose run --rm bot python3 scripts/init_runtime_database.py
+if [ -d .git ]; then
+  git pull --ff-only
+fi
 
-echo "🔄 Перезапуск бота..."
-docker compose up -d bot
+echo "Запускаю PostgreSQL и Redis..."
+compose up -d postgres redis
 
-echo "⏳ Ожидание запуска бота (5 секунд)..."
-sleep 5
+echo "Создаю резервную копию PostgreSQL перед обновлением..."
+COMPOSE_FILE="$COMPOSE_FILE" "$PROJECT_ROOT/scripts/backup_postgres.sh"
 
-echo "📊 Проверка статуса сервисов..."
-docker compose ps
+echo "Собираю образ бота..."
+compose build bot
 
-echo "📜 Последние логи бота:"
-docker compose logs bot --tail=20
+echo "Проверяю Python-код..."
+compose run --rm bot python3 -m compileall -q src config scripts
 
-echo ""
-echo "✅ Обновление завершено!"
-echo ""
-echo "Проверьте логи: docker compose logs bot -f"
-echo "Проверьте статус: docker compose ps"
+echo "Применяю миграции..."
+compose run --rm bot python3 scripts/init_runtime_database.py
+
+echo "Перезапускаю бота..."
+compose up -d bot
+compose ps
+compose logs bot --tail=30
+
+echo "Обновление завершено"
