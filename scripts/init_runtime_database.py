@@ -70,8 +70,8 @@ CREATE TABLE IF NOT EXISTS group_members (
     UNIQUE (group_id, full_name)
 );
 
-CREATE UNIQUE INDEX IF NOT EXISTS idx_group_members_group_telegram_unique
-    ON group_members (group_id, telegram_user_id)
+CREATE UNIQUE INDEX IF NOT EXISTS idx_group_members_telegram_user_unique
+    ON group_members (telegram_user_id)
     WHERE telegram_user_id IS NOT NULL;
 
 CREATE TABLE IF NOT EXISTS poll_reminder_dispatches (
