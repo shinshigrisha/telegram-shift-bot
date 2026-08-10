@@ -4,7 +4,12 @@ from unittest.mock import AsyncMock, patch
 
 from aiogram.enums import ChatMemberStatus
 
-from src.handlers.group_membership import _is_present, sync_group_membership
+from src.handlers.group_membership import (
+    _is_present,
+    sync_group_membership,
+    sync_left_chat_member,
+    sync_new_chat_members,
+)
 
 
 def _chat_member(status, user, is_member=None):
@@ -93,6 +98,41 @@ class GroupMembershipHandlerTests(unittest.IsolatedAsyncioTestCase):
             telegram_user_id=42,
         )
         member_service.sync_member_to_group.assert_not_awaited()
+
+    async def test_service_join_message_is_used_as_non_admin_fallback(self):
+        user = SimpleNamespace(
+            id=42,
+            is_bot=False,
+            full_name="Курьер",
+            username=None,
+        )
+        message = SimpleNamespace(
+            chat=SimpleNamespace(id=-100123),
+            new_chat_members=[user],
+        )
+
+        with patch(
+            "src.handlers.group_membership._sync_joined_user",
+            new=AsyncMock(),
+        ) as sync_joined:
+            await sync_new_chat_members(message)
+
+        sync_joined.assert_awaited_once_with(-100123, user)
+
+    async def test_service_leave_message_is_used_as_non_admin_fallback(self):
+        user = SimpleNamespace(id=42, is_bot=False)
+        message = SimpleNamespace(
+            chat=SimpleNamespace(id=-100123),
+            left_chat_member=user,
+        )
+
+        with patch(
+            "src.handlers.group_membership._sync_left_user",
+            new=AsyncMock(),
+        ) as sync_left:
+            await sync_left_chat_member(message)
+
+        sync_left.assert_awaited_once_with(-100123, user)
 
 
 if __name__ == "__main__":

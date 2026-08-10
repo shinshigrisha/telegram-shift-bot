@@ -28,6 +28,11 @@ class VerificationMiddleware(BaseMiddleware):
         # Проверяем только сообщения от пользователей
         if not isinstance(event, Message):
             return await handler(event, data)
+
+        # Системные сообщения о входе/выходе нужны для синхронизации курьеров.
+        # Их отправителем может быть ещё не верифицированный участник.
+        if event.new_chat_members or event.left_chat_member:
+            return await handler(event, data)
         
         # Пропускаем команды без проверки (для верификации и админ-панели)
         if event.text and event.text.startswith("/"):
