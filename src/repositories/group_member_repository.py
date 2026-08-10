@@ -210,5 +210,31 @@ class GroupMemberRepository:
             )
             return result == "UPDATE 1"
 
+    async def deactivate_in_group_by_telegram_id(
+        self,
+        group_id: int,
+        telegram_user_id: int,
+    ) -> bool:
+        """
+        Деактивировать курьера только в указанной группе.
+
+        Проверка group_id защищает от запоздавшего события выхода из старой
+        группы после того, как курьер уже был автоматически перенесён в новую.
+        """
+        async with self.pool.acquire() as conn:
+            result = await conn.execute(
+                """
+                UPDATE group_members
+                SET is_active = false,
+                    updated_at = CURRENT_TIMESTAMP
+                WHERE group_id = $1
+                  AND telegram_user_id = $2
+                  AND is_active = true
+                """,
+                group_id,
+                telegram_user_id,
+            )
+            return result == "UPDATE 1"
+
     async def delete(self, member_id: int) -> bool:
         return await self.set_active(member_id, False)

@@ -12,13 +12,45 @@ class GroupMemberMemoryTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_reuses_courier_already_linked_to_current_group(self):
         service = self._build_service()
-        existing = {"id": 12, "group_id": 3, "telegram_user_id": 42}
+        existing = {
+            "id": 12,
+            "group_id": 3,
+            "telegram_user_id": 42,
+            "is_active": True,
+        }
         service.repository.get_by_group_and_telegram_id.return_value = existing
+        service.repository.get_by_id.return_value = existing
 
         resolved = await service.resolve_member_for_vote(3, 42, "Курьер", "@courier")
 
         self.assertEqual(resolved, existing)
+        service.repository.bind_telegram_user.assert_awaited_once_with(
+            member_id=12,
+            telegram_user_id=42,
+            username="@courier",
+        )
         service.repository.get_by_telegram_id.assert_not_awaited()
+        service.repository.create.assert_not_awaited()
+
+    async def test_reactivates_courier_who_returned_to_same_group(self):
+        service = self._build_service()
+        inactive = {
+            "id": 12,
+            "group_id": 3,
+            "telegram_user_id": 42,
+            "is_active": False,
+        }
+        active = {**inactive, "is_active": True}
+        service.repository.get_by_group_and_telegram_id.return_value = inactive
+        service.repository.get_by_id.return_value = active
+
+        resolved = await service.sync_member_to_group(3, 42, "Курьер", None)
+
+        self.assertEqual(resolved, active)
+        service.repository.set_active.assert_awaited_once_with(
+            member_id=12,
+            is_active=True,
+        )
         service.repository.create.assert_not_awaited()
 
     async def test_moves_remembered_courier_instead_of_creating_duplicate(self):
@@ -38,6 +70,35 @@ class GroupMemberMemoryTests(unittest.IsolatedAsyncioTestCase):
             telegram_user_id=42,
             username="@courier",
         )
+        service.repository.create.assert_not_awaited()
+
+    async def test_deactivates_only_in_the_group_from_the_event(self):
+        service = self._build_service()
+        service.repository.deactivate_in_group_by_telegram_id.return_value = True
+
+        result = await service.deactivate_member_in_group(3, 42)
+
+        self.assertTrue(result)
+        service.repository.deactivate_in_group_by_telegram_id.assert_awaited_once_with(
+            group_id=3,
+            telegram_user_id=42,
+        )
+
+    async def test_does_not_create_unknown_configured_admin(self):
+        service = self._build_service()
+        service.repository.get_by_group_and_telegram_id.return_value = None
+        service.repository.get_by_telegram_id.return_value = None
+
+        resolved = await service.sync_member_to_group(
+            3,
+            42,
+            "Администратор",
+            "@admin",
+            create_if_missing=False,
+        )
+
+        self.assertIsNone(resolved)
+        service.repository.get_unlinked_by_name.assert_not_awaited()
         service.repository.create.assert_not_awaited()
 
     async def test_binds_existing_unlinked_roster_entry(self):

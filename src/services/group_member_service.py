@@ -71,16 +71,39 @@ class GroupMemberService:
     async def move_member(self, member_id: int, group_id: int) -> bool:
         return await self.repository.move_to_group(member_id=member_id, group_id=group_id)
 
-    async def resolve_member_for_vote(
+    async def deactivate_member_in_group(
+        self,
+        group_id: int,
+        telegram_user_id: int,
+    ) -> bool:
+        return await self.repository.deactivate_in_group_by_telegram_id(
+            group_id=group_id,
+            telegram_user_id=telegram_user_id,
+        )
+
+    async def sync_member_to_group(
         self,
         group_id: int,
         telegram_user_id: int,
         full_name: str,
         username: Optional[str],
-    ) -> Dict[str, Any]:
-        member = await self.repository.get_by_group_and_telegram_id(group_id, telegram_user_id)
+        create_if_missing: bool = True,
+    ) -> Optional[Dict[str, Any]]:
+        """Привязать, восстановить или перенести курьера в текущую группу."""
+        member = await self.repository.get_by_group_and_telegram_id(
+            group_id,
+            telegram_user_id,
+        )
         if member:
-            return member
+            if not member.get("is_active", True):
+                await self.repository.set_active(member_id=member["id"], is_active=True)
+            await self.repository.bind_telegram_user(
+                member_id=member["id"],
+                telegram_user_id=telegram_user_id,
+                username=username,
+            )
+            updated = await self.repository.get_by_id(member["id"])
+            return updated or member
 
         member = await self.repository.get_by_telegram_id(telegram_user_id)
         if member:
@@ -93,7 +116,13 @@ class GroupMemberService:
             updated = await self.repository.get_by_id(member["id"])
             return updated or member
 
-        member = await self.repository.get_unlinked_by_name(group_id, full_name)
+        # Настроенные администраторы группы не становятся курьерами случайно,
+        # но уже существующая карточка администратора выше всё равно переносится.
+        if not create_if_missing:
+            return None
+
+        normalized_name = full_name.strip() or f"User_{telegram_user_id}"
+        member = await self.repository.get_unlinked_by_name(group_id, normalized_name)
         if member:
             await self.repository.bind_telegram_user(
                 member_id=member["id"],
@@ -103,7 +132,7 @@ class GroupMemberService:
             updated = await self.repository.get_by_id(member["id"])
             return updated or member
 
-        member = await self.repository.get_by_group_and_name(group_id, full_name)
+        member = await self.repository.get_by_group_and_name(group_id, normalized_name)
         if member:
             await self.repository.bind_telegram_user(
                 member_id=member["id"],
@@ -113,7 +142,7 @@ class GroupMemberService:
             updated = await self.repository.get_by_id(member["id"])
             return updated or member
 
-        created = await self.repository.create(group_id=group_id, full_name=full_name)
+        created = await self.repository.create(group_id=group_id, full_name=normalized_name)
         await self.repository.bind_telegram_user(
             member_id=created["id"],
             telegram_user_id=telegram_user_id,
@@ -121,3 +150,20 @@ class GroupMemberService:
         )
         updated = await self.repository.get_by_id(created["id"])
         return updated or created
+
+    async def resolve_member_for_vote(
+        self,
+        group_id: int,
+        telegram_user_id: int,
+        full_name: str,
+        username: Optional[str],
+    ) -> Dict[str, Any]:
+        member = await self.sync_member_to_group(
+            group_id=group_id,
+            telegram_user_id=telegram_user_id,
+            full_name=full_name,
+            username=username,
+        )
+        if member is None:  # create_if_missing=True всегда возвращает карточку.
+            raise RuntimeError("Не удалось создать или найти карточку курьера")
+        return member

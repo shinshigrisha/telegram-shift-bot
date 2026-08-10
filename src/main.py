@@ -33,6 +33,7 @@ from src.handlers import admin_monitoring
 from src.handlers import admin_scheduler
 from src.handlers import poll_handlers
 from src.handlers import user_handlers
+from src.handlers import group_membership
 from src.utils.db_pool import get_db_pool, close_db_pool
 from src.services.scheduler_service import SchedulerService
 from src.services.poll_service import PollService
@@ -122,6 +123,7 @@ async def main() -> None:
     dp.callback_query.middleware(DatabaseMiddleware())
     
     # Регистрируем роутеры
+    dp.include_router(group_membership.router)
     dp.include_router(admin.router)
     dp.include_router(admin_panel_navigation.router)
     dp.include_router(admin_groups.router)
