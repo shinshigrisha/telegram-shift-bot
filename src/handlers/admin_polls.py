@@ -673,11 +673,20 @@ async def callback_select_group_for_polls(
         else:
             poll = await poll_service.create_poll_for_group(group_id=group_id)
             if poll:
-                text = (
-                    f"✅ <b>Тестовый опрос отправлен</b>\n\n"
-                    f"Группа: <b>{group.get('name')}</b>\n"
-                    f"Дата: {target_date.strftime('%d.%m.%Y')}"
-                )
+                if poll.get("pin_error"):
+                    text = (
+                        f"⚠️ <b>Опрос отправлен, но не закреплен</b>\n\n"
+                        f"Группа: <b>{group.get('name')}</b>\n"
+                        f"Дата: {target_date.strftime('%d.%m.%Y')}\n\n"
+                        "Выдайте боту право «Закрепление сообщений» "
+                        "в настройках администратора группы."
+                    )
+                else:
+                    text = (
+                        f"✅ <b>Тестовый опрос отправлен и закреплен</b>\n\n"
+                        f"Группа: <b>{group.get('name')}</b>\n"
+                        f"Дата: {target_date.strftime('%d.%m.%Y')}"
+                    )
             else:
                 text = (
                     f"❌ <b>Не удалось отправить опрос</b>\n\n"

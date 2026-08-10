@@ -147,26 +147,58 @@ class PollService:
 
         return option_rows
 
-    async def _pin_poll_message(self, chat_id: int, message_id: int, group_name: str) -> None:
-        """Закрепить сообщение с опросом с уведомлением участников."""
-        try:
-            await self.bot.pin_chat_message(
-                chat_id=chat_id,
-                message_id=message_id,
-                disable_notification=False,
-            )
-            logger.info(
-                "Опрос закреплен в группе %s: chat_id=%s, message_id=%s",
-                group_name,
-                chat_id,
-                message_id,
-            )
-        except Exception as e:
+    async def _pin_poll_message(
+        self,
+        chat_id: int,
+        message_id: int,
+        group_name: str,
+        attempts: int = 3,
+    ) -> Optional[str]:
+        """
+        Закрепить сообщение с опросом и вернуть описание ошибки при неудаче.
+
+        Временные сетевые ошибки повторяются. Постоянные ошибки Telegram,
+        например отсутствие права на закрепление, возвращаются вызывающему коду,
+        чтобы администратор не получил ложный отчет об успешной операции.
+        """
+        for attempt in range(1, attempts + 1):
+            try:
+                await self.bot.pin_chat_message(
+                    chat_id=chat_id,
+                    message_id=message_id,
+                    disable_notification=False,
+                )
+                logger.info(
+                    "Опрос закреплен в группе %s: chat_id=%s, message_id=%s",
+                    group_name,
+                    chat_id,
+                    message_id,
+                )
+                return None
+            except TelegramNetworkError as e:
+                if attempt < attempts:
+                    logger.warning(
+                        "Сетевая ошибка при закреплении опроса в группе %s, "
+                        "попытка %d/%d: %s",
+                        group_name,
+                        attempt,
+                        attempts,
+                        e,
+                    )
+                    await asyncio.sleep(attempt)
+                    continue
+                error = str(e)
+            except Exception as e:
+                error = str(e)
+
             logger.warning(
                 "Не удалось закрепить опрос в группе %s: %s",
                 group_name,
-                e,
+                error,
             )
+            return error
+
+        return "неизвестная ошибка Telegram"
 
     async def _send_poll_with_retry(
         self,
@@ -279,6 +311,14 @@ class PollService:
                         options=options,
                         group_name=group['name'],
                     )
+
+                    # Закрепляем сразу после отправки. Ошибка БД не должна мешать
+                    # Telegram закрепить уже опубликованный опрос.
+                    pin_error = await self._pin_poll_message(
+                        chat_id=chat_id,
+                        message_id=poll_message.message_id,
+                        group_name=group['name'],
+                    )
                     
                     # Сохраняем опрос в БД
                     poll = await self.poll_repo.create(
@@ -294,13 +334,13 @@ class PollService:
                         self._build_poll_option_rows(group, slots, options),
                     )
 
-                    await self._pin_poll_message(
-                        chat_id=chat_id,
-                        message_id=poll_message.message_id,
-                        group_name=group['name'],
-                    )
-                    
                     created_count += 1
+                    if pin_error:
+                        errors.append(
+                            f"Группа {group['name']}: опрос создан, но не закреплен. "
+                            "Выдайте боту право «Закрепление сообщений». "
+                            f"Telegram: {pin_error}"
+                        )
                     logger.info(
                         "Создан опрос для группы %s на дату %s",
                         group['name'],
@@ -367,6 +407,12 @@ class PollService:
                 options=options,
                 group_name=group['name'],
             )
+
+            pin_error = await self._pin_poll_message(
+                chat_id=chat_id,
+                message_id=poll_message.message_id,
+                group_name=group['name'],
+            )
             
             poll = await self.poll_repo.create(
                 group_id=group['id'],
@@ -381,11 +427,8 @@ class PollService:
                 self._build_poll_option_rows(group, slots, options),
             )
 
-            await self._pin_poll_message(
-                chat_id=chat_id,
-                message_id=poll_message.message_id,
-                group_name=group['name'],
-            )
+            if pin_error:
+                poll["pin_error"] = pin_error
             
             return poll
             
