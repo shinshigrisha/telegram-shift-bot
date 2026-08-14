@@ -34,6 +34,7 @@ from src.handlers import admin_scheduler
 from src.handlers import poll_handlers
 from src.handlers import user_handlers
 from src.handlers import group_membership
+from src.handlers import duty_poll_handlers
 from src.utils.db_pool import get_db_pool, close_db_pool
 from src.services.scheduler_service import SchedulerService
 from src.services.poll_service import PollService
@@ -41,6 +42,8 @@ from src.services.group_service import GroupService
 from src.services.service_registry import set_scheduler_service, set_poll_service
 from src.repositories.poll_repository import PollRepository
 from src.repositories.group_repository import GroupRepository
+from src.repositories.duty_poll_repository import DutyPollRepository
+from src.services.duty_poll_service import DutyPollService
 from src.utils.redis_client import create_redis_client
 
 # Создаём директорию для логов перед настройкой логирования
@@ -124,6 +127,7 @@ async def main() -> None:
     
     # Регистрируем роутеры
     dp.include_router(group_membership.router)
+    dp.include_router(duty_poll_handlers.router)
     dp.include_router(admin.router)
     dp.include_router(admin_panel_navigation.router)
     dp.include_router(admin_groups.router)
@@ -152,11 +156,13 @@ async def main() -> None:
         group_repo = GroupRepository(db_pool)
         group_service = GroupService(db_pool)
         poll_service = PollService(bot, poll_repo, group_repo)
+        duty_poll_service = DutyPollService(bot, DutyPollRepository(db_pool))
             
         scheduler_service = SchedulerService(
             bot=bot,
             poll_service=poll_service,
             group_service=group_service,
+            duty_poll_service=duty_poll_service,
         )
             
         # Сохраняем в глобальный реестр для доступа из handlers

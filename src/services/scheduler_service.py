@@ -5,7 +5,7 @@ import logging
 import asyncio
 from html import escape
 from datetime import date, datetime, time, timedelta
-from typing import Optional, List, Dict, Any, Callable, Awaitable
+from typing import TYPE_CHECKING, Optional, List, Dict, Any, Callable, Awaitable
 from pathlib import Path
 
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
@@ -16,6 +16,11 @@ from aiogram.exceptions import TelegramBadRequest, TelegramNetworkError
 
 from config.settings import settings
 from src.services.group_member_service import GroupMemberService
+
+if TYPE_CHECKING:
+    from src.services.duty_poll_service import DutyPollService
+    from src.services.group_service import GroupService
+    from src.services.poll_service import PollService
 
 logger = logging.getLogger(__name__)
 
@@ -44,6 +49,7 @@ class SchedulerService:
         bot: Bot,
         poll_service: "PollService",
         group_service: "GroupService",
+        duty_poll_service: Optional["DutyPollService"] = None,
     ):
         """
         Инициализация планировщика.
@@ -56,6 +62,7 @@ class SchedulerService:
         self.bot = bot
         self.poll_service = poll_service
         self.group_service = group_service
+        self.duty_poll_service = duty_poll_service
         self.group_member_service = GroupMemberService(group_service.db_pool)
         self.scheduler = AsyncIOScheduler(timezone="Europe/Moscow")
         self._is_running = False
@@ -73,6 +80,7 @@ class SchedulerService:
         self._add_poll_closing_job()
         self._add_night_poll_closing_job()
         self._add_recovery_job()
+        self._add_duty_poll_jobs()
         
         # Запускаем планировщик
         self.scheduler.start()
@@ -88,6 +96,11 @@ class SchedulerService:
                    settings.POLL_CLOSING_HOUR,
                    str(settings.POLL_CLOSING_MINUTE).zfill(2))
         logger.info("   - Напоминания: %s", settings.REMINDER_HOURS)
+        logger.info(
+            "   - Опрос дежурных: %s:%s",
+            settings.DUTY_POLL_HOUR,
+            str(settings.DUTY_POLL_MINUTE).zfill(2),
+        )
     
     async def stop(self) -> None:
         """Остановка планировщика."""
@@ -172,6 +185,49 @@ class SchedulerService:
             name="Проверка пропущенных автоматизаций",
             replace_existing=True,
         )
+
+    def _add_duty_poll_jobs(self) -> None:
+        """Добавить создание и полуночное закрытие опроса дежурных."""
+        if not self.duty_poll_service:
+            return
+
+        self.scheduler.add_job(
+            self._create_duty_polls,
+            CronTrigger(
+                hour=settings.DUTY_POLL_HOUR,
+                minute=settings.DUTY_POLL_MINUTE,
+                timezone="Europe/Moscow",
+            ),
+            id="create_duty_polls",
+            name="Создание ежедневного опроса дежурных",
+            replace_existing=True,
+        )
+        self.scheduler.add_job(
+            self._close_expired_duty_polls,
+            CronTrigger(hour=0, minute=0, timezone="Europe/Moscow"),
+            id="close_duty_polls",
+            name="Закрытие опроса дежурных",
+            replace_existing=True,
+        )
+
+    async def _create_duty_polls(self) -> None:
+        """Создать сегодняшний опрос дежурных во всех настроенных темах."""
+        if not self.duty_poll_service:
+            return
+        created, errors = await self.duty_poll_service.send_daily_polls()
+        logger.info("Опросы дежурных: создано=%d, ошибок=%d", created, len(errors))
+        if errors:
+            await self._notify_admins(
+                "❌ <b>Ошибки опроса дежурных:</b>\n" + "\n".join(errors[:5])
+            )
+
+    async def _close_expired_duty_polls(self) -> None:
+        """Закрыть опросы дежурных, дата которых уже закончилась."""
+        if not self.duty_poll_service:
+            return
+        closed = await self.duty_poll_service.close_expired_polls()
+        if closed:
+            logger.info("Закрыто опросов дежурных: %d", closed)
     
     async def _create_daily_polls(self) -> None:
         """Создать опросы на завтра для всех активных групп."""
@@ -532,6 +588,15 @@ class SchedulerService:
         try:
             now = datetime.now()
             current_date = date.today()
+
+            if self.duty_poll_service:
+                await self._close_expired_duty_polls()
+                duty_creation_time = time(
+                    settings.DUTY_POLL_HOUR,
+                    settings.DUTY_POLL_MINUTE,
+                )
+                if now.time() >= duty_creation_time:
+                    await self._create_duty_polls()
 
             night_close_time = time(17, 0)
             day_close_time = time(settings.POLL_CLOSING_HOUR, settings.POLL_CLOSING_MINUTE)
