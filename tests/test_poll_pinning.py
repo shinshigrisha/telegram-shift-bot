@@ -57,6 +57,7 @@ class PollPinningTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(created_count, 1)
         self.assertEqual(len(errors), 1)
         self.assertIn("Закрепление сообщений", errors[0])
+        self.assertFalse(bot.send_poll.await_args.kwargs["disable_notification"])
         bot.pin_chat_message.assert_awaited_once_with(
             chat_id=-100,
             message_id=10,

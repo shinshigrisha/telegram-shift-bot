@@ -94,6 +94,7 @@ class DutyPollService:
                     options=DUTY_POLL_OPTIONS,
                     is_anonymous=False,
                     allows_multiple_answers=False,
+                    disable_notification=False,
                 )
             except TelegramNetworkError as exc:
                 last_error = exc

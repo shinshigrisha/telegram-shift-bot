@@ -39,6 +39,7 @@ class DutyPollServiceTests(unittest.IsolatedAsyncioTestCase):
             options=DUTY_POLL_OPTIONS,
             is_anonymous=False,
             allows_multiple_answers=False,
+            disable_notification=False,
         )
         repository.mark_sent.assert_awaited_once_with(
             config_id=7,

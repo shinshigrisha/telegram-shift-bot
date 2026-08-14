@@ -4,7 +4,7 @@
 import asyncio
 import logging
 from typing import List, Optional, Dict, Any, Tuple
-from datetime import date, datetime, timedelta, time
+from datetime import date, timedelta, time
 from aiogram import Bot
 from aiogram.exceptions import TelegramNetworkError
 
@@ -219,6 +219,7 @@ class PollService:
                     options=options,
                     is_anonymous=False,
                     allows_multiple_answers=False,
+                    disable_notification=False,
                 )
             except TelegramNetworkError as e:
                 last_error = e
