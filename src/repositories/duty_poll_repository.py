@@ -69,6 +69,21 @@ class DutyPollRepository:
             )
             return [dict(row) for row in rows]
 
+    async def get_dispatch_by_telegram_poll_id(
+        self,
+        telegram_poll_id: str,
+    ) -> Optional[Dict[str, Any]]:
+        """Получить отправку опроса дежурных по идентификатору Telegram."""
+        async with self.pool.acquire() as conn:
+            row = await conn.fetchrow(
+                """
+                SELECT * FROM duty_poll_dispatches
+                WHERE telegram_poll_id = $1
+                """,
+                telegram_poll_id,
+            )
+            return dict(row) if row else None
+
     async def claim_dispatch(self, config_id: int, poll_date: date) -> bool:
         """Зарезервировать единственную отправку темы на дату."""
         async with self.pool.acquire() as conn:

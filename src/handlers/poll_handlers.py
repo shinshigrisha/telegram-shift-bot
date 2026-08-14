@@ -11,6 +11,7 @@ from aiogram.types import PollAnswer
 from src.repositories.group_member_repository import GroupMemberRepository
 from src.repositories.group_repository import GroupRepository
 from src.repositories.poll_repository import PollRepository
+from src.repositories.duty_poll_repository import DutyPollRepository
 from src.services.group_member_service import GroupMemberService
 from src.utils.db_pool import get_db_pool
 
@@ -93,7 +94,16 @@ async def handle_poll_answer(
 
         poll = await poll_repo.get_by_telegram_poll_id(poll_id)
         if not poll:
-            if await poll_repo.is_telegram_poll_obsolete(poll_id):
+            duty_dispatch = await DutyPollRepository(pool).get_dispatch_by_telegram_poll_id(
+                poll_id
+            )
+            if duty_dispatch:
+                logger.debug(
+                    "Получен голос по опросу дежурных telegram_poll_id=%s; "
+                    "результаты хранит Telegram",
+                    poll_id,
+                )
+            elif await poll_repo.is_telegram_poll_obsolete(poll_id):
                 logger.info(
                     "Получен поздний голос по устаревшему опросу telegram_poll_id=%s, игнорируем",
                     poll_id,

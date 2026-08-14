@@ -102,6 +102,35 @@ class PollAnswerStatusTests(unittest.IsolatedAsyncioTestCase):
         group_repo.get_by_id.assert_not_awaited()
         repo.sync_user_vote.assert_not_awaited()
 
+    async def test_vote_for_duty_poll_is_ignored_without_warning(self):
+        repo = AsyncMock()
+        repo.get_by_telegram_poll_id.return_value = None
+        duty_repo = AsyncMock()
+        duty_repo.get_dispatch_by_telegram_poll_id.return_value = {
+            "id": 1,
+            "telegram_poll_id": "telegram-duty-poll",
+            "status": "active",
+        }
+        answer = SimpleNamespace(
+            user=SimpleNamespace(id=42, full_name="Иван", username=None),
+            poll_id="telegram-duty-poll",
+            option_ids=[0],
+        )
+
+        with (
+            patch.object(poll_handlers, "get_db_pool", new=AsyncMock(return_value=AsyncMock())),
+            patch.object(poll_handlers, "PollRepository", return_value=repo),
+            patch.object(poll_handlers, "DutyPollRepository", return_value=duty_repo),
+            patch.object(poll_handlers.logger, "warning") as warning,
+        ):
+            await poll_handlers.handle_poll_answer(answer, AsyncMock())
+
+        duty_repo.get_dispatch_by_telegram_poll_id.assert_awaited_once_with(
+            "telegram-duty-poll"
+        )
+        warning.assert_not_called()
+        repo.is_telegram_poll_obsolete.assert_not_awaited()
+
 
 if __name__ == "__main__":
     unittest.main()
