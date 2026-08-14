@@ -749,7 +749,6 @@ async def callback_select_group_for_polls(
                     for title, key in (
                         ("Выхожу", "night_out"),
                         ("Не выхожу", "not_going"),
-                        ("Куратор", "curator"),
                         ("Выходной", "day_off"),
                     ):
                         voters = results.get(key, [])
@@ -799,16 +798,6 @@ async def callback_select_group_for_polls(
                             
                             text += "\n"
 
-                        curator = results.get('curator', [])
-                        if curator:
-                            text += _build_voter_block(
-                                "Куратор",
-                                curator,
-                                group_member_service=group_member_service,
-                                member_names_by_id=member_names_by_id,
-                                member_names_by_user_id=member_names_by_user_id,
-                            )
-                        
                         # Выходной
                         day_off = results.get('day_off', [])
                         if day_off:

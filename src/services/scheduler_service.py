@@ -697,23 +697,23 @@ class SchedulerService:
                 else:
                     report += f"❌ {title} — нет курьеров\n"
                 report += "\n"
-            report += "Дополнительно\n\n"
-            for title, key, icon in (
-                ("Куратор", "curator", "👤"),
-                ("Выходной", "day_off", "🏖"),
-            ):
-                voters = results.get(key, [])
-                if voters:
-                    suffix = ":" if key == "curator" else f" — {_format_people_count(len(voters))}"
-                    report += f"{icon} {title}{suffix}\n"
-                    for voter in voters[:20]:
-                        report += f"• {self.group_member_service.resolve_voter_display_name(voter, member_names_by_id, member_names_by_user_id)}\n"
-                    report += "\n"
+            has_additional = False
+            dayoff_votes = results.get("day_off", [])
+            if dayoff_votes:
+                report += "Дополнительно\n\n"
+                has_additional = True
+                report += f"🏖 Выходной — {_format_people_count(len(dayoff_votes))}\n"
+                for voter in dayoff_votes[:20]:
+                    report += f"• {self.group_member_service.resolve_voter_display_name(voter, member_names_by_id, member_names_by_user_id)}\n"
+                report += "\n"
             custom_results = results.get("custom", {})
             if isinstance(custom_results, dict):
                 for index, option_text in enumerate(extra_options):
                     voters = custom_results.get(f"option_{index}", [])
                     if voters:
+                        if not has_additional:
+                            report += "Дополнительно\n\n"
+                            has_additional = True
                         report += f"📝 {option_text} — {_format_people_count(len(voters))}\n"
                         for voter in voters[:20]:
                             report += f"• {self.group_member_service.resolve_voter_display_name(voter, member_names_by_id, member_names_by_user_id)}\n"
@@ -743,18 +743,6 @@ class SchedulerService:
         
         if not group.get("is_night", False):
             has_additional = False
-            curator_votes = results.get('curator', [])
-            if curator_votes:
-                if not has_additional:
-                    report += "Дополнительно\n\n"
-                    has_additional = True
-                report += "👤 Куратор:\n"
-                for voter in curator_votes[:10]:
-                    report += f"• {self.group_member_service.resolve_voter_display_name(voter, member_names_by_id, member_names_by_user_id)}\n"
-                if len(curator_votes) > 10:
-                    report += f"... и еще {len(curator_votes) - 10}\n"
-                report += "\n"
-
             dayoff_votes = results.get('day_off', [])
             if dayoff_votes:
                 if not has_additional:
